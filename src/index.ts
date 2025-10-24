@@ -121,21 +121,30 @@ client.on(Events.InteractionCreate, async (interaction: Interaction) => {
   }
 
   // /sbk
-  if (interaction.commandName === 'sbk') {
-    const user = interaction.options.getUser('user', true);
-    const reason = interaction.options.getString('reason', true);
-    const count = addCount(data, user.id);
+if (interaction.commandName === 'sbk') {
+  const user = interaction.options.getUser('user', true);
+  const reason = interaction.options.getString('reason', true);
+  const countArg = interaction.options.getInteger('count') ?? 1; // ← 省略時は1
 
-    await interaction.reply(`**${user.tag}** がしばかれました！（累計 ${count} 回）\n理由: ${reason}`);
+  const nextCount = (data[user.id] ?? 0) + countArg;
+  data[user.id] = nextCount;
+  saveData(data);
 
-    if (LOG_CHANNEL_ID && interaction.guild) {
-      const ch = await interaction.guild.channels.fetch(LOG_CHANNEL_ID).catch(() => null);
-      if (ch && ch.type === ChannelType.GuildText) {
-        await (ch as TextChannel).send(`${interaction.user.tag} → ${user.tag}\n理由: ${reason}\n累計: ${count} 回`);
-      }
+  await interaction.reply(
+    `**${user.tag}** が ${countArg} 回 しばかれました！（累計 ${nextCount} 回）\n理由: ${reason}`
+  );
+
+  if (LOG_CHANNEL_ID && interaction.guild) {
+    const ch = await interaction.guild.channels.fetch(LOG_CHANNEL_ID).catch(() => null);
+    if (ch && ch.type === ChannelType.GuildText) {
+      await (ch as TextChannel).send(
+        `${interaction.user.tag} → ${user.tag}\n理由: ${reason}\n今回: ${countArg} 回\n累計: ${nextCount} 回`
+      );
     }
-    return;
   }
+  return;
+}
+
 
   // /check
   if (interaction.commandName === 'check') {
