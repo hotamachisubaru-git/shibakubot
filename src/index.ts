@@ -2,7 +2,9 @@
 import 'dotenv/config';
 import {
   Client, GatewayIntentBits, Events,
-  type Interaction, ChannelType, type TextChannel
+  type Interaction, ChannelType, type TextChannel,
+  EmbedBuilder,
+  ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType
 } from 'discord.js';
 import fs from 'fs';
 import path from 'path';
@@ -10,7 +12,7 @@ import path from 'path';
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 const LOG_CHANNEL_ID = process.env.LOG_CHANNEL_ID || '';
 
-// ---- データ保存まわり ----
+// ==== データ保存まわり ====
 const ROOT_DATA = path.join(process.cwd(), 'data.json');
 const LEGACY_DATA = path.join(process.cwd(), 'src', 'data.json');
 
@@ -23,11 +25,10 @@ function loadData(): CounterMap {
     }
     if (fs.existsSync(LEGACY_DATA)) {
       const d = JSON.parse(fs.readFileSync(LEGACY_DATA, 'utf8'));
-      // 旧ファイルがあれば移行
       fs.writeFileSync(ROOT_DATA, JSON.stringify(d, null, 2));
       return d;
     }
-  } catch { /* 何もしない（新規） */ }
+  } catch {}
   return {};
 }
 
@@ -49,7 +50,58 @@ function getTop(data: CounterMap, limit = 10): Array<{ id: string; count: number
     .slice(0, limit);
 }
 
-// ---- Bot本体 ----
+// ==== /top 用ユーティリティ（トップレベルに配置！）====
+const PAGE_SIZE = 10;
+
+async function getUserLabel(client: Client, id: string): Promise<string> {
+  try {
+    const u = await client.users.fetch(id).catch(() => null);
+    const label = u?.tag ?? id;
+    // 通知が飛ばないリンク表記
+    return `[${label}](https://discord.com/users/${id})`;
+  } catch {
+    return id;
+  }
+}
+
+function sliceTop(data: Record<string, number>, page: number, pageSize: number) {
+  const entries = Object.entries(data)
+    .map(([id, count]) => ({ id, count }))
+    .sort((a, b) => b.count - a.count);
+
+  const totalPages = Math.max(1, Math.ceil(entries.length / pageSize));
+  const clamped = Math.min(Math.max(page, 1), totalPages);
+  const start = (clamped - 1) * pageSize;
+  const items = entries.slice(start, start + pageSize);
+
+  return { items, page: clamped, totalPages };
+}
+
+async function buildTopEmbed(client: Client, data: Record<string, number>, page = 1) {
+  const { items, totalPages } = sliceTop(data, page, PAGE_SIZE);
+  const medal = ['🥇', '🥈', '🥉'];
+
+  const lines = await Promise.all(items.map(async (e, idx) => {
+    const rankIcon = medal[idx] ?? `${(page - 1) * PAGE_SIZE + idx + 1}.`;
+    const userLabel = await getUserLabel(client, e.id);
+    return `${rankIcon} ${userLabel} • 🟡 ${e.count.toLocaleString()}`;
+  }));
+
+  const embed = new EmbedBuilder()
+    .setTitle('🏛️ Leaderboard')
+    .setDescription('View the leaderboard online [here](https://discord.com)')
+    .addFields({ name: '\u200B', value: lines.join('\n') || 'まだデータがありません。' })
+    .setFooter({ text: `Page ${page}/${totalPages}` });
+
+  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId(`top_prev_${page}`).setLabel('Previous Page').setStyle(ButtonStyle.Secondary).setDisabled(page <= 1),
+    new ButtonBuilder().setCustomId(`top_next_${page}`).setLabel('Next Page').setStyle(ButtonStyle.Primary).setDisabled(page >= totalPages),
+  );
+
+  return { embed, components: [row] as const, totalPages };
+}
+
+// ==== Bot本体 ====
 client.once(Events.ClientReady, b => {
   console.log(`✅ ログイン完了: ${b.user.tag}`);
 });
@@ -57,28 +109,21 @@ client.once(Events.ClientReady, b => {
 client.on(Events.InteractionCreate, async (interaction: Interaction) => {
   if (!interaction.isChatInputCommand()) return;
 
-  // 毎回読む（超小規模なので十分シンプル）
   const data = loadData();
 
+  // /ping
   if (interaction.commandName === 'ping') {
-  // 返信を送信
-  await interaction.reply({ content: '測定中...' });
+    await interaction.reply({ content: '📡 測定中...' });
+    const sent = await interaction.fetchReply();
+    const ping = sent.createdTimestamp - interaction.createdTimestamp;
+    await interaction.editReply(`🏓 Pong! 応答速度: **${ping}ms**`);
+    return;
+  }
 
-  // 返信メッセージを取得
-  const sent = await interaction.fetchReply();
-  const ping = sent.createdTimestamp - interaction.createdTimestamp;
-  const wsPing = Math.round(interaction.client.ws.ping);
-
-  await interaction.editReply(`応答速度: **${ping}ms**`);
-  return;
-
-}
-
-
+  // /sbk
   if (interaction.commandName === 'sbk') {
     const user = interaction.options.getUser('user', true);
     const reason = interaction.options.getString('reason', true);
-
     const count = addCount(data, user.id);
 
     await interaction.reply(`**${user.tag}** がしばかれました！（累計 ${count} 回）\n理由: ${reason}`);
@@ -86,14 +131,13 @@ client.on(Events.InteractionCreate, async (interaction: Interaction) => {
     if (LOG_CHANNEL_ID && interaction.guild) {
       const ch = await interaction.guild.channels.fetch(LOG_CHANNEL_ID).catch(() => null);
       if (ch && ch.type === ChannelType.GuildText) {
-        await (ch as TextChannel).send(
-          `${interaction.user.tag} → ${user.tag}\n理由: ${reason}\n累計: ${count} 回`
-        );
+        await (ch as TextChannel).send(`${interaction.user.tag} → ${user.tag}\n理由: ${reason}\n累計: ${count} 回`);
       }
     }
     return;
   }
 
+  // /check
   if (interaction.commandName === 'check') {
     const user = interaction.options.getUser('user', true);
     const count = data[user.id] ?? 0;
@@ -101,31 +145,47 @@ client.on(Events.InteractionCreate, async (interaction: Interaction) => {
     return;
   }
 
- if (interaction.commandName === 'top') {
-  const limit = interaction.options.getInteger('limit') ?? 10;
-  const top = getTop(data, limit);
+  // /top
+  if (interaction.commandName === 'top') {
+    let page = 1;
+    const { embed, components } = await buildTopEmbed(interaction.client, data, page);
 
-  if (top.length === 0) {
-    await interaction.reply('🤔まだ誰も しばかれていません。');
+    const msg = await interaction.reply({
+      embeds: [embed],
+      components,
+      allowedMentions: { parse: [] }, // ✅ メンション抑止
+    });
+
+    const collector = msg.createMessageComponentCollector({
+      componentType: ComponentType.Button,
+      time: 60_000,
+      filter: i => i.user.id === interaction.user.id,
+    });
+
+    collector.on('collect', async btn => {
+      await btn.deferUpdate();
+      if (btn.customId.startsWith('top_prev_')) page = Math.max(1, page - 1);
+      if (btn.customId.startsWith('top_next_')) page += 1;
+
+      const updated = await buildTopEmbed(interaction.client, loadData(), page);
+      await msg.edit({
+        embeds: [updated.embed],
+        components: updated.components,
+        allowedMentions: { parse: [] },
+      });
+    });
+
+    collector.on('end', async () => {
+      const disabled = components.map(row => {
+        const r = ActionRowBuilder.from(row) as ActionRowBuilder<ButtonBuilder>;
+        r.components.forEach((c: any) => c.setDisabled(true));
+        return r;
+      });
+      await msg.edit({ components: disabled });
+    });
+
     return;
   }
-
-  // 1〜3位にだけメダル、それ以降は番号
-  const medal = ['🥇','🥈','🥉'];
-  const lines = top.map((e, i) => {
-    const rank = medal[i] ?? `${i + 1}.`;
-    // mentionの代わりに tag 形式で表示（通知なし）
-    const userTag = interaction.client.users.cache.get(e.id)?.tag ?? e.id;
-    return `${rank} ${userTag} — ${e.count} 回`;
-  });
-
-  await interaction.reply({
-    content: `🏆 **しばかれランキング TOP${top.length}**\n${lines.join('\n')}`,
-    allowedMentions: { parse: [] } // ✅ メンション抑止！
-  });
-  return;
-}
 });
-
 
 client.login(process.env.TOKEN);
