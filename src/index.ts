@@ -62,14 +62,14 @@ client.on(Events.InteractionCreate, async (interaction: Interaction) => {
 
   if (interaction.commandName === 'ping') {
   // 返信を送信
-  await interaction.reply({ content: '📡 測定中...' });
+  await interaction.reply({ content: '測定中...' });
 
   // 返信メッセージを取得
   const sent = await interaction.fetchReply();
   const ping = sent.createdTimestamp - interaction.createdTimestamp;
   const wsPing = Math.round(interaction.client.ws.ping);
 
-  await interaction.editReply(`🏓 Pong! 応答速度: **${ping}ms**`);
+  await interaction.editReply(`応答速度: **${ping}ms**`);
   return;
 
 }
@@ -101,25 +101,31 @@ client.on(Events.InteractionCreate, async (interaction: Interaction) => {
     return;
   }
 
-  if (interaction.commandName === 'top') {
-    const limit = interaction.options.getInteger('limit') ?? 10;
-    const top = getTop(data, limit);
+ if (interaction.commandName === 'top') {
+  const limit = interaction.options.getInteger('limit') ?? 10;
+  const top = getTop(data, limit);
 
-    if (top.length === 0) {
-      await interaction.reply('まだ誰も しばかれていません。');
-      return;
-    }
-
-    // 1〜3位にだけメダル、それ以降は番号
-    const medal = ['🥇','🥈','🥉'];
-    const lines = top.map((e, i) => {
-      const rank = medal[i] ?? `${i + 1}.`;
-      return `${rank} <@${e.id}> — ${e.count} 回`;
-    });
-
-    await interaction.reply(`🏆 **しばかれランキング TOP${top.length}**\n${lines.join('\n')}`);
+  if (top.length === 0) {
+    await interaction.reply('🤔まだ誰も しばかれていません。');
     return;
   }
+
+  // 1〜3位にだけメダル、それ以降は番号
+  const medal = ['🥇','🥈','🥉'];
+  const lines = top.map((e, i) => {
+    const rank = medal[i] ?? `${i + 1}.`;
+    // mentionの代わりに tag 形式で表示（通知なし）
+    const userTag = interaction.client.users.cache.get(e.id)?.tag ?? e.id;
+    return `${rank} ${userTag} — ${e.count} 回`;
+  });
+
+  await interaction.reply({
+    content: `🏆 **しばかれランキング TOP${top.length}**\n${lines.join('\n')}`,
+    allowedMentions: { parse: [] } // ✅ メンション抑止！
+  });
+  return;
+}
 });
+
 
 client.login(process.env.TOKEN);
