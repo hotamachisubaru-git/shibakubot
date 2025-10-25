@@ -1,73 +1,190 @@
-# 🪓 しばくbot (ShibakuBot)
+⚙️ ShibakuBot 導入ガイド（完全版）
+🧩 ① Discord Bot を作成する
 
-Discordサーバーでユーザーを「しばく」ことができるネタ系Botです。  
-メンバーのしばかれ回数をカウント・ランキング化し、  
-管理者向けの免除機能や回数調整機能も備えています。
+Discord Developer Portal
+ にアクセス
 
----
+「New Application」をクリック
 
-## 🚀 機能一覧
+名前を入力（例：しばくbot）→「Create」
 
-| コマンド | 説明 |
-|-----------|------|
-| `/ping` | Bot応答速度を測定します。 |
-| `/sbk <user> <reason> [count]` | 指定ユーザーを「しばく」。`count` は省略時1。上限10回。 |
-| `/check <user>` | 指定ユーザーのしばかれ回数を確認します。 |
-| `/top` | サーバー全体のしばかれランキングを表示します。 |
-| `/members` | 全メンバー（BOT除外）のしばかれ回数を一覧表示します。CSVファイル付き。 |
-| `/control <user> <count>` | **管理者・開発者のみ** 使用可。指定ユーザーの回数を任意の数に変更します。 |
-| `/immune add/remove/list` | **管理者・開発者のみ** 使用可。しばき免除リストを操作します。 |
+▶ Botを有効化
+
+左メニューから「Bot」を選択
+
+「Add Bot」をクリック
+
+確認ダイアログで「Yes, do it!」を選択
+
+名前とアイコンを設定（任意）
+
+下部の “Token” セクションで「Reset Token」を押して
+表示されたトークンをコピーしておく（※後で .env に記載）
+
+▶ インテント設定（超重要）
+
+「Privileged Gateway Intents」までスクロールし、
+以下の3つをすべてONにしてください：
+
+✅ PRESENCE INTENT
+
+✅ SERVER MEMBERS INTENT（/members で必要）
+
+✅ MESSAGE CONTENT INTENT
+
+保存を押します。
+
+▶ Botをサーバーに招待
+
+左メニューから「OAuth2 → URL Generator」を開く
+
+「bot」と「applications.commands」にチェック
+
+「Bot Permissions」から以下を選択：
+
+Send Messages
+
+Embed Links
+
+Attach Files
+
+Use Slash Commands
+
+Read Message History
+
+Manage Messages（必要なら）
+
+一番下の「Generated URL」をコピーしてブラウザで開き、
+招待したいサーバーを選択して「承認」。
+
+💻 ② Node.js と開発環境を準備
+Node.js のインストール
+
+推奨バージョン: 20 以上
+
+https://nodejs.org/
+ からインストール
+
+インストール後、ターミナルで確認：
+
+node -v
+npm -v
+
+📦 ③ Botプロジェクトを作成
+mkdir shibakubot
+cd shibakubot
+npm init -y
+
+TypeScript 環境をセットアップ
+npm install discord.js dotenv ts-node typescript
+npm install --save-dev @types/node
 
 
----
+TypeScript 設定ファイルを生成：
 
-## ⚙️ 導入方法
+npx tsc --init
 
-### ① Node.js の準備
-- 推奨バージョン: **Node.js 20 以上**
-- インストール:  
-[https://nodejs.org/](https://nodejs.org/)
+🧾 ④ .env を設定
 
-### ② 必要パッケージをインストール
-```
-npm install
-```
+ルートディレクトリに .env ファイルを作成：
 
-正常に起動すると以下のログが表示されます。
+TOKEN=ここにDiscordBotトークンを貼り付け
+CLIENT_ID=Discord Developer PortalのApplication ID
+GUILD_ID=テストサーバーのID
+LOG_CHANNEL_ID=ログを送信したいチャンネルID（任意）
+OWNER_IDS=管理者のユーザーID
+IMMUNE_IDS=ここに免除したいユーザーのユーザーID
+
+各項目の説明
+項目	説明
+TOKEN	Discord Bot の認証トークン
+CLIENT_ID	アプリケーションのID（General Informationに表示）
+GUILD_ID	コマンド登録するサーバーのID
+LOG_CHANNEL_ID	しばきログを送信するチャンネルID（任意）
+OWNER_IDS	管理者・開発者のDiscord ID（複数可）
+IMMUNE_IDS	永久しばき免除ユーザーID（任意）
+📜 ⑤ コマンドを登録
+
+スラッシュコマンドをDiscordに登録します。
+
+npm run register
+
+
+成功すると：
+
+⏫ コマンド登録中...
+✅ 登録完了
+
+
+と表示されます。
+
+▶ ⑥ Botを起動
+
+開発モードで起動：
+
+npm run dev
+
+
+成功すると：
 
 ✅ ログイン完了: しばくbot#9680
 
-🛠 ビルド（配布用）
 
-TypeScriptをJavaScriptに変換します。
+と表示され、Botがオンラインになります。
+
+🧱 ⑦ ビルド（配布・本番用）
+
+TypeScriptをJavaScriptに変換：
 
 npm run build
 
 
-出力: dist/ フォルダ
+生成されたファイルは dist/ フォルダに出力されます。
 
-🔐 権限仕様
-操作	権限
-/ping, /check, /sbk, /top, /members	全員
-/control, /immune	サーバー管理者 または .env の OWNER_IDS
+本番起動コマンド：
+
+node dist/index.js
+
+🧠 コマンド一覧
+コマンド	内容
+/ping	応答速度を測定
+/sbk <user> <reason> [count]	ユーザーをしばく（1〜10回）
+/check <user>	しばかれ回数を表示
+/top	ランキング表示
+/members	全メンバーのしばかれ回数一覧＋CSV
+/control <user> <count>	管理者専用：回数を手動設定
+/immune add/remove/list	管理者専用：免除リストを編集
 🚫 しばけない対象
 
-以下のユーザーは常にしばけません：
+BOT（自分自身を含む）
 
-BOT（しばくbot含む）
+.env の IMMUNE_IDS
 
-.env に記載された IMMUNE_IDS
+/immune add で登録されたユーザー
 
-/immune リスト登録ユーザー
+🧾 データ保存
 
-📁 データ保存場所
+データは data.json に自動保存されます。
+（サーバーごとではなくグローバル共通）
 
-データはローカルファイル data.json に保存されます。
-
-サーバーごとではなく全体共通データです。
-
-🪄 作者
+💡 トラブルシューティング
+現象	対応
+Used disallowed intents	Bot設定で「Server Members Intent」をONにする
+Unknown interaction	コマンド登録後にBotを再起動
+コマンドが出ない	/register を再実行して更新
+反応が遅い	サーバーリージョンを近い地域（Japan等）に変更
+✅ セットアップまとめ
+手順	コマンド	内容
+1	npm install	パッケージをインストール
+2	.env 設定	Botトークンなどを設定
+3	npm run register	コマンドを登録
+4	npm run dev	Botを起動
+5	npm run build	配布用ビルド
+🧾 作者
 
 hotamachisubaru (蛍の光)
 GitHub: @hotamachisubaru-git
 
+🪪 ライセンス
+
+このプロジェクトは MIT License で公開されています。

@@ -3,3 +3,6 @@
 *.env
 data.json
 data.json
+data/
+*.json
+!.env.example
