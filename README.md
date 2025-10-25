@@ -92,8 +92,8 @@ TOKEN=ここにDiscordBotトークンを貼り付け
 CLIENT_ID=Discord Developer PortalのApplication ID
 GUILD_ID=テストサーバーのID
 LOG_CHANNEL_ID=ログを送信したいチャンネルID（任意）
-OWNER_IDS=878891232309424158,872343576468656208
-IMMUNE_IDS=642953927243071519
+OWNER_IDS=管理者のユーザーID
+IMMUNE_IDS=ここに免除したいユーザーのユーザーID
 
 各項目の説明
 項目	説明
