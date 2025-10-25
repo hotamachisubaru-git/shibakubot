@@ -7,34 +7,45 @@ exports.loadData = loadData;
 exports.saveData = saveData;
 exports.addCount = addCount;
 exports.getTop = getTop;
+exports.getImmuneList = getImmuneList;
+exports.addImmuneId = addImmuneId;
+exports.removeImmuneId = removeImmuneId;
+exports.isImmune = isImmune;
 // src/data.ts
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
+// ---- しばかれ回数の保存先 ----
 const ROOT_DATA = path_1.default.join(process.cwd(), 'data.json');
 const LEGACY_DATA = path_1.default.join(process.cwd(), 'src', 'data.json');
-function safeRead(p) {
+// ---- 免除リストの保存先（ギルドごと）----
+const IMMUNE_PATH = path_1.default.join(process.cwd(), 'immune.json');
+function safeReadText(p) {
     try {
-        const txt = fs_1.default.readFileSync(p, 'utf8').trim();
-        if (!txt)
-            return {}; // 空ファイルは {} とみなす
-        return JSON.parse(txt);
+        return fs_1.default.readFileSync(p, 'utf8');
     }
     catch {
-        return null; // 壊れていたら null
+        return null;
     }
 }
+function safeReadJson(p, fallback) {
+    try {
+        const t = (safeReadText(p) ?? '').trim();
+        return t ? JSON.parse(t) : fallback;
+    }
+    catch {
+        return fallback;
+    }
+}
+// ========== 回数データ ==========
 function loadData() {
-    // ルート優先
-    const root = safeRead(ROOT_DATA);
-    if (root)
+    const root = safeReadJson(ROOT_DATA, {});
+    if (Object.keys(root).length)
         return root;
-    // 旧場所があれば移行
-    const legacy = safeRead(LEGACY_DATA);
-    if (legacy) {
+    const legacy = safeReadJson(LEGACY_DATA, {});
+    if (Object.keys(legacy).length) {
         fs_1.default.writeFileSync(ROOT_DATA, JSON.stringify(legacy, null, 2));
         return legacy;
     }
-    // どこにも無ければ作成
     fs_1.default.writeFileSync(ROOT_DATA, '{}');
     return {};
 }
@@ -52,4 +63,39 @@ function getTop(data, limit = 10) {
         .map(([id, count]) => ({ id, count }))
         .sort((a, b) => b.count - a.count)
         .slice(0, limit);
+}
+function readImmuneStore() {
+    return safeReadJson(IMMUNE_PATH, {});
+}
+function writeImmuneStore(store) {
+    fs_1.default.writeFileSync(IMMUNE_PATH, JSON.stringify(store, null, 2));
+}
+function getImmuneList(guildId) {
+    const store = readImmuneStore();
+    return store[guildId] ?? [];
+}
+function addImmuneId(guildId, userId) {
+    const store = readImmuneStore();
+    const set = new Set(store[guildId] ?? []);
+    const before = set.size;
+    set.add(userId);
+    store[guildId] = Array.from(set);
+    writeImmuneStore(store);
+    return set.size !== before; // 追加されたら true
+}
+function removeImmuneId(guildId, userId) {
+    const store = readImmuneStore();
+    const set = new Set(store[guildId] ?? []);
+    const existed = set.delete(userId);
+    store[guildId] = Array.from(set);
+    writeImmuneStore(store);
+    return existed; // 削除できたら true
+}
+/** env のグローバル免除 + ギルド免除、どちらかに含まれていれば true */
+function isImmune(guildId, userId, envImmuneIds) {
+    if (envImmuneIds.includes(userId))
+        return true;
+    if (!guildId)
+        return false;
+    return getImmuneList(guildId).includes(userId);
 }

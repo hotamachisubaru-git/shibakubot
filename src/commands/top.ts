@@ -1,96 +1,121 @@
 // src/commands/top.ts
 import {
-  Client, EmbedBuilder,
-  ActionRowBuilder, ButtonBuilder, ButtonStyle,
-  ComponentType, type ChatInputCommandInteraction
+  Client,
+  EmbedBuilder,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  ComponentType,
+  type ChatInputCommandInteraction,
 } from 'discord.js';
-import { loadData } from '../data'; // データ読み込み関数
+import { loadData } from '../data';
 
 const PAGE_SIZE = 10;
 
-// 通知ゼロ＆リンクなしの backtick 表記
+// 通知ゼロ＆リンクなし(backtick)表記
 async function getUserLabel(client: Client, id: string): Promise<string> {
   const u = await client.users.fetch(id).catch(() => null);
   const tag = u?.tag ?? id;
   return `\`${tag}\``;
 }
 
-function getTopFirstPage(data: Record<string, number>, pageSize: number) {
-  return Object.entries(data)
+function sliceTop(data: Record<string, number>, page: number, pageSize: number) {
+  const entries = Object.entries(data)
     .map(([id, count]) => ({ id, count }))
-    .sort((a, b) => b.count - a.count)
-    .slice(0, pageSize);
+    .sort((a, b) => b.count - a.count);
+
+  const totalPages = Math.max(1, Math.ceil(entries.length / pageSize));
+  const clamped = Math.min(Math.max(1, page), totalPages);
+  const start = (clamped - 1) * pageSize;
+  const items = entries.slice(start, start + pageSize);
+  return { items, page: clamped, totalPages };
 }
 
-async function buildTopEmbed(
-  client: Client,
-  data: Record<string, number>,
-  guildIconUrl: string | null = null
-) {
-  const items = getTopFirstPage(data, PAGE_SIZE);
+async function buildTopEmbed(client: Client, data: Record<string, number>, page = 1) {
+  const { items, totalPages } = sliceTop(data, page, PAGE_SIZE);
 
-  // 数値順位 (#1, #2, #3 …)
   const lines = await Promise.all(
     items.map(async (e, idx) => {
-      const rankNo = idx + 1;
+      const rankNo = (page - 1) * PAGE_SIZE + (idx + 1);
       const name = await getUserLabel(client, e.id);
       return `#${rankNo} ${name} × **${e.count.toLocaleString()}**`;
-    })
+    }),
   );
 
   const embed = new EmbedBuilder()
-    .setColor(0xD94848)
+    .setColor(0xd94848)
     .setAuthor({ name: 'しばきランキング' })
-    .setThumbnail(guildIconUrl ?? null)
     .setDescription(lines.join('\n') || 'まだ誰も しばかれていません。')
-    .setFooter({ text: `Page 1/1・更新: ${new Date().toLocaleString('ja-JP')}` });
+    .setFooter({ text: `Page ${page}/${totalPages}・更新: ${new Date().toLocaleString('ja-JP')}` });
 
-  // 「更新」ボタンだけ
   const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
-      .setCustomId('top_refresh')
+      .setCustomId(`top_prev_${page}`)
+      .setLabel('前へ')
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(page <= 1),
+    new ButtonBuilder()
+      .setCustomId(`top_next_${page}`)
+      .setLabel('次へ')
+      .setStyle(ButtonStyle.Primary)
+      .setDisabled(page >= totalPages),
+    new ButtonBuilder()
+      .setCustomId(`top_refresh_${page}`)
       .setLabel('更新')
-      .setStyle(ButtonStyle.Success)
+      .setStyle(ButtonStyle.Success),
   );
 
-  return { embed, components: [row] };
+  return { embed, components: [row] as const };
 }
 
-// ✅ ここから「ハンドラ部分」を追記
 export async function handleTop(interaction: ChatInputCommandInteraction) {
-  const icon = interaction.guild?.iconURL() ?? null;
-  const data = loadData();
-  const { embed, components } = await buildTopEmbed(interaction.client, data, icon);
-
-  const msg = await interaction.reply({
-    embeds: [embed],
-    components,
-    allowedMentions: { parse: [] }
+  // 3秒制限回避：先にACKだけ返す（allowedMentionsはここでは指定しない）
+  await interaction.deferReply({
+    ephemeral: false,     // 公開にしたくなければ true
+    withResponse: false,  // fetchReply: true でも可
   });
 
-  // 「更新」ボタンのイベントを処理
+  let page = 1;
+  const data = loadData();
+  const first = await buildTopEmbed(interaction.client, data, page);
+
+  await interaction.editReply({
+    embeds: [first.embed],
+    components: first.components,
+    allowedMentions: { parse: [] },
+  });
+
+  const msg = await interaction.fetchReply();
+
   const collector = msg.createMessageComponentCollector({
     componentType: ComponentType.Button,
-    time: 5 * 60_000, // 5分
-    filter: i => i.user.id === interaction.user.id
+    time: 60_000,
+    filter: (i) => i.user.id === interaction.user.id,
   });
 
-  collector.on('collect', async btn => {
-    if (btn.customId !== 'top_refresh') return;
+  collector.on('collect', async (btn) => {
     await btn.deferUpdate();
-    const updated = await buildTopEmbed(interaction.client, loadData(), icon);
-    await msg.edit({
+
+    if (btn.customId.startsWith('top_prev_')) page = Math.max(1, page - 1);
+    if (btn.customId.startsWith('top_next_')) page = page + 1;
+    if (btn.customId.startsWith('top_refresh_')) {
+      // ここでは特に何もしない（最新データで再描画）
+    }
+
+    const updated = await buildTopEmbed(interaction.client, loadData(), page);
+    await interaction.editReply({
       embeds: [updated.embed],
       components: updated.components,
-      allowedMentions: { parse: [] }
+      allowedMentions: { parse: [] },
     });
   });
 
   collector.on('end', async () => {
-    // 時間切れでボタン無効化
-    const disabledRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
-      ButtonBuilder.from(components[0].components[0]).setDisabled(true)
-    );
-    await msg.edit({ components: [disabledRow] });
+    const disabled = first.components.map((row) => {
+      const r = ActionRowBuilder.from(row) as ActionRowBuilder<ButtonBuilder>;
+      r.components.forEach((c: any) => c.setDisabled(true));
+      return r;
+    });
+    await interaction.editReply({ components: disabled });
   });
 }

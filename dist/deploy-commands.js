@@ -24,6 +24,10 @@ const commands = [
         .setName('top')
         .setDescription('しばきランキングを表示'),
     new discord_js_1.SlashCommandBuilder()
+        .setName('members')
+        .setDescription('全メンバー（BOT除外）のしばかれ回数一覧'),
+    // ✅ 復活：/control（表示は全員OK。実行は index.ts 側で管理者/OWNER_IDS チェック）
+    new discord_js_1.SlashCommandBuilder()
         .setName('control')
         .setDescription('指定ユーザーのしばかれ回数を調整（指定値に変更）')
         .addUserOption(o => o.setName('user').setDescription('対象ユーザー').setRequired(true))
@@ -31,12 +35,19 @@ const commands = [
         .setDescription('設定する回数（0以上）')
         .setRequired(true)
         .setMinValue(0))
-        .setDefaultMemberPermissions(discord_js_1.PermissionFlagsBits.Administrator)
         .setDMPermission(false),
-    // ✅ 追加：/members
     new discord_js_1.SlashCommandBuilder()
-        .setName('members')
-        .setDescription('全メンバー（BOT除外）のしばかれ回数一覧')
+        .setName('immune')
+        .setDescription('しばき免除リストを操作（管理者/開発者のみ実行可）')
+        .addSubcommand(sc => sc.setName('add')
+        .setDescription('免除に追加')
+        .addUserOption(o => o.setName('user').setDescription('対象ユーザー').setRequired(true)))
+        .addSubcommand(sc => sc.setName('remove')
+        .setDescription('免除から削除')
+        .addUserOption(o => o.setName('user').setDescription('対象ユーザー').setRequired(true)))
+        .addSubcommand(sc => sc.setName('list')
+        .setDescription('免除リストを表示'))
+        .setDMPermission(false),
 ].map(c => c.toJSON());
 const rest = new discord_js_1.REST({ version: '10' }).setToken(token);
 (async () => {

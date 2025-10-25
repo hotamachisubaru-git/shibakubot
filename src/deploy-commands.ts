@@ -1,6 +1,6 @@
 // src/deploy-commands.ts
 import 'dotenv/config';
-import { REST, Routes, SlashCommandBuilder, PermissionFlagsBits } from 'discord.js';
+import { REST, Routes, SlashCommandBuilder } from 'discord.js';
 
 const token   = process.env.TOKEN!;
 const clientId= process.env.CLIENT_ID!;
@@ -27,7 +27,11 @@ const commands = [
     .setName('top')
     .setDescription('しばきランキングを表示'),
 
-  // ★ 表示制限を外す（誰でも見える）。実行時の権限チェックは index.ts 側で継続。
+  new SlashCommandBuilder()
+    .setName('members')
+    .setDescription('全メンバー（BOT除外）のしばかれ回数一覧'),
+
+  // ✅ 復活：/control（表示は全員OK。実行は index.ts 側で管理者/OWNER_IDS チェック）
   new SlashCommandBuilder()
     .setName('control')
     .setDescription('指定ユーザーのしばかれ回数を調整（指定値に変更）')
@@ -38,12 +42,26 @@ const commands = [
        .setRequired(true)
        .setMinValue(0)
     )
-    // .setDefaultMemberPermissions(PermissionFlagsBits.Administrator) ← 削除
     .setDMPermission(false),
 
   new SlashCommandBuilder()
-    .setName('members')
-    .setDescription('全メンバー（BOT除外）のしばかれ回数一覧'),
+    .setName('immune')
+    .setDescription('しばき免除リストを操作（管理者/開発者のみ実行可）')
+    .addSubcommand(sc =>
+      sc.setName('add')
+        .setDescription('免除に追加')
+        .addUserOption(o => o.setName('user').setDescription('対象ユーザー').setRequired(true))
+    )
+    .addSubcommand(sc =>
+      sc.setName('remove')
+        .setDescription('免除から削除')
+        .addUserOption(o => o.setName('user').setDescription('対象ユーザー').setRequired(true))
+    )
+    .addSubcommand(sc =>
+      sc.setName('list')
+        .setDescription('免除リストを表示')
+    )
+    .setDMPermission(false),
 ].map(c => c.toJSON());
 
 const rest = new REST({ version: '10' }).setToken(token);
