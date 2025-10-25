@@ -43,6 +43,7 @@ export function addCount(data: CounterMap, userId: string, by = 1): number {
   return next;
 }
 
+
 export function getTop(data: CounterMap, limit = 10) {
   return Object.entries(data)
     .map(([id, count]) => ({ id, count }))

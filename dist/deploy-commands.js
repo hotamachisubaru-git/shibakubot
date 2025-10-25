@@ -1,36 +1,42 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+// src/deploy-commands.ts
 require("dotenv/config");
 const discord_js_1 = require("discord.js");
 const token = process.env.TOKEN;
 const clientId = process.env.CLIENT_ID;
 const guildId = process.env.GUILD_ID;
-if (!token || !clientId || !guildId) {
-    console.error('❌ TOKEN / CLIENT_ID / GUILD_ID を .env に設定してください');
-    process.exit(1);
-}
 const commands = [
     new discord_js_1.SlashCommandBuilder()
         .setName('ping')
-        .setDescription('疎通チェック'),
+        .setDescription('疎通確認'),
     new discord_js_1.SlashCommandBuilder()
         .setName('sbk')
-        .setDescription('しばく（ユーザー＋理由）')
-        .addUserOption(o => o.setName('user').setDescription('対象ユーザー').setRequired(true))
-        .addStringOption(o => o.setName('reason').setDescription('理由').setRequired(true)),
+        .setDescription('指定したユーザーをしばく')
+        .addUserOption(o => o.setName('user').setDescription('相手').setRequired(true))
+        .addStringOption(o => o.setName('reason').setDescription('理由').setRequired(true))
+        .addIntegerOption(o => o.setName('count').setDescription('回数（省略時1）')),
     new discord_js_1.SlashCommandBuilder()
         .setName('check')
-        .setDescription('ユーザーがしばかれた回数を確認します')
-        .addUserOption(o => o.setName('user').setDescription('確認するユーザー').setRequired(true)),
-    // ★ 追加：ランキング
+        .setDescription('指定ユーザーのしばかれ回数を見る')
+        .addUserOption(o => o.setName('user').setDescription('対象').setRequired(true)),
     new discord_js_1.SlashCommandBuilder()
         .setName('top')
-        .setDescription('しばかれランキングを表示します')
-        .addIntegerOption(o => o.setName('limit')
-        .setDescription('表示件数（3〜25）')
-        .setMinValue(3)
-        .setMaxValue(25)
-        .setRequired(false)),
+        .setDescription('しばきランキングを表示'),
+    new discord_js_1.SlashCommandBuilder()
+        .setName('control')
+        .setDescription('指定ユーザーのしばかれ回数を調整（指定値に変更）')
+        .addUserOption(o => o.setName('user').setDescription('対象ユーザー').setRequired(true))
+        .addIntegerOption(o => o.setName('count')
+        .setDescription('設定する回数（0以上）')
+        .setRequired(true)
+        .setMinValue(0))
+        .setDefaultMemberPermissions(discord_js_1.PermissionFlagsBits.Administrator)
+        .setDMPermission(false),
+    // ✅ 追加：/members
+    new discord_js_1.SlashCommandBuilder()
+        .setName('members')
+        .setDescription('全メンバー（BOT除外）のしばかれ回数一覧')
 ].map(c => c.toJSON());
 const rest = new discord_js_1.REST({ version: '10' }).setToken(token);
 (async () => {
@@ -39,7 +45,7 @@ const rest = new discord_js_1.REST({ version: '10' }).setToken(token);
         await rest.put(discord_js_1.Routes.applicationGuildCommands(clientId, guildId), { body: commands });
         console.log('✅ 登録完了');
     }
-    catch (e) {
-        console.error('❌ 登録失敗:', e);
+    catch (err) {
+        console.error('❌ 登録失敗:', err);
     }
 })();
