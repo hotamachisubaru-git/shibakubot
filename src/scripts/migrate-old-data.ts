@@ -10,9 +10,9 @@ const PROJECT = process.cwd();
 const DATA_DIR = path.join(PROJECT, 'data');
 const GUILDS_DIR = path.join(DATA_DIR, 'guilds');
 
-const ROOT_JSON = path.join(PROJECT, 'data.json');          // 旧：グローバルカウント
-const SRC_JSON  = path.join(PROJECT, 'src', 'data.json');   // 旧：src配下にあった場合
-const IMMUNE_OLD = path.join(PROJECT, 'immune.json');       // 旧：ギルドごとの免除ストア（任意）
+const ROOT_JSON = path.join(PROJECT, 'data.json');          // 旧: ルートの data.json
+const SRC_JSON  = path.join(PROJECT, 'src', 'data.json');   // 旧: src/data.json（あれば）
+const IMMUNE_OLD = path.join(PROJECT, 'immune.json');       // 旧: 免除リスト（任意）
 
 const GUILD_ID = process.env.GUILD_ID;
 if (!GUILD_ID) {
@@ -41,7 +41,7 @@ function guildFile(gid: string) {
   return path.join(GUILDS_DIR, `${gid}.json`);
 }
 
-// 1) 旧データ読み込み
+// 旧データ読み込み
 const oldGlobalCounts: CounterMap =
   readJsonSafe<CounterMap>(ROOT_JSON) ??
   readJsonSafe<CounterMap>(SRC_JSON) ??
@@ -50,7 +50,7 @@ const oldGlobalCounts: CounterMap =
 type OldImmuneStore = Record<string, string[]>;
 const oldImmuneStore: OldImmuneStore = readJsonSafe<OldImmuneStore>(IMMUNE_OLD) ?? {};
 
-// 2) 既存の新ファイルを読み込み（あればマージ）
+// 新ファイルの既存データ（あれば）を読み込み
 ensureDirs();
 const targetPath = guildFile(GUILD_ID);
 const existsNew = fs.existsSync(targetPath);
@@ -58,10 +58,7 @@ const currentNew: GuildData = existsNew
   ? (readJsonSafe<GuildData>(targetPath) ?? { counts: {}, immune: [] })
   : { counts: {}, immune: [] };
 
-// 3) マージ方針
-// - counts: 加算（同一ユーザーIDは合計）
-// - immune: 和集合（重複を排除）
-// - 旧免除が guildId をキーに持つ場合はその配列を採用
+// マージ: counts は加算、immune は和集合
 const mergedCounts: CounterMap = { ...currentNew.counts };
 for (const [uid, n] of Object.entries(oldGlobalCounts)) {
   const v = Math.max(0, Math.floor(n as number));
@@ -72,21 +69,22 @@ const mergedImmune = new Set<string>(currentNew.immune);
 const localImmune = oldImmuneStore[GUILD_ID] ?? [];
 for (const uid of localImmune) mergedImmune.add(uid);
 
-// 4) 書き出し
+// 書き出し
 const result: GuildData = {
   counts: mergedCounts,
   immune: Array.from(mergedImmune),
 };
 writeJson(targetPath, result);
 
-// 5) レポート
+// レポート
 const users = Object.keys(mergedCounts).length;
 console.log('✅ 移行完了');
 console.log(`  → 書き込み先: ${targetPath}`);
 console.log(`  → ユーザー数: ${users}`);
 console.log(`  → 免除数   : ${result.immune.length}`);
 
-// 6) オプション：元ファイルは残す（安全第一）。消したい場合はコメントアウト解除。
-// try { fs.renameSync(ROOT_JSON, ROOT_JSON + '.migrated'); } catch {}
-// try { fs.renameSync(SRC_JSON,  SRC_JSON + '.migrated');  } catch {}
-// try { fs.renameSync(IMMUNE_OLD, IMMUNE_OLD + '.migrated'); } catch {}
+// 元ファイルは残す（安全のため）
+// 削除/リネームしたい場合は下を有効化:
+// fs.renameSync(ROOT_JSON, ROOT_JSON + '.migrated');
+// fs.renameSync(SRC_JSON,  SRC_JSON + '.migrated');
+// fs.renameSync(IMMUNE_OLD, IMMUNE_OLD + '.migrated');

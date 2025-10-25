@@ -5,11 +5,28 @@ exports.handleTop = handleTop;
 const discord_js_1 = require("discord.js");
 const data_1 = require("../data");
 const PAGE_SIZE = 10;
-// 通知ゼロ＆リンクなし(backtick)表記
-async function getUserLabel(client, id) {
-    const u = await client.users.fetch(id).catch(() => null);
-    const tag = u?.tag ?? id;
-    return `\`${tag}\``;
+/** サーバー内の表示名（ニックネーム→なければ通常名）を取得 */
+async function getDisplayName(client, userId, guild) {
+    // ギルド内なら displayName を最優先
+    if (guild) {
+        try {
+            const member = await guild.members.fetch(userId);
+            return member.displayName;
+        }
+        catch {
+            /* 取得失敗時は fallthrough */
+        }
+    }
+    // ギルド外/失敗時はユーザー名で
+    try {
+        const u = await client.users.fetch(userId);
+        // 新ユーザー名（global name が欲しければ u.globalName ?? u.username でもOK）
+        return u.username;
+    }
+    catch {
+        // どうしても取れない場合はIDを返す
+        return userId;
+    }
 }
 function sliceTop(data, page, pageSize) {
     const entries = Object.entries(data)
@@ -21,11 +38,12 @@ function sliceTop(data, page, pageSize) {
     const items = entries.slice(start, start + pageSize);
     return { items, page: clamped, totalPages };
 }
-async function buildTopEmbed(client, data, page = 1) {
+async function buildTopEmbed(client, data, page = 1, guild) {
     const { items, totalPages } = sliceTop(data, page, PAGE_SIZE);
     const lines = await Promise.all(items.map(async (e, idx) => {
         const rankNo = (page - 1) * PAGE_SIZE + (idx + 1);
-        const name = await getUserLabel(client, e.id);
+        const name = await getDisplayName(client, e.id, guild);
+        // メンション通知が飛ばないよう @ 記号は使わず、素の表示名のみ
         return `#${rankNo} ${name} × **${e.count.toLocaleString()}**`;
     }));
     const embed = new discord_js_1.EmbedBuilder()
@@ -41,25 +59,25 @@ async function buildTopEmbed(client, data, page = 1) {
         .setCustomId(`top_next_${page}`)
         .setLabel('次へ')
         .setStyle(discord_js_1.ButtonStyle.Primary)
-        .setDisabled(page >= totalPages), new discord_js_1.ButtonBuilder()
+        .setDisabled(items.length < PAGE_SIZE && page >= totalPages), new discord_js_1.ButtonBuilder()
         .setCustomId(`top_refresh_${page}`)
         .setLabel('更新')
         .setStyle(discord_js_1.ButtonStyle.Success));
     return { embed, components: [row] };
 }
+/** /top の実装（defer→editReplyで安定運用） */
 async function handleTop(interaction) {
-    // 3秒制限回避：先にACKだけ返す（allowedMentionsはここでは指定しない）
     await interaction.deferReply({
-        ephemeral: false, // 公開にしたくなければ true
-        withResponse: false, // fetchReply: true でも可
+        ephemeral: false,
+        withResponse: false,
     });
     let page = 1;
-    const data = (0, data_1.loadData)();
-    const first = await buildTopEmbed(interaction.client, data, page);
+    const store = (0, data_1.loadData)();
+    const first = await buildTopEmbed(interaction.client, store, page, interaction.inGuild() ? interaction.guild ?? undefined : undefined);
     await interaction.editReply({
         embeds: [first.embed],
         components: first.components,
-        allowedMentions: { parse: [] },
+        allowedMentions: { parse: [] }, // 念のため通知抑止
     });
     const msg = await interaction.fetchReply();
     const collector = msg.createMessageComponentCollector({
@@ -74,9 +92,9 @@ async function handleTop(interaction) {
         if (btn.customId.startsWith('top_next_'))
             page = page + 1;
         if (btn.customId.startsWith('top_refresh_')) {
-            // ここでは特に何もしない（最新データで再描画）
+            // 何もしなくても最新データで再描画する
         }
-        const updated = await buildTopEmbed(interaction.client, (0, data_1.loadData)(), page);
+        const updated = await buildTopEmbed(interaction.client, (0, data_1.loadData)(), page, interaction.inGuild() ? interaction.guild ?? undefined : undefined);
         await interaction.editReply({
             embeds: [updated.embed],
             components: updated.components,
@@ -84,6 +102,7 @@ async function handleTop(interaction) {
         });
     });
     collector.on('end', async () => {
+        // タイムアウトでボタン無効化
         const disabled = first.components.map((row) => {
             const r = discord_js_1.ActionRowBuilder.from(row);
             r.components.forEach((c) => c.setDisabled(true));
