@@ -143,12 +143,23 @@ if (interaction.commandName === 'sbk') {
 }
 
   // /check
-  if (interaction.commandName === 'check') {
-    const user = interaction.options.getUser('user', true);
-    const count = data[user.id] ?? 0;
-    await interaction.reply(`**${user.tag}** は今までに ${count} 回 しばかれました。`);
-    return;
+if (interaction.commandName === 'check') {
+  const user = interaction.options.getUser('user', true);
+  const count = data[user.id] ?? 0;
+
+  let displayName = user.tag;
+  if (interaction.inGuild()) {
+    const member = await interaction.guild!.members.fetch(user.id).catch(() => null);
+    if (member?.displayName) displayName = member.displayName; // 表示名優先
   }
+
+  await interaction.reply({
+    content: `**${displayName}** は今までに ${count} 回 しばかれました。`,
+    allowedMentions: { parse: [] },
+  });
+  return;
+}
+
 
   // /top
   if (interaction.commandName === 'top') {
@@ -168,11 +179,15 @@ if (interaction.commandName === 'sbk') {
     const members = await guild.members.fetch();
     const humans = members.filter((m) => !m.user.bot);
 
-    const rows = humans.map((m) => ({
-      tag: m.user.tag,
-      id: m.id,
-      count: data[m.id] ?? 0
-    })).sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
+    const rows = humans.map(m => {
+    const display = m.displayName || m.user.tag; // ← 表示名優先
+    return {
+    tag: display,
+    id: m.id,
+    count: data[m.id] ?? 0
+    };
+  }).sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
+
 
     const top = rows.slice(0, 20);
     const lines = top.map((r, i) => `#${i + 1} \`${r.tag}\` × **${r.count}**`);

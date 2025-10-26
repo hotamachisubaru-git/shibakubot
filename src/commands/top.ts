@@ -1,41 +1,31 @@
 // src/commands/top.ts
 import {
-  Client,
   EmbedBuilder,
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
   ComponentType,
   type ChatInputCommandInteraction,
-  type Guild,
 } from 'discord.js';
 import { loadData } from '../data';
 
 const PAGE_SIZE = 10;
 
-/** サーバー内の表示名（ニックネーム→なければ通常名）を取得 */
-async function getDisplayName(client: Client, userId: string, guild?: Guild): Promise<string> {
-  // ギルド内なら displayName を最優先
-  if (guild) {
-    try {
-      const member = await guild.members.fetch(userId);
-      return member.displayName;
-    } catch {
-      /* 取得失敗時は fallthrough */
-    }
+/** ギルドでは displayName（ニックネーム）→ なければ user.tag → 最後にID */
+async function getDisplayName(
+  interaction: ChatInputCommandInteraction,
+  userId: string
+): Promise<string> {
+  const g = interaction.guild;
+  if (g) {
+    const m = await g.members.fetch(userId).catch(() => null);
+    if (m?.displayName) return m.displayName;
   }
-  // ギルド外/失敗時はユーザー名で
-  try {
-    const u = await client.users.fetch(userId);
-    // 新ユーザー名（global name が欲しければ u.globalName ?? u.username でもOK）
-    return u.username;
-  } catch {
-    // どうしても取れない場合はIDを返す
-    return userId;
-  }
+  const u = await interaction.client.users.fetch(userId).catch(() => null);
+  return u?.tag ?? userId;
 }
 
-function sliceTop(
+function paginate(
   data: Record<string, number>,
   page: number,
   pageSize: number
@@ -45,27 +35,26 @@ function sliceTop(
     .sort((a, b) => b.count - a.count);
 
   const totalPages = Math.max(1, Math.ceil(entries.length / pageSize));
-  const clamped = Math.min(Math.max(1, page), totalPages);
-  const start = (clamped - 1) * pageSize;
+  const p = Math.min(Math.max(page, 1), totalPages);
+  const start = (p - 1) * pageSize;
   const items = entries.slice(start, start + pageSize);
 
-  return { items, page: clamped, totalPages };
+  return { items, page: p, totalPages };
 }
 
 async function buildTopEmbed(
-  client: Client,
-  data: Record<string, number>,
-  page = 1,
-  guild?: Guild
+  interaction: ChatInputCommandInteraction,
+  page: number
 ) {
-  const { items, totalPages } = sliceTop(data, page, PAGE_SIZE);
+  const store = loadData();
+  const { items, totalPages } = paginate(store, page, PAGE_SIZE);
 
   const lines = await Promise.all(
     items.map(async (e, idx) => {
-      const rankNo = (page - 1) * PAGE_SIZE + (idx + 1);
-      const name = await getDisplayName(client, e.id, guild);
-      // メンション通知が飛ばないよう @ 記号は使わず、素の表示名のみ
-      return `#${rankNo} ${name} × **${e.count.toLocaleString()}**`;
+      const rankNo = (page - 1) * PAGE_SIZE + idx + 1;
+      const name = await getDisplayName(interaction, e.id); // ← 表示名優先
+      // メンション通知は飛ばさない（バッククォート）
+      return `#${rankNo} \`${name}\` × **${e.count.toLocaleString()}**`;
     })
   );
 
@@ -73,7 +62,9 @@ async function buildTopEmbed(
     .setColor(0xd94848)
     .setAuthor({ name: 'しばきランキング' })
     .setDescription(lines.join('\n') || 'まだ誰も しばかれていません。')
-    .setFooter({ text: `Page ${page}/${totalPages}・更新: ${new Date().toLocaleString('ja-JP')}` });
+    .setFooter({
+      text: `Page ${page}/${totalPages}・更新: ${new Date().toLocaleString('ja-JP')}`,
+    });
 
   const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
@@ -85,41 +76,30 @@ async function buildTopEmbed(
       .setCustomId(`top_next_${page}`)
       .setLabel('次へ')
       .setStyle(ButtonStyle.Primary)
-      .setDisabled(items.length < PAGE_SIZE && page >= totalPages),
+      .setDisabled(page >= totalPages),
     new ButtonBuilder()
       .setCustomId(`top_refresh_${page}`)
       .setLabel('更新')
-      .setStyle(ButtonStyle.Success),
+      .setStyle(ButtonStyle.Success)
   );
 
-  return { embed, components: [row] as const };
+  return { embed, components: [row] as const, totalPages };
 }
 
-/** /top の実装（defer→editReplyで安定運用） */
+/** /top のハンドラ（エクスポート） */
 export async function handleTop(interaction: ChatInputCommandInteraction) {
-  await interaction.deferReply({
-    ephemeral: false,
-    withResponse: false,
-  });
+  // 先にACK（公開でOK。非公開にしたいなら ephemeral: true）
+  await interaction.deferReply();
 
   let page = 1;
-  const store = loadData();
-
-  const first = await buildTopEmbed(
-    interaction.client,
-    store,
-    page,
-    interaction.inGuild() ? interaction.guild ?? undefined : undefined
-  );
-
-  await interaction.editReply({
+  const first = await buildTopEmbed(interaction, page);
+  const msg = await interaction.editReply({
     embeds: [first.embed],
     components: first.components,
-    allowedMentions: { parse: [] }, // 念のため通知抑止
+    allowedMentions: { parse: [] },
   });
 
-  const msg = await interaction.fetchReply();
-
+  // ボタン操作（実行者のみ・60秒）
   const collector = msg.createMessageComponentCollector({
     componentType: ComponentType.Button,
     time: 60_000,
@@ -131,18 +111,10 @@ export async function handleTop(interaction: ChatInputCommandInteraction) {
 
     if (btn.customId.startsWith('top_prev_')) page = Math.max(1, page - 1);
     if (btn.customId.startsWith('top_next_')) page = page + 1;
-    if (btn.customId.startsWith('top_refresh_')) {
-      // 何もしなくても最新データで再描画する
-    }
+    if (btn.customId.startsWith('top_refresh_')) page = page; // そのまま再描画
 
-    const updated = await buildTopEmbed(
-      interaction.client,
-      loadData(),
-      page,
-      interaction.inGuild() ? interaction.guild ?? undefined : undefined
-    );
-
-    await interaction.editReply({
+    const updated = await buildTopEmbed(interaction, page);
+    await msg.edit({
       embeds: [updated.embed],
       components: updated.components,
       allowedMentions: { parse: [] },
@@ -151,11 +123,13 @@ export async function handleTop(interaction: ChatInputCommandInteraction) {
 
   collector.on('end', async () => {
     // タイムアウトでボタン無効化
-    const disabled = first.components.map((row) => {
-      const r = ActionRowBuilder.from(row) as ActionRowBuilder<ButtonBuilder>;
-      r.components.forEach((c: any) => c.setDisabled(true));
-      return r;
-    });
-    await interaction.editReply({ components: disabled });
+    const disabled = (await buildTopEmbed(interaction, page)).components.map(
+      (row) => {
+        const r = ActionRowBuilder.from(row) as ActionRowBuilder<ButtonBuilder>;
+        r.components.forEach((c: any) => c.setDisabled(true));
+        return r;
+      }
+    );
+    await msg.edit({ components: disabled });
   });
 }
