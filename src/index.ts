@@ -206,33 +206,44 @@ if (interaction.commandName === 'check') {
     return;
   }
 
-  // /control
-  if (interaction.commandName === 'control') {
-    if (!interaction.inGuild()) {
-      await interaction.reply({ content: 'このコマンドはサーバー内でのみ使用できます。', ephemeral: true });
-      return;
-    }
-    const isAdmin = interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) ?? false;
-    const isOwner = OWNER_IDS.includes(interaction.user.id);
-    if (!isAdmin && !isOwner) {
-      await interaction.reply({ content: '権限がありません。（管理者または開発者のみ）', ephemeral: true });
-      return;
-    }
-
-    const target = interaction.options.getUser('user', true);
-    const newCountRaw = interaction.options.getInteger('count', true);
-    const newCount = Math.max(0, newCountRaw);
-
-    const store = loadData();
-    store[target.id] = newCount;
-    saveData(store);
-
-    await interaction.reply({
-      content: `\`${target.tag}\` のしばかれ回数を **${newCount} 回** に設定しました。`,
-      allowedMentions: { parse: [] }
-    });
+  // /control（管理者 or 開発者専用）
+if (interaction.commandName === 'control') {
+  if (!interaction.inGuild()) {
+    await interaction.reply({ content: 'このコマンドはサーバー内でのみ使用できます。', ephemeral: true });
     return;
   }
+
+  const isAdmin = interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) ?? false;
+  const isOwner = OWNER_IDS.includes(interaction.user.id);
+  if (!isAdmin && !isOwner) {
+    await interaction.reply({ content: '権限がありません。（管理者または開発者のみ）', ephemeral: true });
+    return;
+  }
+
+  const target = interaction.options.getUser('user', true);
+  const newCountRaw = interaction.options.getInteger('count', true);
+  const newCount = Math.max(0, newCountRaw);
+
+  const store = loadData();
+  store[target.id] = newCount;
+  saveData(store);
+
+  // ✅ 表示名（ニックネーム）優先で表示
+  let displayName = target.tag;
+  if (interaction.inGuild()) {
+    const member = await interaction.guild!.members.fetch(target.id).catch(() => null);
+    if (member?.displayName) displayName = member.displayName;
+  }
+
+  await interaction.reply({
+    content: `**${displayName}** のしばかれ回数を **${newCount} 回** に設定しました。`,
+    allowedMentions: { parse: [] },
+    ephemeral: true // ✅ あなただけに表示
+  });
+
+  return;
+}
+
 
   // /immune
   if (interaction.commandName === 'immune') {

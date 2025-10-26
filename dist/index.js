@@ -165,7 +165,7 @@ client.on(discord_js_1.Events.InteractionCreate, async (interaction) => {
         await interaction.editReply({ embeds: [embed], files: [file], allowedMentions: { parse: [] } });
         return;
     }
-    // /control
+    // /control（管理者 or 開発者専用）
     if (interaction.commandName === 'control') {
         if (!interaction.inGuild()) {
             await interaction.reply({ content: 'このコマンドはサーバー内でのみ使用できます。', ephemeral: true });
@@ -183,9 +183,17 @@ client.on(discord_js_1.Events.InteractionCreate, async (interaction) => {
         const store = (0, data_1.loadData)();
         store[target.id] = newCount;
         (0, data_1.saveData)(store);
+        // ✅ 表示名（ニックネーム）優先で表示
+        let displayName = target.tag;
+        if (interaction.inGuild()) {
+            const member = await interaction.guild.members.fetch(target.id).catch(() => null);
+            if (member?.displayName)
+                displayName = member.displayName;
+        }
         await interaction.reply({
-            content: `\`${target.tag}\` のしばかれ回数を **${newCount} 回** に設定しました。`,
-            allowedMentions: { parse: [] }
+            content: `**${displayName}** のしばかれ回数を **${newCount} 回** に設定しました。`,
+            allowedMentions: { parse: [] },
+            ephemeral: true // ✅ あなただけに表示
         });
         return;
     }
