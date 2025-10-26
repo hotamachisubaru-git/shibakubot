@@ -5,6 +5,18 @@ require("dotenv/config");
 const discord_js_1 = require("discord.js");
 const data_1 = require("./data");
 const top_1 = require("./commands/top");
+//ヘルパー
+// ギルドではニックネーム（displayName）→ なければ user.tag → 最後にID
+async function getDisplayName(interaction, userId) {
+    const g = interaction.guild;
+    if (g) {
+        const m = await g.members.fetch(userId).catch(() => null);
+        if (m?.displayName)
+            return m.displayName;
+    }
+    const u = await interaction.client.users.fetch(userId).catch(() => null);
+    return u?.tag ?? userId;
+}
 // ---- クライアント設定 ----
 const client = new discord_js_1.Client({
     intents: [
@@ -67,7 +79,7 @@ client.on(discord_js_1.Events.InteractionCreate, async (interaction) => {
         }
         const reason = interaction.options.getString('reason', true);
         const raw = interaction.options.getInteger('count') ?? 1;
-        // ✅ 上限設定（1〜10）
+        // 上限設定（1〜10）
         const MIN = 1;
         const MAX = 10;
         if (raw > MAX) {
@@ -81,12 +93,22 @@ client.on(discord_js_1.Events.InteractionCreate, async (interaction) => {
         const countArg = Math.max(MIN, raw);
         // カウント追加
         const nextCount = (0, data_1.addCount)(data, user.id, countArg);
-        await interaction.reply(`**${user.tag}** が ${countArg} 回 しばかれました！（累計 ${nextCount} 回）\n理由: ${reason}`);
-        // ログ出力
+        // 表示名（ニックネーム優先）を取得
+        const targetName = await getDisplayName(interaction, user.id);
+        const actorName = await getDisplayName(interaction, interaction.user.id);
+        // 返信（メンション抑止）
+        await interaction.reply({
+            content: `\`${targetName}\` が ${countArg} 回 しばかれました！（累計 ${nextCount} 回）\n理由: ${reason}`,
+            allowedMentions: { parse: [] }
+        });
+        // ログ出力（こちらも表示名に変更）
         if (LOG_CHANNEL_ID && interaction.guild) {
             const ch = await interaction.guild.channels.fetch(LOG_CHANNEL_ID).catch(() => null);
             if (ch && ch.type === discord_js_1.ChannelType.GuildText) {
-                await ch.send(`${interaction.user.tag} → ${user.tag}\n理由: ${reason}\n今回: ${countArg} 回\n累計: ${nextCount} 回`);
+                await ch.send({
+                    content: `\`${actorName}\` → \`${targetName}\`\n理由: ${reason}\n今回: ${countArg} 回\n累計: ${nextCount} 回`,
+                    allowedMentions: { parse: [] }
+                });
             }
         }
         return;
@@ -172,7 +194,7 @@ client.on(discord_js_1.Events.InteractionCreate, async (interaction) => {
         if (sub === 'add') {
             const u = interaction.options.getUser('user', true);
             if (u.bot) {
-                await interaction.reply({ content: 'BOTはそもそもしばけません。', ephemeral: true });
+                await interaction.reply({ content: 'BOTはそもそも人間じゃないのでしばけません。', ephemeral: true });
                 return;
             }
             const added = (0, data_1.addImmuneId)(gid, u.id);

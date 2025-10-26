@@ -1,8 +1,17 @@
+# Environment files
 .env
 .env.*
 *.env
-data.json
-data.json
-data/
-*.json
 !.env.example
+
+# Data files
+*.json
+data/
+
+# Build and dependencies
+node_modules/
+dist/
+
+# Other
+logs/
+*.zip

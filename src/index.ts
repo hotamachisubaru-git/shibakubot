@@ -3,13 +3,28 @@ import 'dotenv/config';
 import {
   Client, GatewayIntentBits, Events,
   type Interaction, ChannelType, type TextChannel,
-  PermissionFlagsBits, AttachmentBuilder
+  type ChatInputCommandInteraction, PermissionFlagsBits, AttachmentBuilder
 } from 'discord.js';
 import {
   loadData, addCount, saveData,
   isImmune, getImmuneList, addImmuneId, removeImmuneId
 } from './data';
 import { handleTop } from './commands/top';
+
+//ヘルパー
+// ギルドではニックネーム（displayName）→ なければ user.tag → 最後にID
+async function getDisplayName(
+  interaction: ChatInputCommandInteraction,
+  userId: string
+): Promise<string> {
+  const g = interaction.guild;
+  if (g) {
+    const m = await g.members.fetch(userId).catch(() => null);
+    if (m?.displayName) return m.displayName;
+  }
+  const u = await interaction.client.users.fetch(userId).catch(() => null);
+  return u?.tag ?? userId;
+}
 
 // ---- クライアント設定 ----
 const client = new Client({
@@ -60,64 +75,72 @@ if (interaction.commandName === 'ping') {
 
   const data = loadData();
 
-  // /sbk
-  if (interaction.commandName === 'sbk') {
-    const user = interaction.options.getUser('user', true);
+ // /sbk
+if (interaction.commandName === 'sbk') {
+  const user = interaction.options.getUser('user', true);
 
-    // BOT（自分含む）は不可
-    if (user.bot || user.id === interaction.client.user?.id) {
-      await interaction.reply({
-        content: 'BOTをしばくことはできません。',
-        ephemeral: true,
-        allowedMentions: { parse: [] }
-      });
-      return;
-    }
-
-    // 免除チェック
-    if (isImmune(interaction.guildId ?? undefined, user.id, IMMUNE_IDS)) {
-      await interaction.reply({
-        content: 'このユーザーはしばき免除です。',
-        ephemeral: true,
-        allowedMentions: { parse: [] }
-      });
-      return;
-    }
-
-    const reason = interaction.options.getString('reason', true);
-    const raw = interaction.options.getInteger('count') ?? 1;
-
-    // ✅ 上限設定（1〜10）
-    const MIN = 1;
-    const MAX = 10;
-    if (raw > MAX) {
-      await interaction.reply({
-        content: `1回でしばけるのは最大 **${MAX} 回** までです！`,
-        ephemeral: true,
-        allowedMentions: { parse: [] }
-      });
-      return;
-    }
-    const countArg = Math.max(MIN, raw);
-
-    // カウント追加
-    const nextCount = addCount(data, user.id, countArg);
-
-    await interaction.reply(
-      `**${user.tag}** が ${countArg} 回 しばかれました！（累計 ${nextCount} 回）\n理由: ${reason}`
-    );
-
-    // ログ出力
-    if (LOG_CHANNEL_ID && interaction.guild) {
-      const ch = await interaction.guild.channels.fetch(LOG_CHANNEL_ID).catch(() => null);
-      if (ch && ch.type === ChannelType.GuildText) {
-        await (ch as TextChannel).send(
-          `${interaction.user.tag} → ${user.tag}\n理由: ${reason}\n今回: ${countArg} 回\n累計: ${nextCount} 回`
-        );
-      }
-    }
+  // BOT（自分含む）は不可
+  if (user.bot || user.id === interaction.client.user?.id) {
+    await interaction.reply({
+      content: 'BOTをしばくことはできません。',
+      ephemeral: true,
+      allowedMentions: { parse: [] }
+    });
     return;
   }
+
+  // 免除チェック
+  if (isImmune(interaction.guildId ?? undefined, user.id, IMMUNE_IDS)) {
+    await interaction.reply({
+      content: 'このユーザーはしばき免除です。',
+      ephemeral: true,
+      allowedMentions: { parse: [] }
+    });
+    return;
+  }
+
+  const reason = interaction.options.getString('reason', true);
+  const raw = interaction.options.getInteger('count') ?? 1;
+
+  // 上限設定（1〜10）
+  const MIN = 1;
+  const MAX = 10;
+  if (raw > MAX) {
+    await interaction.reply({
+      content: `1回でしばけるのは最大 **${MAX} 回** までです！`,
+      ephemeral: true,
+      allowedMentions: { parse: [] }
+    });
+    return;
+  }
+  const countArg = Math.max(MIN, raw);
+
+  // カウント追加
+  const nextCount = addCount(data, user.id, countArg);
+
+  // 表示名（ニックネーム優先）を取得
+  const targetName = await getDisplayName(interaction as ChatInputCommandInteraction, user.id);
+  const actorName  = await getDisplayName(interaction as ChatInputCommandInteraction, interaction.user.id);
+
+  // 返信（メンション抑止）
+  await interaction.reply({
+    content: `\`${targetName}\` が ${countArg} 回 しばかれました！（累計 ${nextCount} 回）\n理由: ${reason}`,
+    allowedMentions: { parse: [] }
+  });
+
+  // ログ出力（こちらも表示名に変更）
+  if (LOG_CHANNEL_ID && interaction.guild) {
+    const ch = await interaction.guild.channels.fetch(LOG_CHANNEL_ID).catch(() => null);
+    if (ch && ch.type === ChannelType.GuildText) {
+      await (ch as TextChannel).send({
+        content:
+          `\`${actorName}\` → \`${targetName}\`\n理由: ${reason}\n今回: ${countArg} 回\n累計: ${nextCount} 回`,
+        allowedMentions: { parse: [] }
+      });
+    }
+  }
+  return;
+}
 
   // /check
   if (interaction.commandName === 'check') {
@@ -215,7 +238,7 @@ if (interaction.commandName === 'ping') {
     if (sub === 'add') {
       const u = interaction.options.getUser('user', true);
       if (u.bot) {
-        await interaction.reply({ content: 'BOTはそもそもしばけません。', ephemeral: true });
+        await interaction.reply({ content: 'BOTはそもそも人間じゃないのでしばけません。', ephemeral: true });
         return;
       }
       const added = addImmuneId(gid, u.id);
