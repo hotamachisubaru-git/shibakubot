@@ -5,8 +5,7 @@ require("dotenv/config");
 const discord_js_1 = require("discord.js");
 const data_1 = require("./data");
 const top_1 = require("./commands/top");
-//ヘルパー
-// ギルドではニックネーム（displayName）→ なければ user.tag → 最後にID
+// ---- ヘルパー（表示名取得） ----
 async function getDisplayName(interaction, userId) {
     const g = interaction.guild;
     if (g) {
@@ -19,16 +18,13 @@ async function getDisplayName(interaction, userId) {
 }
 // ---- クライアント設定 ----
 const client = new discord_js_1.Client({
-    intents: [
-        discord_js_1.GatewayIntentBits.Guilds,
-        discord_js_1.GatewayIntentBits.GuildMembers // /members 用
-    ]
+    intents: [discord_js_1.GatewayIntentBits.Guilds, discord_js_1.GatewayIntentBits.GuildMembers]
 });
 // ---- 定数 ----
 const LOG_CHANNEL_ID = process.env.LOG_CHANNEL_ID || '';
 const OWNER_IDS = (process.env.OWNER_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
 const IMMUNE_IDS = (process.env.IMMUNE_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
-client.once(discord_js_1.Events.ClientReady, (b) => {
+client.once(discord_js_1.Events.ClientReady, b => {
     console.log(`✅ ログイン完了: ${b.user.tag}`);
 });
 // ---- コマンドハンドラ ----
@@ -36,93 +32,64 @@ client.on(discord_js_1.Events.InteractionCreate, async (interaction) => {
     if (!interaction.isChatInputCommand())
         return;
     // /ping
-    // /ping
     if (interaction.commandName === 'ping') {
         const t0 = performance.now();
         await interaction.deferReply({ ephemeral: true });
         const apiPing = Math.round(performance.now() - t0);
-        // WS Pingが未計測(-1)なら最大5秒まで待機して再取得
+        // WS pingを最大5秒待ってみる
         let wsPing = interaction.client.ws?.ping ?? -1;
-        const maxWait = 5000; // 最大5秒
-        const interval = 200; // チェック間隔200ms
-        let waited = 0;
-        while (wsPing < 0 && waited < maxWait) {
-            await new Promise(r => setTimeout(r, interval));
+        for (let waited = 0; wsPing < 0 && waited < 5000; waited += 200) {
+            await new Promise(r => setTimeout(r, 200));
             wsPing = interaction.client.ws?.ping ?? -1;
-            waited += interval;
         }
         const wsText = wsPing >= 0 ? `${Math.round(wsPing)}ms` : '取得できませんでした';
         await interaction.editReply(`API: **${apiPing}ms** | WS: **${wsText}**`);
         return;
     }
-    const data = (0, data_1.loadData)();
     // /sbk
     if (interaction.commandName === 'sbk') {
-        const user = interaction.options.getUser('user', true);
-        // BOT（自分含む）は不可
-        if (user.bot || user.id === interaction.client.user?.id) {
-            await interaction.reply({
-                content: 'BOTをしばくことはできません。',
-                ephemeral: true,
-                allowedMentions: { parse: [] }
-            });
+        if (!interaction.inGuild()) {
+            await interaction.reply({ content: 'サーバー内で使ってね。', ephemeral: true });
             return;
         }
-        // 免除チェック
-        if ((0, data_1.isImmune)(interaction.guildId ?? undefined, user.id, IMMUNE_IDS)) {
-            await interaction.reply({
-                content: 'このユーザーはしばき免除です。',
-                ephemeral: true,
-                allowedMentions: { parse: [] }
-            });
+        const gid = interaction.guildId;
+        const user = interaction.options.getUser('user', true);
+        if (user.bot || user.id === interaction.client.user?.id) {
+            await interaction.reply({ content: 'BOTは対象外です。', ephemeral: true, allowedMentions: { parse: [] } });
+            return;
+        }
+        if ((0, data_1.isImmune)(gid, user.id, IMMUNE_IDS)) {
+            await interaction.reply({ content: 'このユーザーはしばき免除です。', ephemeral: true, allowedMentions: { parse: [] } });
             return;
         }
         const reason = interaction.options.getString('reason', true);
         const raw = interaction.options.getInteger('count') ?? 1;
-        // 上限設定（1〜10）
-        const MIN = 1;
-        const MAX = 10;
-        if (raw > MAX) {
-            await interaction.reply({
-                content: `1回でしばけるのは最大 **${MAX} 回** までです！`,
-                ephemeral: true,
-                allowedMentions: { parse: [] }
-            });
-            return;
-        }
-        const countArg = Math.max(MIN, raw);
-        // カウント追加
-        const nextCount = (0, data_1.addCount)(data, user.id, countArg);
-        // 表示名（ニックネーム優先）を取得
-        const targetName = await getDisplayName(interaction, user.id);
-        const actorName = await getDisplayName(interaction, interaction.user.id);
-        // 返信（メンション抑止）
-        await interaction.reply({
-            content: `\`${targetName}\` が ${countArg} 回 しばかれました！（累計 ${nextCount} 回）\n理由: ${reason}`,
-            allowedMentions: { parse: [] }
-        });
-        // ログ出力（こちらも表示名に変更）
-        if (LOG_CHANNEL_ID && interaction.guild) {
+        const countArg = Math.max(1, Math.min(10, raw)); // 1〜10
+        const nextCount = (0, data_1.addCountGuild)(gid, user.id, countArg);
+        // 表示名（ニックネーム優先）
+        const member = await interaction.guild.members.fetch(user.id).catch(() => null);
+        const display = member?.displayName ?? user.tag;
+        await interaction.reply(`**${display}** が ${countArg} 回 しばかれました！（累計 ${nextCount} 回）\n理由: ${reason}`);
+        if (LOG_CHANNEL_ID) {
             const ch = await interaction.guild.channels.fetch(LOG_CHANNEL_ID).catch(() => null);
             if (ch && ch.type === discord_js_1.ChannelType.GuildText) {
-                await ch.send({
-                    content: `\`${actorName}\` → \`${targetName}\`\n理由: ${reason}\n今回: ${countArg} 回\n累計: ${nextCount} 回`,
-                    allowedMentions: { parse: [] }
-                });
+                await ch.send(`${interaction.user.tag} → ${display}\n理由: ${reason}\n今回: ${countArg} 回\n累計: ${nextCount} 回`);
             }
         }
         return;
     }
     // /check
     if (interaction.commandName === 'check') {
-        const user = interaction.options.getUser('user', true);
-        const count = data[user.id] ?? 0;
-        let displayName = user.tag;
-        if (interaction.inGuild()) {
-            const member = await interaction.guild.members.fetch(user.id).catch(() => null);
-            if (member?.displayName)
-                displayName = member.displayName; // 表示名優先
+        if (!interaction.inGuild()) {
+            await interaction.reply({ content: 'サーバー内で使用してください。', ephemeral: true });
+            return;
         }
+        const gid = interaction.guildId;
+        const target = interaction.options.getUser('user', true);
+        const store = (0, data_1.loadGuildStore)(gid);
+        const count = store.counts[target.id] ?? 0;
+        const member = await interaction.guild.members.fetch(target.id).catch(() => null);
+        const displayName = member?.displayName ?? target.tag;
         await interaction.reply({
             content: `**${displayName}** は今までに ${count} 回 しばかれました。`,
             allowedMentions: { parse: [] },
@@ -131,7 +98,7 @@ client.on(discord_js_1.Events.InteractionCreate, async (interaction) => {
     }
     // /top
     if (interaction.commandName === 'top') {
-        await (0, top_1.handleTop)(interaction);
+        await (0, top_1.handleTop)(interaction); // ※ handleTop 内も guildId ベースにしておく
         return;
     }
     // /members
@@ -141,23 +108,24 @@ client.on(discord_js_1.Events.InteractionCreate, async (interaction) => {
             return;
         }
         await interaction.deferReply();
+        const gid = interaction.guildId;
+        const store = (0, data_1.loadGuildStore)(gid);
         const guild = interaction.guild;
         const members = await guild.members.fetch();
-        const humans = members.filter((m) => !m.user.bot);
-        const rows = humans.map(m => {
-            const display = m.displayName || m.user.tag; // ← 表示名優先
-            return {
-                tag: display,
-                id: m.id,
-                count: data[m.id] ?? 0
-            };
-        }).sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
+        const humans = members.filter(m => !m.user.bot);
+        const rows = humans
+            .map(m => ({
+            tag: m.displayName || m.user.tag, // 表示名優先
+            id: m.id,
+            count: store.counts[m.id] ?? 0,
+        }))
+            .sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
         const top = rows.slice(0, 20);
         const lines = top.map((r, i) => `#${i + 1} \`${r.tag}\` × **${r.count}**`);
         const embed = {
             title: '全メンバーのしばかれ回数（BOT除外）',
             description: lines.join('\n') || 'メンバーがいません（または全員カウント 0）',
-            footer: { text: `合計 ${rows.length} 名 • ${new Date().toLocaleString('ja-JP')}` }
+            footer: { text: `合計 ${rows.length} 名 • ${new Date().toLocaleString('ja-JP')}` },
         };
         const header = 'rank,tag,id,count';
         const csv = [header, ...rows.map((r, i) => `${i + 1},${r.tag},${r.id},${r.count}`)].join('\n');
@@ -165,7 +133,7 @@ client.on(discord_js_1.Events.InteractionCreate, async (interaction) => {
         await interaction.editReply({ embeds: [embed], files: [file], allowedMentions: { parse: [] } });
         return;
     }
-    // /control（管理者 or 開発者専用）
+    // /control（管理者 / 開発者のみ）
     if (interaction.commandName === 'control') {
         if (!interaction.inGuild()) {
             await interaction.reply({ content: 'このコマンドはサーバー内でのみ使用できます。', ephemeral: true });
@@ -177,27 +145,24 @@ client.on(discord_js_1.Events.InteractionCreate, async (interaction) => {
             await interaction.reply({ content: '権限がありません。（管理者または開発者のみ）', ephemeral: true });
             return;
         }
+        const gid = interaction.guildId;
         const target = interaction.options.getUser('user', true);
         const newCountRaw = interaction.options.getInteger('count', true);
         const newCount = Math.max(0, newCountRaw);
-        const store = (0, data_1.loadData)();
-        store[target.id] = newCount;
-        (0, data_1.saveData)(store);
-        // ✅ 表示名（ニックネーム）優先で表示
-        let displayName = target.tag;
-        if (interaction.inGuild()) {
-            const member = await interaction.guild.members.fetch(target.id).catch(() => null);
-            if (member?.displayName)
-                displayName = member.displayName;
-        }
+        const store = (0, data_1.loadGuildStore)(gid);
+        store.counts[target.id] = newCount;
+        (0, data_1.saveGuildStore)(gid, store);
+        // 表示名優先
+        const member = await interaction.guild.members.fetch(target.id).catch(() => null);
+        const displayName = member?.displayName ?? target.tag;
         await interaction.reply({
             content: `**${displayName}** のしばかれ回数を **${newCount} 回** に設定しました。`,
             allowedMentions: { parse: [] },
-            ephemeral: true // ✅ あなただけに表示
+            ephemeral: true
         });
         return;
     }
-    // /immune
+    // /immune（管理者 / 開発者のみ）
     if (interaction.commandName === 'immune') {
         if (!interaction.inGuild()) {
             await interaction.reply({ content: 'このコマンドはサーバー内でのみ使用できます。', ephemeral: true });
@@ -214,7 +179,7 @@ client.on(discord_js_1.Events.InteractionCreate, async (interaction) => {
         if (sub === 'add') {
             const u = interaction.options.getUser('user', true);
             if (u.bot) {
-                await interaction.reply({ content: 'BOTはそもそも人間じゃないのでしばけません。', ephemeral: true });
+                await interaction.reply({ content: 'BOTはそもそもしばけません。', ephemeral: true });
                 return;
             }
             const added = (0, data_1.addImmuneId)(gid, u.id);

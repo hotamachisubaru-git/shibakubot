@@ -3,96 +3,69 @@ import fs from 'fs';
 import path from 'path';
 
 export type CounterMap = Record<string, number>;
-
-// ---- しばかれ回数の保存先 ----
-const ROOT_DATA = path.join(process.cwd(), 'data.json');
-const LEGACY_DATA = path.join(process.cwd(), 'src', 'data.json');
-
-// ---- 免除リストの保存先（ギルドごと）----
-const IMMUNE_PATH = path.join(process.cwd(), 'immune.json');
-
-function safeReadText(p: string): string | null {
-  try { return fs.readFileSync(p, 'utf8'); } catch { return null; }
+export interface GuildStore {
+  counts: CounterMap;
+  immune: string[];
 }
-function safeReadJson<T>(p: string, fallback: T): T {
-  try {
-    const t = (safeReadText(p) ?? '').trim();
-    return t ? (JSON.parse(t) as T) : fallback;
-  } catch {
-    return fallback;
+
+const DATA_DIR = path.join(process.cwd(), 'data', 'guilds');
+function ensureDir(p: string) {
+  if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true });
+}
+function guildFile(gid: string) {
+  ensureDir(DATA_DIR);
+  return path.join(DATA_DIR, `${gid}.json`);
+}
+
+export function loadGuildStore(gid: string): GuildStore {
+  const file = guildFile(gid);
+  if (fs.existsSync(file)) {
+    try {
+      return JSON.parse(fs.readFileSync(file, 'utf8')) as GuildStore;
+    } catch {
+      /* 壊れていたら初期化 */
+    }
   }
+  const init: GuildStore = { counts: {}, immune: [] };
+  fs.writeFileSync(file, JSON.stringify(init, null, 2));
+  return init;
 }
 
-// ========== 回数データ ==========
-export function loadData(): CounterMap {
-  const root = safeReadJson<CounterMap>(ROOT_DATA, {} as CounterMap);
-  if (Object.keys(root).length) return root;
-
-  const legacy = safeReadJson<CounterMap>(LEGACY_DATA, {} as CounterMap);
-  if (Object.keys(legacy).length) {
-    fs.writeFileSync(ROOT_DATA, JSON.stringify(legacy, null, 2));
-    return legacy;
-  }
-
-  fs.writeFileSync(ROOT_DATA, '{}');
-  return {};
+export function saveGuildStore(gid: string, store: GuildStore) {
+  fs.writeFileSync(guildFile(gid), JSON.stringify(store, null, 2));
 }
 
-export function saveData(data: CounterMap) {
-  fs.writeFileSync(ROOT_DATA, JSON.stringify(data, null, 2));
-}
-
-export function addCount(data: CounterMap, userId: string, by = 1): number {
-  const next = (data[userId] ?? 0) + by;
-  data[userId] = next;
-  saveData(data);
+/** by 回まとめて加算（既定1）→ 新しい累計を返す */
+export function addCountGuild(gid: string, userId: string, by = 1): number {
+  const store = loadGuildStore(gid);
+  const next = (store.counts[userId] ?? 0) + by;
+  store.counts[userId] = next;
+  saveGuildStore(gid, store);
   return next;
 }
 
-export function getTop(data: CounterMap, limit = 10) {
-  return Object.entries(data)
-    .map(([id, count]) => ({ id, count }))
-    .sort((a, b) => b.count - a.count)
-    .slice(0, limit);
+/** 免除系 */
+export function isImmune(gid: string, userId: string, globalImmune: string[] = []) {
+  const store = loadGuildStore(gid);
+  return store.immune.includes(userId) || globalImmune.includes(userId);
 }
-
-// ========== 免除リスト（ギルドごと） ==========
-type ImmuneStore = Record<string, string[]>; // guildId -> userIds[]
-
-function readImmuneStore(): ImmuneStore {
-  return safeReadJson<ImmuneStore>(IMMUNE_PATH, {});
+export function getImmuneList(gid: string) {
+  return loadGuildStore(gid).immune;
 }
-function writeImmuneStore(store: ImmuneStore) {
-  fs.writeFileSync(IMMUNE_PATH, JSON.stringify(store, null, 2));
+export function addImmuneId(gid: string, userId: string) {
+  const s = loadGuildStore(gid);
+  if (s.immune.includes(userId)) return false;
+  s.immune.push(userId);
+  saveGuildStore(gid, s);
+  return true;
 }
-
-export function getImmuneList(guildId: string): string[] {
-  const store = readImmuneStore();
-  return store[guildId] ?? [];
-}
-
-export function addImmuneId(guildId: string, userId: string): boolean {
-  const store = readImmuneStore();
-  const set = new Set<string>(store[guildId] ?? []);
-  const before = set.size;
-  set.add(userId);
-  store[guildId] = Array.from(set);
-  writeImmuneStore(store);
-  return set.size !== before; // 追加されたら true
-}
-
-export function removeImmuneId(guildId: string, userId: string): boolean {
-  const store = readImmuneStore();
-  const set = new Set<string>(store[guildId] ?? []);
-  const existed = set.delete(userId);
-  store[guildId] = Array.from(set);
-  writeImmuneStore(store);
-  return existed; // 削除できたら true
-}
-
-/** env のグローバル免除 + ギルド免除、どちらかに含まれていれば true */
-export function isImmune(guildId: string | undefined, userId: string, envImmuneIds: string[]): boolean {
-  if (envImmuneIds.includes(userId)) return true;
-  if (!guildId) return false;
-  return getImmuneList(guildId).includes(userId);
+export function removeImmuneId(gid: string, userId: string) {
+  const s = loadGuildStore(gid);
+  const n = s.immune.filter(x => x !== userId);
+  const changed = n.length !== s.immune.length;
+  if (changed) {
+    s.immune = n;
+    saveGuildStore(gid, s);
+  }
+  return changed;
 }

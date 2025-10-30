@@ -3,99 +3,73 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.loadData = loadData;
-exports.saveData = saveData;
-exports.addCount = addCount;
-exports.getTop = getTop;
+exports.loadGuildStore = loadGuildStore;
+exports.saveGuildStore = saveGuildStore;
+exports.addCountGuild = addCountGuild;
+exports.isImmune = isImmune;
 exports.getImmuneList = getImmuneList;
 exports.addImmuneId = addImmuneId;
 exports.removeImmuneId = removeImmuneId;
-exports.isImmune = isImmune;
 // src/data.ts
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
-// ---- しばかれ回数の保存先 ----
-const ROOT_DATA = path_1.default.join(process.cwd(), 'data.json');
-const LEGACY_DATA = path_1.default.join(process.cwd(), 'src', 'data.json');
-// ---- 免除リストの保存先（ギルドごと）----
-const IMMUNE_PATH = path_1.default.join(process.cwd(), 'immune.json');
-function safeReadText(p) {
-    try {
-        return fs_1.default.readFileSync(p, 'utf8');
-    }
-    catch {
-        return null;
-    }
+const DATA_DIR = path_1.default.join(process.cwd(), 'data', 'guilds');
+function ensureDir(p) {
+    if (!fs_1.default.existsSync(p))
+        fs_1.default.mkdirSync(p, { recursive: true });
 }
-function safeReadJson(p, fallback) {
-    try {
-        const t = (safeReadText(p) ?? '').trim();
-        return t ? JSON.parse(t) : fallback;
-    }
-    catch {
-        return fallback;
-    }
+function guildFile(gid) {
+    ensureDir(DATA_DIR);
+    return path_1.default.join(DATA_DIR, `${gid}.json`);
 }
-// ========== 回数データ ==========
-function loadData() {
-    const root = safeReadJson(ROOT_DATA, {});
-    if (Object.keys(root).length)
-        return root;
-    const legacy = safeReadJson(LEGACY_DATA, {});
-    if (Object.keys(legacy).length) {
-        fs_1.default.writeFileSync(ROOT_DATA, JSON.stringify(legacy, null, 2));
-        return legacy;
+function loadGuildStore(gid) {
+    const file = guildFile(gid);
+    if (fs_1.default.existsSync(file)) {
+        try {
+            return JSON.parse(fs_1.default.readFileSync(file, 'utf8'));
+        }
+        catch {
+            /* 壊れていたら初期化 */
+        }
     }
-    fs_1.default.writeFileSync(ROOT_DATA, '{}');
-    return {};
+    const init = { counts: {}, immune: [] };
+    fs_1.default.writeFileSync(file, JSON.stringify(init, null, 2));
+    return init;
 }
-function saveData(data) {
-    fs_1.default.writeFileSync(ROOT_DATA, JSON.stringify(data, null, 2));
+function saveGuildStore(gid, store) {
+    fs_1.default.writeFileSync(guildFile(gid), JSON.stringify(store, null, 2));
 }
-function addCount(data, userId, by = 1) {
-    const next = (data[userId] ?? 0) + by;
-    data[userId] = next;
-    saveData(data);
+/** by 回まとめて加算（既定1）→ 新しい累計を返す */
+function addCountGuild(gid, userId, by = 1) {
+    const store = loadGuildStore(gid);
+    const next = (store.counts[userId] ?? 0) + by;
+    store.counts[userId] = next;
+    saveGuildStore(gid, store);
     return next;
 }
-function getTop(data, limit = 10) {
-    return Object.entries(data)
-        .map(([id, count]) => ({ id, count }))
-        .sort((a, b) => b.count - a.count)
-        .slice(0, limit);
+/** 免除系 */
+function isImmune(gid, userId, globalImmune = []) {
+    const store = loadGuildStore(gid);
+    return store.immune.includes(userId) || globalImmune.includes(userId);
 }
-function readImmuneStore() {
-    return safeReadJson(IMMUNE_PATH, {});
+function getImmuneList(gid) {
+    return loadGuildStore(gid).immune;
 }
-function writeImmuneStore(store) {
-    fs_1.default.writeFileSync(IMMUNE_PATH, JSON.stringify(store, null, 2));
-}
-function getImmuneList(guildId) {
-    const store = readImmuneStore();
-    return store[guildId] ?? [];
-}
-function addImmuneId(guildId, userId) {
-    const store = readImmuneStore();
-    const set = new Set(store[guildId] ?? []);
-    const before = set.size;
-    set.add(userId);
-    store[guildId] = Array.from(set);
-    writeImmuneStore(store);
-    return set.size !== before; // 追加されたら true
-}
-function removeImmuneId(guildId, userId) {
-    const store = readImmuneStore();
-    const set = new Set(store[guildId] ?? []);
-    const existed = set.delete(userId);
-    store[guildId] = Array.from(set);
-    writeImmuneStore(store);
-    return existed; // 削除できたら true
-}
-/** env のグローバル免除 + ギルド免除、どちらかに含まれていれば true */
-function isImmune(guildId, userId, envImmuneIds) {
-    if (envImmuneIds.includes(userId))
-        return true;
-    if (!guildId)
+function addImmuneId(gid, userId) {
+    const s = loadGuildStore(gid);
+    if (s.immune.includes(userId))
         return false;
-    return getImmuneList(guildId).includes(userId);
+    s.immune.push(userId);
+    saveGuildStore(gid, s);
+    return true;
+}
+function removeImmuneId(gid, userId) {
+    const s = loadGuildStore(gid);
+    const n = s.immune.filter(x => x !== userId);
+    const changed = n.length !== s.immune.length;
+    if (changed) {
+        s.immune = n;
+        saveGuildStore(gid, s);
+    }
+    return changed;
 }
