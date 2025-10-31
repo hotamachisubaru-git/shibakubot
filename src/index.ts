@@ -83,7 +83,7 @@ client.on(Events.InteractionCreate, async (interaction: Interaction) => {
 
     const reason = interaction.options.getString('reason', true);
     const raw = interaction.options.getInteger('count') ?? 1;
-    const countArg = Math.max(1, Math.min(20, raw)); // 1〜10
+    const countArg = Math.max(1, Math.min(10, raw)); // 1〜10
 
     const nextCount = addCountGuild(gid, user.id, countArg);
 
@@ -134,44 +134,56 @@ client.on(Events.InteractionCreate, async (interaction: Interaction) => {
   }
 
   // /members
-  if (interaction.commandName === 'members') {
-    if (!interaction.inGuild()) {
-      await interaction.reply({ content: 'サーバー内で使用してください。', ephemeral: true });
-      return;
-    }
-    await interaction.deferReply();
+if (interaction.commandName === 'members') {
+  if (!interaction.inGuild()) {
+    await interaction.reply({ content: 'サーバー内で使用してください。', ephemeral: true });
+    return;
+  }
 
-    const gid = interaction.guildId!;
-    const store = loadGuildStore(gid);
+  try {
+    // ★ ここを「ephemeral: true」に
+    await interaction.deferReply({ ephemeral: true });
 
-    const guild = interaction.guild!;
-    const members = await guild.members.fetch();
+    const store = loadGuildStore(interaction.guildId!);
+    const members = await interaction.guild!.members.fetch();
     const humans = members.filter(m => !m.user.bot);
 
-    const rows = humans
-      .map(m => ({
-        tag: m.displayName || m.user.tag,   // 表示名優先
-        id: m.id,
-        count: store.counts[m.id] ?? 0,
-      }))
-      .sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
+    const rows = humans.map(m => ({
+      tag: m.displayName || m.user.tag,
+      id: m.id,
+      count: store.counts[m.id] ?? 0
+    })).sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
 
     const top = rows.slice(0, 20);
     const lines = top.map((r, i) => `#${i + 1} \`${r.tag}\` × **${r.count}**`);
 
     const embed = {
       title: '全メンバーのしばかれ回数（BOT除外）',
-      description: lines.join('\n') || 'メンバーがいません（または全員カウント 0）',
-      footer: { text: `合計 ${rows.length} 名 • ${new Date().toLocaleString('ja-JP')}` },
+      description: lines.join('\n') || 'メンバーがいません（または全員 0）',
+      footer: { text: `合計 ${rows.length} 名 • ${new Date().toLocaleString('ja-JP')}` }
     };
 
+    // CSV も ephemeral で添付できる
     const header = 'rank,tag,id,count';
     const csv = [header, ...rows.map((r, i) => `${i + 1},${r.tag},${r.id},${r.count}`)].join('\n');
     const file = new AttachmentBuilder(Buffer.from(csv, 'utf8'), { name: 'members_counts.csv' });
 
-    await interaction.editReply({ embeds: [embed], files: [file], allowedMentions: { parse: [] } });
-    return;
+    await interaction.editReply({
+      embeds: [embed],
+      files: [file],
+      allowedMentions: { parse: [] } // 念のためメンション抑制
+    });
+  } catch (e) {
+    console.error(e);
+    if (interaction.deferred) {
+      await interaction.editReply('エラーが発生しました。');
+    } else {
+      await interaction.reply({ content: 'エラーが発生しました。', ephemeral: true });
+    }
   }
+  return;
+}
+
 
   // /control（管理者 / 開発者のみ）
   if (interaction.commandName === 'control') {
