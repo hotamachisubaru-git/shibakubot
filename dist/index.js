@@ -5,6 +5,7 @@ require("dotenv/config");
 const discord_js_1 = require("discord.js");
 const data_1 = require("./data");
 const top_1 = require("./commands/top");
+const mp_1 = require("./commands/mp");
 // ---- ヘルパー（表示名取得） ----
 async function getDisplayName(interaction, userId) {
     const g = interaction.guild;
@@ -18,7 +19,11 @@ async function getDisplayName(interaction, userId) {
 }
 // ---- クライアント設定 ----
 const client = new discord_js_1.Client({
-    intents: [discord_js_1.GatewayIntentBits.Guilds, discord_js_1.GatewayIntentBits.GuildMembers]
+    intents: [
+        discord_js_1.GatewayIntentBits.Guilds,
+        discord_js_1.GatewayIntentBits.GuildMembers,
+        discord_js_1.GatewayIntentBits.GuildVoiceStates, // ★音声操作に必須
+    ],
 });
 // ---- 定数 ----
 const LOG_CHANNEL_ID = process.env.LOG_CHANNEL_ID || '';
@@ -107,30 +112,43 @@ client.on(discord_js_1.Events.InteractionCreate, async (interaction) => {
             await interaction.reply({ content: 'サーバー内で使用してください。', ephemeral: true });
             return;
         }
-        await interaction.deferReply();
-        const gid = interaction.guildId;
-        const store = (0, data_1.loadGuildStore)(gid);
-        const guild = interaction.guild;
-        const members = await guild.members.fetch();
-        const humans = members.filter(m => !m.user.bot);
-        const rows = humans
-            .map(m => ({
-            tag: m.displayName || m.user.tag, // 表示名優先
-            id: m.id,
-            count: store.counts[m.id] ?? 0,
-        }))
-            .sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
-        const top = rows.slice(0, 20);
-        const lines = top.map((r, i) => `#${i + 1} \`${r.tag}\` × **${r.count}**`);
-        const embed = {
-            title: '全メンバーのしばかれ回数（BOT除外）',
-            description: lines.join('\n') || 'メンバーがいません（または全員カウント 0）',
-            footer: { text: `合計 ${rows.length} 名 • ${new Date().toLocaleString('ja-JP')}` },
-        };
-        const header = 'rank,tag,id,count';
-        const csv = [header, ...rows.map((r, i) => `${i + 1},${r.tag},${r.id},${r.count}`)].join('\n');
-        const file = new discord_js_1.AttachmentBuilder(Buffer.from(csv, 'utf8'), { name: 'members_counts.csv' });
-        await interaction.editReply({ embeds: [embed], files: [file], allowedMentions: { parse: [] } });
+        try {
+            // ★ ここを「ephemeral: true」に
+            await interaction.deferReply({ ephemeral: true });
+            const store = (0, data_1.loadGuildStore)(interaction.guildId);
+            const members = await interaction.guild.members.fetch();
+            const humans = members.filter(m => !m.user.bot);
+            const rows = humans.map(m => ({
+                tag: m.displayName || m.user.tag,
+                id: m.id,
+                count: store.counts[m.id] ?? 0
+            })).sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
+            const top = rows.slice(0, 20);
+            const lines = top.map((r, i) => `#${i + 1} \`${r.tag}\` × **${r.count}**`);
+            const embed = {
+                title: '全メンバーのしばかれ回数（BOT除外）',
+                description: lines.join('\n') || 'メンバーがいません（または全員 0）',
+                footer: { text: `合計 ${rows.length} 名 • ${new Date().toLocaleString('ja-JP')}` }
+            };
+            // CSV も ephemeral で添付できる
+            const header = 'rank,tag,id,count';
+            const csv = [header, ...rows.map((r, i) => `${i + 1},${r.tag},${r.id},${r.count}`)].join('\n');
+            const file = new discord_js_1.AttachmentBuilder(Buffer.from(csv, 'utf8'), { name: 'members_counts.csv' });
+            await interaction.editReply({
+                embeds: [embed],
+                files: [file],
+                allowedMentions: { parse: [] } // 念のためメンション抑制
+            });
+        }
+        catch (e) {
+            console.error(e);
+            if (interaction.deferred) {
+                await interaction.editReply('エラーが発生しました。');
+            }
+            else {
+                await interaction.reply({ content: 'エラーが発生しました。', ephemeral: true });
+            }
+        }
         return;
     }
     // /control（管理者 / 開発者のみ）
@@ -219,6 +237,11 @@ client.on(discord_js_1.Events.InteractionCreate, async (interaction) => {
             });
             return;
         }
+    }
+    // /mp
+    if (interaction.commandName === 'mp') {
+        await (0, mp_1.handleMp)(interaction);
+        return;
     }
 });
 client.login(process.env.TOKEN);

@@ -36,6 +36,39 @@ const commands = [
         .addUserOption(o => o.setName('user').setDescription('対象').setRequired(true)))
         .addSubcommand(sc => sc.setName('list').setDescription('免除リストを表示'))
         .setDMPermission(false),
+    new discord_js_1.SlashCommandBuilder()
+        .setName('reset')
+        .setDescription('全データをリセット（開発者のみ）')
+        .setDMPermission(false),
+    new discord_js_1.SlashCommandBuilder()
+        .setName('export')
+        .setDescription('全データをエクスポート（管理者/開発者のみ）')
+        .setDMPermission(false),
+    new discord_js_1.SlashCommandBuilder()
+        .setName('import')
+        .setDescription('全データをインポート（管理者/開発者のみ）')
+        .addStringOption(o => o.setName('data').setDescription('エクスポートされたデータ').setRequired(true))
+        .setDMPermission(false),
+    new discord_js_1.SlashCommandBuilder()
+        .setName('help')
+        .setDescription('コマンド一覧を表示'),
+    new discord_js_1.SlashCommandBuilder()
+        .setName('stats')
+        .setDescription('しばき統計情報を表示（管理者/開発者のみ）')
+        .setDMPermission(false),
+    new discord_js_1.SlashCommandBuilder()
+        .setName('mp')
+        .setDescription('音楽を再生する(URLを必ず指定。音量は任意。省略時100)。')
+        .addStringOption(o => o.
+        setName('url')
+        .setDescription('再生する音楽のURL')
+        .setRequired(true))
+        .addIntegerOption(o => o
+        .setName('vol')
+        .setDescription('音量(%) (1-200)。省略時100')
+        .setMinValue(1)
+        .setMaxValue(200))
+        .setDMPermission(false),
 ].map(c => c.toJSON());
 const rest = new discord_js_1.REST({ version: '10' }).setToken(token);
 (async () => {

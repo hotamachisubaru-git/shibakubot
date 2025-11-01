@@ -13,6 +13,7 @@ import {
 } from './data';
 
 import { handleTop } from './commands/top';
+import { handleMp } from './commands/mp';
 
 // ---- ヘルパー（表示名取得） ----
 async function getDisplayName(
@@ -30,8 +31,13 @@ async function getDisplayName(
 
 // ---- クライアント設定 ----
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers]
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildVoiceStates, // ★音声操作に必須
+  ],
 });
+
 
 // ---- 定数 ----
 const LOG_CHANNEL_ID = process.env.LOG_CHANNEL_ID || '';
@@ -282,6 +288,11 @@ if (interaction.commandName === 'members') {
       });
       return;
     }
+  }
+  // /mp
+  if (interaction.commandName === 'mp') {
+    await handleMp(interaction);
+    return;
   }
 });
 
