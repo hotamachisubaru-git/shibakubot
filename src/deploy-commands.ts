@@ -57,18 +57,33 @@ const commands = [
     .setDescription('しばき統計情報を表示（管理者/開発者のみ）')
     .setDMPermission(false),
   new SlashCommandBuilder()
-    .setName('mp')
-    .setDescription('音楽を再生する(URLを必ず指定。音量は任意。省略時100)。')
-    .addStringOption(o => o.
-      setName('url')
-      .setDescription('再生する音楽のURL')
-      .setRequired(true))
-    .addIntegerOption(o => o
-      .setName('vol')
-      .setDescription('音量(%) (1-200)。省略時100')
-      .setMinValue(1)
-      .setMaxValue(200))
+    .setName('room')
+    .setDescription('本日の大門なおゲーセンのルーム案内を表示')
+    .addStringOption(o =>
+      o.setName('game')
+        .setDescription('ゲーム名（選択）')
+        .setRequired(true)
+        // ★ Discordの選択肢は最大25件。必要に応じて増減してください
+        .addChoices(
+          { name: 'PPR', value: 'PPR' },
+          { name: 'PPS', value: 'PPS' },
+          { name: 'PPP', value: 'PPP' },
+        )
+    )
+    .addIntegerOption(o =>
+      o.setName('area')
+        .setDescription('エリア番号（1〜200）') // 例：156 など
+        .setRequired(true)
+        .setMinValue(1)
+        .setMaxValue(200)
+    )
+    .addStringOption(o =>
+      o.setName('password')
+        .setDescription('パスワード')
+        .setRequired(true)
+    )
     .setDMPermission(false),
+
 ].map(c => c.toJSON());
 
 const rest = new REST({ version: '10' }).setToken(token);

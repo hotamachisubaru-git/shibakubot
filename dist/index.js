@@ -5,7 +5,7 @@ require("dotenv/config");
 const discord_js_1 = require("discord.js");
 const data_1 = require("./data");
 const top_1 = require("./commands/top");
-const mp_1 = require("./commands/mp");
+const daimongamecenter_1 = require("./commands/daimongamecenter");
 // ---- ヘルパー（表示名取得） ----
 async function getDisplayName(interaction, userId) {
     const g = interaction.guild;
@@ -22,7 +22,7 @@ const client = new discord_js_1.Client({
     intents: [
         discord_js_1.GatewayIntentBits.Guilds,
         discord_js_1.GatewayIntentBits.GuildMembers,
-        discord_js_1.GatewayIntentBits.GuildVoiceStates, // ★音声操作に必須
+        discord_js_1.GatewayIntentBits.GuildMessages,
     ],
 });
 // ---- 定数 ----
@@ -69,7 +69,7 @@ client.on(discord_js_1.Events.InteractionCreate, async (interaction) => {
         }
         const reason = interaction.options.getString('reason', true);
         const raw = interaction.options.getInteger('count') ?? 1;
-        const countArg = Math.max(1, Math.min(10, raw)); // 1〜10
+        const countArg = Math.max(1, Math.min(15, raw)); // 1〜10 // 上限
         const nextCount = (0, data_1.addCountGuild)(gid, user.id, countArg);
         // 表示名（ニックネーム優先）
         const member = await interaction.guild.members.fetch(user.id).catch(() => null);
@@ -238,9 +238,9 @@ client.on(discord_js_1.Events.InteractionCreate, async (interaction) => {
             return;
         }
     }
-    // /mp
-    if (interaction.commandName === 'mp') {
-        await (0, mp_1.handleMp)(interaction);
+    // /room
+    if (interaction.commandName === 'room') {
+        await (0, daimongamecenter_1.handleRoom)(interaction);
         return;
     }
 });

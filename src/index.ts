@@ -13,7 +13,8 @@ import {
 } from './data';
 
 import { handleTop } from './commands/top';
-import { handleMp } from './commands/mp';
+import { handleRoom } from './commands/daimongamecenter';
+
 
 // ---- ヘルパー（表示名取得） ----
 async function getDisplayName(
@@ -34,7 +35,7 @@ const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMembers,
-    GatewayIntentBits.GuildVoiceStates, // ★音声操作に必須
+    GatewayIntentBits.GuildMessages,
   ],
 });
 
@@ -89,7 +90,7 @@ client.on(Events.InteractionCreate, async (interaction: Interaction) => {
 
     const reason = interaction.options.getString('reason', true);
     const raw = interaction.options.getInteger('count') ?? 1;
-    const countArg = Math.max(1, Math.min(10, raw)); // 1〜10
+    const countArg = Math.max(1, Math.min(15 , raw)); // 1〜10 // 上限
 
     const nextCount = addCountGuild(gid, user.id, countArg);
 
@@ -288,10 +289,11 @@ if (interaction.commandName === 'members') {
       });
       return;
     }
+    
   }
-  // /mp
-  if (interaction.commandName === 'mp') {
-    await handleMp(interaction);
+  // /room
+  if (interaction.commandName === 'room') {
+    await handleRoom(interaction);
     return;
   }
 });
