@@ -14,6 +14,9 @@ import {
 
 import { handleTop } from './commands/top';
 import { handleRoom } from './commands/daimongamecenter';
+import { handleHelp } from "./commands/help";
+import { handleStats } from "./commands/stats";
+
 
 
 // ---- ヘルパー（表示名取得） ----
@@ -294,6 +297,17 @@ if (interaction.commandName === 'members') {
   // /room
   if (interaction.commandName === 'room') {
     await handleRoom(interaction);
+    return;
+  }
+    // /help
+  if (interaction.commandName === 'help') {
+    await handleHelp(interaction);
+    return;
+  }
+
+  // /stats
+  if (interaction.commandName === 'stats') {
+    await handleStats(interaction);
     return;
   }
 });

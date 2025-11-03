@@ -6,6 +6,8 @@ const discord_js_1 = require("discord.js");
 const data_1 = require("./data");
 const top_1 = require("./commands/top");
 const daimongamecenter_1 = require("./commands/daimongamecenter");
+const help_1 = require("./commands/help");
+const stats_1 = require("./commands/stats");
 // ---- ヘルパー（表示名取得） ----
 async function getDisplayName(interaction, userId) {
     const g = interaction.guild;
@@ -241,6 +243,16 @@ client.on(discord_js_1.Events.InteractionCreate, async (interaction) => {
     // /room
     if (interaction.commandName === 'room') {
         await (0, daimongamecenter_1.handleRoom)(interaction);
+        return;
+    }
+    // /help
+    if (interaction.commandName === 'help') {
+        await (0, help_1.handleHelp)(interaction);
+        return;
+    }
+    // /stats
+    if (interaction.commandName === 'stats') {
+        await (0, stats_1.handleStats)(interaction);
         return;
     }
 });

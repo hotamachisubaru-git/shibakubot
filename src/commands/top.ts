@@ -5,9 +5,9 @@ import {
   ButtonBuilder,
   ButtonStyle,
   ComponentType,
-  type ChatInputCommandInteraction
+  type ChatInputCommandInteraction,
 } from 'discord.js';
-import { loadGuildStore } from '../data'; // ✅ 新しいデータ管理を使用
+import { loadGuildStore } from '../data';
 
 const PAGE_SIZE = 10;
 
@@ -25,86 +25,140 @@ async function getDisplayName(
   return u?.tag ?? userId;
 }
 
+/** 指定ページの埋め込みを作る（0-based page） */
+async function makePageEmbed(
+  interaction: ChatInputCommandInteraction,
+  sortedEntries: Array<[string, number]>,
+  page: number
+) {
+  const totalPages = Math.max(1, Math.ceil(sortedEntries.length / PAGE_SIZE));
+  const start = page * PAGE_SIZE;
+  const slice = sortedEntries.slice(start, start + PAGE_SIZE);
+
+  const lines = await Promise.all(
+    slice.map(async ([userId, count], i) => {
+      const rank = start + i + 1;
+      const name = await getDisplayName(interaction, userId);
+      return `#${rank} ${name} × **${count}**`;
+    })
+  );
+
+  return new EmbedBuilder()
+    .setTitle('しばきランキング')
+    .setDescription(lines.join('\n') || 'まだ誰も しばかれていません。')
+    .setFooter({
+      text: `Page ${page + 1}/${totalPages} • 更新: ${new Date().toLocaleString('ja-JP')}`,
+    });
+}
+
+/** ページに応じてボタン有効/無効を切り替える */
+function makeRow(page: number, totalPages: number) {
+  return new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId('top_prev')
+      .setLabel('◀')
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(page <= 0),
+    new ButtonBuilder()
+      .setCustomId('top_next')
+      .setLabel('▶')
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(page >= totalPages - 1)
+  );
+}
+
 export async function handleTop(interaction: ChatInputCommandInteraction) {
   if (!interaction.inGuild()) {
     await interaction.reply({
       content: 'このコマンドはサーバー内でのみ使用できます。',
-      ephemeral: true
+      ephemeral: true,
     });
     return;
   }
 
   const gid = interaction.guildId!;
-  const store = loadGuildStore(gid); // ✅ ギルドごとに読み込み
+  const store = loadGuildStore(gid);
   const entries = Object.entries(store.counts);
 
   if (entries.length === 0) {
-    await interaction.reply('まだ誰も しばかれていません。');
+    await interaction.reply({
+      content: 'まだ誰も しばかれていません。',
+      ephemeral: true,
+    });
     return;
   }
 
-  // ソート＆ランキング作成
+  // スコア降順に並べ替え
   const sorted = entries.sort((a, b) => b[1] - a[1]);
-  let page = 0;
 
-  const makePage = async (page: number) => {
-    const slice = sorted.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
-    const lines = await Promise.all(
-      slice.map(async ([userId, count], i) => {
-        const rank = page * PAGE_SIZE + i + 1;
-        const name = await getDisplayName(interaction, userId);
-        return `#${rank} ${name} × **${count}**`;
-      })
-    );
-
-    const embed = new EmbedBuilder()
-      .setTitle('しばきランキング')
-      .setDescription(lines.join('\n'))
-      .setFooter({
-        text: `Page ${page + 1}/${Math.ceil(sorted.length / PAGE_SIZE)} • 更新: ${new Date().toLocaleString('ja-JP')}`
-      });
-
-    return embed;
-  };
-
-  const embed = await makePage(0);
+  let page = 0; // 0-based
+  const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
+  const embed = await makePageEmbed(interaction, sorted, page);
 
   if (sorted.length <= PAGE_SIZE) {
-    await interaction.reply({ embeds: [embed] });
+    await interaction.reply({
+      embeds: [embed],
+      allowedMentions: { parse: [] },
+    });
     return;
   }
 
-  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setCustomId('prev').setLabel('◀').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('next').setLabel('▶').setStyle(ButtonStyle.Secondary)
-  );
+  const row = makeRow(page, totalPages);
 
-  const msg = await interaction.reply({
+  // fetchReply の非推奨警告を避けるため、reply → fetchReply の二段
+  await interaction.reply({
     embeds: [embed],
     components: [row],
-    fetchReply: true
+    allowedMentions: { parse: [] },
   });
+  const msg = await interaction.fetchReply();
 
+  // ボタン収集
   const collector = msg.createMessageComponentCollector({
     componentType: ComponentType.Button,
-    time: 60_000
+    time: 60_000,
+    filter: (i) => i.user.id === interaction.user.id,
   });
 
   collector.on('collect', async (btn) => {
-    if (btn.user.id !== interaction.user.id) {
-      await btn.reply({ content: 'このボタンは実行者専用です。', ephemeral: true });
-      return;
+    // ❶ まずACK（これが超重要）。Unknown interaction対策
+    try {
+      await btn.deferUpdate();
+    } catch {
+      // 既に ACK 済みなら無視
     }
 
-    page = btn.customId === 'next'
-      ? (page + 1) % Math.ceil(sorted.length / PAGE_SIZE)
-      : (page - 1 + Math.ceil(sorted.length / PAGE_SIZE)) % Math.ceil(sorted.length / PAGE_SIZE);
+    // ❷ ページ更新
+    const dir = btn.customId === 'top_prev' ? -1 : 1;
+    page = Math.max(0, Math.min(page + dir, totalPages - 1));
 
-    const newEmbed = await makePage(page);
-    await btn.update({ embeds: [newEmbed] });
+    // ❸ メッセージ編集（Interaction.update は使わない）
+    const newEmbed = await makePageEmbed(interaction, sorted, page);
+    await msg.edit({
+      embeds: [newEmbed],
+      components: [makeRow(page, totalPages)],
+      allowedMentions: { parse: [] },
+    });
   });
 
   collector.on('end', async () => {
-    await msg.edit({ components: [] });
+    // タイムアウトでボタン無効化
+    const disabledRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId('top_prev')
+        .setLabel('◀')
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(true),
+      new ButtonBuilder()
+        .setCustomId('top_next')
+        .setLabel('▶')
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(true)
+    );
+    try {
+      await msg.edit({ components: [disabledRow] });
+    } catch {
+      /* 削除されていたら無視 */
+    }
   });
 }

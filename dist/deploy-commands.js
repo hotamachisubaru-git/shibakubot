@@ -37,19 +37,6 @@ const commands = [
         .addSubcommand(sc => sc.setName('list').setDescription('免除リストを表示'))
         .setDMPermission(false),
     new discord_js_1.SlashCommandBuilder()
-        .setName('reset')
-        .setDescription('全データをリセット（開発者のみ）')
-        .setDMPermission(false),
-    new discord_js_1.SlashCommandBuilder()
-        .setName('export')
-        .setDescription('全データをエクスポート（管理者/開発者のみ）')
-        .setDMPermission(false),
-    new discord_js_1.SlashCommandBuilder()
-        .setName('import')
-        .setDescription('全データをインポート（管理者/開発者のみ）')
-        .addStringOption(o => o.setName('data').setDescription('エクスポートされたデータ').setRequired(true))
-        .setDMPermission(false),
-    new discord_js_1.SlashCommandBuilder()
         .setName('help')
         .setDescription('コマンド一覧を表示'),
     new discord_js_1.SlashCommandBuilder()
