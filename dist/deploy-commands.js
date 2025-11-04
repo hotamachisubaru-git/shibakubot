@@ -61,6 +61,14 @@ const commands = [
         .setRequired(true))
         .setDMPermission(false),
 ].map(c => c.toJSON());
+// Add /reset command (admin/owner only)
+commands.push(new discord_js_1.SlashCommandBuilder()
+    .setName('reset')
+    .setDescription('しばき回数をリセットします（管理者/開発者のみ）')
+    .addUserOption(o => o.setName('user').setDescription('対象ユーザー'))
+    .addBooleanOption(o => o.setName('all').setDescription('全員をリセットする場合はtrue'))
+    .setDMPermission(false)
+    .toJSON());
 const rest = new discord_js_1.REST({ version: '10' }).setToken(token);
 (async () => {
     try {

@@ -8,6 +8,7 @@ const top_1 = require("./commands/top");
 const daimongamecenter_1 = require("./commands/daimongamecenter");
 const help_1 = require("./commands/help");
 const stats_1 = require("./commands/stats");
+const reset_1 = require("./commands/reset");
 // ---- ヘルパー（表示名取得） ----
 async function getDisplayName(interaction, userId) {
     const g = interaction.guild;
@@ -71,7 +72,7 @@ client.on(discord_js_1.Events.InteractionCreate, async (interaction) => {
         }
         const reason = interaction.options.getString('reason', true);
         const raw = interaction.options.getInteger('count') ?? 1;
-        const countArg = Math.max(1, Math.min(15, raw)); // 1〜10 // 上限
+        const countArg = Math.max(1, Math.min(334, raw)); // 1〜10 // 上限
         const nextCount = (0, data_1.addCountGuild)(gid, user.id, countArg);
         // 表示名（ニックネーム優先）
         const member = await interaction.guild.members.fetch(user.id).catch(() => null);
@@ -253,6 +254,11 @@ client.on(discord_js_1.Events.InteractionCreate, async (interaction) => {
     // /stats
     if (interaction.commandName === 'stats') {
         await (0, stats_1.handleStats)(interaction);
+        return;
+    }
+    // /reset
+    if (interaction.commandName === 'reset') {
+        await (0, reset_1.handleReset)(interaction);
         return;
     }
 });

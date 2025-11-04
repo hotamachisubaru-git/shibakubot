@@ -16,6 +16,7 @@ import { handleTop } from './commands/top';
 import { handleRoom } from './commands/daimongamecenter';
 import { handleHelp } from "./commands/help";
 import { handleStats } from "./commands/stats";
+import { handleReset } from './commands/reset';
 
 
 
@@ -93,7 +94,7 @@ client.on(Events.InteractionCreate, async (interaction: Interaction) => {
 
     const reason = interaction.options.getString('reason', true);
     const raw = interaction.options.getInteger('count') ?? 1;
-    const countArg = Math.max(1, Math.min(15 , raw)); // 1〜10 // 上限
+    const countArg = Math.max(1, Math.min(10 , raw)); // 1〜10 // 上限
 
     const nextCount = addCountGuild(gid, user.id, countArg);
 
@@ -308,6 +309,12 @@ if (interaction.commandName === 'members') {
   // /stats
   if (interaction.commandName === 'stats') {
     await handleStats(interaction);
+    return;
+  }
+
+  // /reset
+  if (interaction.commandName === 'reset') {
+    await handleReset(interaction);
     return;
   }
 });

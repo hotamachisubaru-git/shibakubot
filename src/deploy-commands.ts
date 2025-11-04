@@ -73,6 +73,16 @@ const commands = [
 
 ].map(c => c.toJSON());
 
+// Add /reset command (admin/owner only)
+(commands as any[]).push(
+  new SlashCommandBuilder()
+    .setName('reset')
+    .setDescription('しばき回数をリセットします（管理者/開発者のみ）')
+    .addUserOption(o => o.setName('user').setDescription('対象ユーザー'))
+    .addBooleanOption(o => o.setName('all').setDescription('全員をリセットする場合はtrue'))
+    .setDMPermission(false)
+    .toJSON()
+);
 const rest = new REST({ version: '10' }).setToken(token);
 
 (async () => {
