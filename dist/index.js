@@ -72,7 +72,7 @@ client.on(discord_js_1.Events.InteractionCreate, async (interaction) => {
         }
         const reason = interaction.options.getString('reason', true);
         const raw = interaction.options.getInteger('count') ?? 1;
-        const countArg = Math.max(1, Math.min(334, raw)); // 1〜10 // 上限
+        const countArg = Math.max(1, Math.min(10, raw)); // 1〜10 // 上限
         const nextCount = (0, data_1.addCountGuild)(gid, user.id, countArg);
         // 表示名（ニックネーム優先）
         const member = await interaction.guild.members.fetch(user.id).catch(() => null);
