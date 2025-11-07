@@ -17,6 +17,8 @@ import { handleRoom } from './commands/daimongamecenter';
 import { handleHelp } from "./commands/help";
 import { handleStats } from "./commands/stats";
 import { handleReset } from './commands/reset';
+import { handleMenu } from './commands/menu';
+
 
 
 
@@ -317,6 +319,13 @@ if (interaction.commandName === 'members') {
     await handleReset(interaction);
     return;
   }
+    // /menu
+  if (interaction.commandName === 'menu') {
+    await handleMenu(interaction);
+    return;
+  }
+
+
 });
 
 client.login(process.env.TOKEN);

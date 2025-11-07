@@ -1,3 +1,4 @@
+// src/deploy-commands.ts
 import 'dotenv/config';
 import { REST, Routes, SlashCommandBuilder } from 'discord.js';
 
@@ -10,23 +11,29 @@ const guildIds = (process.env.GUILD_IDS ?? process.env.GUILD_ID ?? '')
 
 const commands = [
   new SlashCommandBuilder().setName('ping').setDescription('疎通確認'),
+
   new SlashCommandBuilder()
     .setName('sbk')
     .setDescription('指定したユーザーをしばく')
     .addUserOption(o => o.setName('user').setDescription('相手').setRequired(true))
     .addStringOption(o => o.setName('reason').setDescription('理由').setRequired(true))
     .addIntegerOption(o => o.setName('count').setDescription('回数（省略時1）')),
+
   new SlashCommandBuilder()
-    .setName('check').setDescription('指定ユーザーのしばかれ回数を見る')
+    .setName('check')
+    .setDescription('指定ユーザーのしばかれ回数を見る')
     .addUserOption(o => o.setName('user').setDescription('対象').setRequired(true)),
+
   new SlashCommandBuilder().setName('top').setDescription('しばきランキングを表示'),
   new SlashCommandBuilder().setName('members').setDescription('全メンバー（BOT除外）のしばかれ回数一覧'),
+
   new SlashCommandBuilder()
     .setName('control')
     .setDescription('回数を直接設定（管理者/開発者のみ）')
     .addUserOption(o => o.setName('user').setDescription('対象').setRequired(true))
     .addIntegerOption(o => o.setName('count').setDescription('設定する回数（0以上）').setRequired(true).setMinValue(0))
     .setDMPermission(false),
+
   new SlashCommandBuilder()
     .setName('immune')
     .setDescription('しばき免除を操作（管理者/開発者のみ）')
@@ -36,53 +43,23 @@ const commands = [
       .addUserOption(o => o.setName('user').setDescription('対象').setRequired(true)))
     .addSubcommand(sc => sc.setName('list').setDescription('免除リストを表示'))
     .setDMPermission(false),
+
+  new SlashCommandBuilder().setName('reset').setDescription('全データをリセット（開発者のみ）').setDMPermission(false),
+  new SlashCommandBuilder().setName('export').setDescription('全データをエクスポート（管理者/開発者のみ）').setDMPermission(false),
   new SlashCommandBuilder()
-    .setName('help')
-    .setDescription('コマンド一覧を表示'),
-  new SlashCommandBuilder()
-    .setName('stats')
-    .setDescription('しばき統計情報を表示（管理者/開発者のみ）')
-    .setDMPermission(false),
-  new SlashCommandBuilder()
-    .setName('room')
-    .setDescription('本日の大門なおゲーセンのルーム案内を表示')
-    .addStringOption(o =>
-      o.setName('game')
-        .setDescription('ゲーム名（選択）')
-        .setRequired(true)
-        // ★ Discordの選択肢は最大25件。必要に応じて増減してください
-        .addChoices(
-          { name: 'PPR', value: 'PPR' },
-          { name: 'PPS', value: 'PPS' },
-          { name: 'PPP', value: 'PPP' },
-        )
-    )
-    .addIntegerOption(o =>
-      o.setName('area')
-        .setDescription('エリア番号（1〜200）') // 例：156 など
-        .setRequired(true)
-        .setMinValue(1)
-        .setMaxValue(200)
-    )
-    .addStringOption(o =>
-      o.setName('password')
-        .setDescription('パスワード')
-        .setRequired(true)
-    )
+    .setName('import')
+    .setDescription('全データをインポート（管理者/開発者のみ）')
+    .addStringOption(o => o.setName('data').setDescription('エクスポートされたデータ').setRequired(true))
     .setDMPermission(false),
 
-].map(c => c.toJSON());
+  new SlashCommandBuilder().setName('help').setDescription('コマンド一覧を表示'),
+  new SlashCommandBuilder().setName('stats').setDescription('しばき統計情報を表示（管理者/開発者のみ）').setDMPermission(false),
 
-// Add /reset command (admin/owner only)
-(commands as any[]).push(
-  new SlashCommandBuilder()
-    .setName('reset')
-    .setDescription('しばき回数をリセットします（管理者/開発者のみ）')
-    .addUserOption(o => o.setName('user').setDescription('対象ユーザー'))
-    .addBooleanOption(o => o.setName('all').setDescription('全員をリセットする場合はtrue'))
-    .setDMPermission(false)
-    .toJSON()
-);
+  // ★ 追加: /menu
+  new SlashCommandBuilder().setName('menu').setDescription('クイックメニューを開く'),
+].map(c => c.toJSON()); // ← ここでしっかり配列を閉じる
+
+// ← ここからは配列の“外”なのでエラーにならない
 const rest = new REST({ version: '10' }).setToken(token);
 
 (async () => {
