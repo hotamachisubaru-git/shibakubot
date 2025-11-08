@@ -379,19 +379,23 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
               const targetId = pickedUserId!;
               const countArg = pickedCount;
 
-              const next = addCountGuild(gid, targetId, countArg);
-              const name = await displayName(submitted.guild, targetId);
+              
+                const next = addCountGuild(gid, targetId, countArg);
+                const name = await displayName(submitted.guild, targetId);
 
-              try {
-                await submitted.editReply({ content: '実行しました。', components: [] });
-              } catch {}
+                // 元の小パネルを閉じる（エラーは無視）
+                try {
+                await (panel as any).edit({ components: [] });
+                } catch {}
 
-              await submitted.followUp({
+                // ★ モーダルへの最初の応答は reply() を使う（followUp や update はNG）
+                await submitted.reply({
                 content: `**${name}** が ${countArg} 回 しばかれました！（累計 ${next} 回）\n理由: ${reason}`,
                 allowedMentions: { parse: [] },
-              });
+               
+                });
 
-              sub.stop('done');
+                sub.stop('done');
             }
           });
 
