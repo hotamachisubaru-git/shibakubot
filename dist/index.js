@@ -11,6 +11,7 @@ const daimongamecenter_1 = require("./commands/daimongamecenter");
 const help_1 = require("./commands/help");
 const reset_1 = require("./commands/reset");
 const stats_1 = require("./commands/stats");
+const config_1 = require("./config");
 // ---- ユーティリティ：表示名（ギルドのニックネーム優先）
 async function getDisplayName(interaction, userId) {
     const g = interaction.guild;
@@ -86,8 +87,8 @@ client.on(discord_js_1.Events.InteractionCreate, async (interaction) => {
             return;
         }
         const reason = interaction.options.getString('reason', true);
-        const raw = interaction.options.getInteger('count') ?? 1;
-        const countArg = Math.max(1, Math.min(100, raw)); // 上限は必要に応じて
+        const raw = interaction.options.getInteger('count') ?? config_1.SBK_MIN;
+        const countArg = Math.max(config_1.SBK_MIN, Math.min(config_1.SBK_MAX, raw)); // 上限は必要に応じて
         const nextCount = (0, data_1.addCountGuild)(gid, user.id, countArg);
         const member = await interaction.guild.members.fetch(user.id).catch(() => null);
         const display = member?.displayName ?? user.tag;

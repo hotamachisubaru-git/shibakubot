@@ -27,6 +27,7 @@ import { handleRoom } from './commands/daimongamecenter';
 import { handleHelp } from './commands/help';
 import { handleReset } from './commands/reset';
 import { handleStats } from './commands/stats';
+import { SBK_MAX, SBK_MIN } from './config';
 
 
 // ---- ユーティリティ：表示名（ギルドのニックネーム優先）
@@ -116,8 +117,8 @@ if (isImmune(gid, user.id) || (IMMUNE_IDS?.includes?.(user.id) ?? false)) {
     }
 
     const reason = interaction.options.getString('reason', true);
-    const raw = interaction.options.getInteger('count') ?? 1;
-    const countArg = Math.max(1, Math.min(100, raw)); // 上限は必要に応じて
+    const raw = interaction.options.getInteger('count') ?? SBK_MIN;
+    const countArg = Math.max(SBK_MIN, Math.min(SBK_MAX, raw)); // 上限は必要に応じて
 
     const nextCount = addCountGuild(gid, user.id, countArg);
 

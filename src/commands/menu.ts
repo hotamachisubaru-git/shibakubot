@@ -16,6 +16,7 @@ import {
 } from 'discord.js';
 
 import { loadGuildStore, addCountGuild } from '../data';
+import { SBK_MAX, SBK_MIN,SBK_OPTIONS } from '../config';
 
 // ===== 共通ユーティリティ =====
 const PAGE_SIZE = 10;
@@ -264,7 +265,7 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
             .setDescription(
               [
                 '主なコマンド：',
-                '• `/sbk @ユーザー 理由 [回数]` … しばく（回数は1〜20、理由は50文字まで）',
+                '• `/sbk @ユーザー 理由 [回数]` … しばく（回数は${SBK_MIN}～${SBK_MAX} 、理由は50文字まで）',
                 '• `/check @ユーザー` … しばかれ回数を見る',
                 '• `/top` … ランキングを表示',
                 '• `/members` … 全メンバー一覧（CSV付き・自分だけ見える）',
@@ -285,22 +286,22 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
               .setMaxValues(1)
           );
 
-          const rowCount =
-            new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+            const rowCount = new ActionRowBuilder<StringSelectMenuBuilder>()
+            .addComponents(
               new StringSelectMenuBuilder()
-                .setCustomId('sbk_pick_count')
-                .setPlaceholder('回数を選ぶ')
-                .addOptions(
-                  ...[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 15, 20].map((n) => ({
-                    label: `${n}回`,
-                    value: String(n),
-                  }))
-                )
+              .setCustomId('sbk_pick_count')
+              .setPlaceholder('回数を選ぶ')
+              .addOptions(
+                ...SBK_OPTIONS.map(n => ({
+                label: `${n}回`,
+                value: String(n)
+                }))
+              )
             );
 
           await btn.reply({
             content:
-              '🎯 しばく対象と回数を選んで、最後に「理由を入力して実行」を押してください。',
+              'しばく対象と回数を選んで、最後に「理由を入力して実行」を押してください。',
             components: [
               rowUser,
               rowCount,

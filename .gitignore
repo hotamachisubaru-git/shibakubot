@@ -16,3 +16,10 @@ dist/
 # Other
 logs/
 *.zip
+*.js
+*.json
+*.log
+*.tsbuildinfo
+.vscode/settings
+.DS_Store
+.idea/  
