@@ -27,57 +27,46 @@ async function makePageEmbed(interaction, sortedEntries, page) {
         return `#${rank} ${name} × **${count}**`;
     }));
     return new discord_js_1.EmbedBuilder()
-        .setTitle('しばきランキング')
+        .setTitle('🏆 しばきランキング')
         .setDescription(lines.join('\n') || 'まだ誰も しばかれていません。')
         .setFooter({
-        text: `Page ${page + 1}/${totalPages} • 更新: ${new Date().toLocaleString('ja-JP')}`,
+        text: `ページ ${page + 1}/${totalPages} • ${new Date().toLocaleString('ja-JP')}`,
     });
 }
-/** ページに応じてボタン有効/無効を切り替える */
+/** ページボタンの行を作る */
 function makeRow(page, totalPages) {
-    return new discord_js_1.ActionRowBuilder().addComponents(new discord_js_1.ButtonBuilder()
+    const row = new discord_js_1.ActionRowBuilder().addComponents(new discord_js_1.ButtonBuilder()
         .setCustomId('top_prev')
         .setLabel('◀')
         .setStyle(discord_js_1.ButtonStyle.Secondary)
-        .setDisabled(page <= 0), new discord_js_1.ButtonBuilder()
+        .setDisabled(page === 0), new discord_js_1.ButtonBuilder()
         .setCustomId('top_next')
         .setLabel('▶')
         .setStyle(discord_js_1.ButtonStyle.Secondary)
-        .setDisabled(page >= totalPages - 1));
+        .setDisabled(page === totalPages - 1 || totalPages <= 1));
+    return row;
 }
 async function handleTop(interaction) {
     if (!interaction.inGuild()) {
-        await interaction.reply({
-            content: 'このコマンドはサーバー内でのみ使用できます。',
-            ephemeral: true,
-        });
+        await interaction.reply({ content: 'サーバー内で使ってね。', ephemeral: true });
         return;
     }
-    const gid = interaction.guildId;
-    const store = (0, data_1.loadGuildStore)(gid);
+    await interaction.deferReply({ ephemeral: false });
+    const store = (0, data_1.loadGuildStore)(interaction.guildId);
     const entries = Object.entries(store.counts);
-    if (entries.length === 0) {
-        await interaction.reply({
-            content: 'まだ誰も しばかれていません。',
-            ephemeral: true,
+    const sorted = entries.sort((a, b) => b[1] - a[1]);
+    if (sorted.length === 0) {
+        await interaction.editReply({
+            embeds: [new discord_js_1.EmbedBuilder().setTitle('🏆 しばきランキング').setDescription('まだ誰も しばかれていません。')],
         });
         return;
     }
-    // スコア降順に並べ替え
-    const sorted = entries.sort((a, b) => b[1] - a[1]);
-    let page = 0; // 0-based
+    let page = 0;
     const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
     const embed = await makePageEmbed(interaction, sorted, page);
-    if (sorted.length <= PAGE_SIZE) {
-        await interaction.reply({
-            embeds: [embed],
-            allowedMentions: { parse: [] },
-        });
-        return;
-    }
     const row = makeRow(page, totalPages);
-    // fetchReply の非推奨警告を避けるため、reply → fetchReply の二段
-    await interaction.reply({
+    // 一部の環境で InteractionReply の components が取得できないエラーを避けるため、reply → fetchReply の二段
+    await interaction.editReply({
         embeds: [embed],
         components: [row],
         allowedMentions: { parse: [] },
@@ -119,11 +108,7 @@ async function handleTop(interaction) {
             .setLabel('▶')
             .setStyle(discord_js_1.ButtonStyle.Secondary)
             .setDisabled(true));
-        try {
-            await msg.edit({ components: [disabledRow] });
-        }
-        catch {
-            /* 削除されていたら無視 */
-        }
+        // メッセージの編集は、fetchReply が成功している前提で msg.edit を使う
+        await msg.edit({ components: [disabledRow] }).catch(() => null);
     });
 }

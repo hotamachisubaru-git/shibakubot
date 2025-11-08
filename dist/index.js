@@ -5,11 +5,13 @@ require("dotenv/config");
 const discord_js_1 = require("discord.js");
 const data_1 = require("./data");
 const top_1 = require("./commands/top");
+const members_1 = require("./commands/members");
+const menu_1 = require("./commands/menu");
 const daimongamecenter_1 = require("./commands/daimongamecenter");
 const help_1 = require("./commands/help");
-const stats_1 = require("./commands/stats");
 const reset_1 = require("./commands/reset");
-// ---- ヘルパー（表示名取得） ----
+const stats_1 = require("./commands/stats");
+// ---- ユーティリティ：表示名（ギルドのニックネーム優先）
 async function getDisplayName(interaction, userId) {
     const g = interaction.guild;
     if (g) {
@@ -22,16 +24,18 @@ async function getDisplayName(interaction, userId) {
 }
 // ---- クライアント設定 ----
 const client = new discord_js_1.Client({
-    intents: [
-        discord_js_1.GatewayIntentBits.Guilds,
-        discord_js_1.GatewayIntentBits.GuildMembers,
-        discord_js_1.GatewayIntentBits.GuildMessages,
-    ],
+    intents: [discord_js_1.GatewayIntentBits.Guilds, discord_js_1.GatewayIntentBits.GuildMembers],
 });
 // ---- 定数 ----
 const LOG_CHANNEL_ID = process.env.LOG_CHANNEL_ID || '';
-const OWNER_IDS = (process.env.OWNER_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
-const IMMUNE_IDS = (process.env.IMMUNE_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
+const OWNER_IDS = (process.env.OWNER_IDS || '')
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean);
+const IMMUNE_IDS = (process.env.IMMUNE_IDS || '')
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean);
 client.once(discord_js_1.Events.ClientReady, b => {
     console.log(`✅ ログイン完了: ${b.user.tag}`);
 });
@@ -39,12 +43,13 @@ client.once(discord_js_1.Events.ClientReady, b => {
 client.on(discord_js_1.Events.InteractionCreate, async (interaction) => {
     if (!interaction.isChatInputCommand())
         return;
+    const name = interaction.commandName;
     // /ping
-    if (interaction.commandName === 'ping') {
+    if (name === 'ping') {
         const t0 = performance.now();
         await interaction.deferReply({ ephemeral: true });
         const apiPing = Math.round(performance.now() - t0);
-        // WS pingを最大5秒待ってみる
+        // WS ping（最大5秒リトライ）
         let wsPing = interaction.client.ws?.ping ?? -1;
         for (let waited = 0; wsPing < 0 && waited < 5000; waited += 200) {
             await new Promise(r => setTimeout(r, 200));
@@ -55,26 +60,35 @@ client.on(discord_js_1.Events.InteractionCreate, async (interaction) => {
         return;
     }
     // /sbk
-    if (interaction.commandName === 'sbk') {
+    if (name === 'sbk') {
         if (!interaction.inGuild()) {
             await interaction.reply({ content: 'サーバー内で使ってね。', ephemeral: true });
             return;
         }
         const gid = interaction.guildId;
         const user = interaction.options.getUser('user', true);
+        // BOTは不可
         if (user.bot || user.id === interaction.client.user?.id) {
-            await interaction.reply({ content: 'BOTは対象外です。', ephemeral: true, allowedMentions: { parse: [] } });
+            await interaction.reply({
+                content: 'BOTは対象外です。',
+                ephemeral: true,
+                allowedMentions: { parse: [] },
+            });
             return;
         }
-        if ((0, data_1.isImmune)(gid, user.id, IMMUNE_IDS)) {
-            await interaction.reply({ content: 'このユーザーはしばき免除です。', ephemeral: true, allowedMentions: { parse: [] } });
+        // 免除チェック（グローバル + ギルド）
+        if ((0, data_1.isImmune)(gid, user.id) || (IMMUNE_IDS?.includes?.(user.id) ?? false)) {
+            await interaction.reply({
+                content: 'このユーザーはしばき免除です。',
+                ephemeral: true,
+                allowedMentions: { parse: [] },
+            });
             return;
         }
         const reason = interaction.options.getString('reason', true);
         const raw = interaction.options.getInteger('count') ?? 1;
-        const countArg = Math.max(1, Math.min(10, raw)); // 1〜10 // 上限
+        const countArg = Math.max(1, Math.min(100, raw)); // 上限は必要に応じて
         const nextCount = (0, data_1.addCountGuild)(gid, user.id, countArg);
-        // 表示名（ニックネーム優先）
         const member = await interaction.guild.members.fetch(user.id).catch(() => null);
         const display = member?.displayName ?? user.tag;
         await interaction.reply(`**${display}** が ${countArg} 回 しばかれました！（累計 ${nextCount} 回）\n理由: ${reason}`);
@@ -87,7 +101,7 @@ client.on(discord_js_1.Events.InteractionCreate, async (interaction) => {
         return;
     }
     // /check
-    if (interaction.commandName === 'check') {
+    if (name === 'check') {
         if (!interaction.inGuild()) {
             await interaction.reply({ content: 'サーバー内で使用してください。', ephemeral: true });
             return;
@@ -104,66 +118,53 @@ client.on(discord_js_1.Events.InteractionCreate, async (interaction) => {
         });
         return;
     }
-    // /top
-    if (interaction.commandName === 'top') {
-        await (0, top_1.handleTop)(interaction); // ※ handleTop 内も guildId ベースにしておく
+    // ========================
+    // 外部ファイルに振り分ける系
+    // ========================
+    if (interaction.commandName === 'menu') {
+        await (0, menu_1.handleMenu)(interaction);
         return;
     }
-    // /members
     if (interaction.commandName === 'members') {
-        if (!interaction.inGuild()) {
-            await interaction.reply({ content: 'サーバー内で使用してください。', ephemeral: true });
-            return;
-        }
-        try {
-            // ★ ここを「ephemeral: true」に
-            await interaction.deferReply({ ephemeral: true });
-            const store = (0, data_1.loadGuildStore)(interaction.guildId);
-            const members = await interaction.guild.members.fetch();
-            const humans = members.filter(m => !m.user.bot);
-            const rows = humans.map(m => ({
-                tag: m.displayName || m.user.tag,
-                id: m.id,
-                count: store.counts[m.id] ?? 0
-            })).sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
-            const top = rows.slice(0, 20);
-            const lines = top.map((r, i) => `#${i + 1} \`${r.tag}\` × **${r.count}**`);
-            const embed = {
-                title: '全メンバーのしばかれ回数（BOT除外）',
-                description: lines.join('\n') || 'メンバーがいません（または全員 0）',
-                footer: { text: `合計 ${rows.length} 名 • ${new Date().toLocaleString('ja-JP')}` }
-            };
-            // CSV も ephemeral で添付できる
-            const header = 'rank,tag,id,count';
-            const csv = [header, ...rows.map((r, i) => `${i + 1},${r.tag},${r.id},${r.count}`)].join('\n');
-            const file = new discord_js_1.AttachmentBuilder(Buffer.from(csv, 'utf8'), { name: 'members_counts.csv' });
-            await interaction.editReply({
-                embeds: [embed],
-                files: [file],
-                allowedMentions: { parse: [] } // 念のためメンション抑制
-            });
-        }
-        catch (e) {
-            console.error(e);
-            if (interaction.deferred) {
-                await interaction.editReply('エラーが発生しました。');
-            }
-            else {
-                await interaction.reply({ content: 'エラーが発生しました。', ephemeral: true });
-            }
-        }
+        await (0, members_1.handleMembers)(interaction);
+        return;
+    }
+    if (interaction.commandName === 'room') {
+        await (0, daimongamecenter_1.handleRoom)(interaction);
+        return;
+    }
+    if (interaction.commandName === 'help') {
+        await (0, help_1.handleHelp)(interaction);
+        return;
+    }
+    if (interaction.commandName === 'stats') {
+        await (0, stats_1.handleStats)(interaction);
+        return;
+    }
+    if (interaction.commandName === 'reset') {
+        await (0, reset_1.handleReset)(interaction);
+        return;
+    }
+    if (interaction.commandName === 'top') {
+        await (0, top_1.handleTop)(interaction);
         return;
     }
     // /control（管理者 / 開発者のみ）
-    if (interaction.commandName === 'control') {
+    if (name === 'control') {
         if (!interaction.inGuild()) {
-            await interaction.reply({ content: 'このコマンドはサーバー内でのみ使用できます。', ephemeral: true });
+            await interaction.reply({
+                content: 'このコマンドはサーバー内でのみ使用できます。',
+                ephemeral: true,
+            });
             return;
         }
         const isAdmin = interaction.memberPermissions?.has(discord_js_1.PermissionFlagsBits.Administrator) ?? false;
         const isOwner = OWNER_IDS.includes(interaction.user.id);
         if (!isAdmin && !isOwner) {
-            await interaction.reply({ content: '権限がありません。（管理者または開発者のみ）', ephemeral: true });
+            await interaction.reply({
+                content: '権限がありません。（管理者または開発者のみ）',
+                ephemeral: true,
+            });
             return;
         }
         const gid = interaction.guildId;
@@ -173,26 +174,31 @@ client.on(discord_js_1.Events.InteractionCreate, async (interaction) => {
         const store = (0, data_1.loadGuildStore)(gid);
         store.counts[target.id] = newCount;
         (0, data_1.saveGuildStore)(gid, store);
-        // 表示名優先
         const member = await interaction.guild.members.fetch(target.id).catch(() => null);
         const displayName = member?.displayName ?? target.tag;
         await interaction.reply({
             content: `**${displayName}** のしばかれ回数を **${newCount} 回** に設定しました。`,
             allowedMentions: { parse: [] },
-            ephemeral: true
+            ephemeral: true,
         });
         return;
     }
     // /immune（管理者 / 開発者のみ）
-    if (interaction.commandName === 'immune') {
+    if (name === 'immune') {
         if (!interaction.inGuild()) {
-            await interaction.reply({ content: 'このコマンドはサーバー内でのみ使用できます。', ephemeral: true });
+            await interaction.reply({
+                content: 'このコマンドはサーバー内でのみ使用できます。',
+                ephemeral: true,
+            });
             return;
         }
         const isAdmin = interaction.memberPermissions?.has(discord_js_1.PermissionFlagsBits.Administrator) ?? false;
         const isOwner = OWNER_IDS.includes(interaction.user.id);
         if (!isAdmin && !isOwner) {
-            await interaction.reply({ content: '権限がありません。（管理者または開発者のみ）', ephemeral: true });
+            await interaction.reply({
+                content: '権限がありません。（管理者または開発者のみ）',
+                ephemeral: true,
+            });
             return;
         }
         const sub = interaction.options.getSubcommand();
@@ -205,8 +211,11 @@ client.on(discord_js_1.Events.InteractionCreate, async (interaction) => {
             }
             const added = (0, data_1.addImmuneId)(gid, u.id);
             await interaction.reply({
-                content: added ? `\`${u.tag}\` を免除リストに追加しました。` : `\`${u.tag}\` はすでに免除リストに存在します。`,
-                allowedMentions: { parse: [] }, ephemeral: true
+                content: added
+                    ? `\`${u.tag}\` を免除リストに追加しました。`
+                    : `\`${u.tag}\` はすでに免除リストに存在します。`,
+                allowedMentions: { parse: [] },
+                ephemeral: true,
             });
             return;
         }
@@ -215,7 +224,8 @@ client.on(discord_js_1.Events.InteractionCreate, async (interaction) => {
             const removed = (0, data_1.removeImmuneId)(gid, u.id);
             await interaction.reply({
                 content: removed ? `\`${u.tag}\` を免除リストから削除しました。` : `\`${u.tag}\` は免除リストにありません。`,
-                allowedMentions: { parse: [] }, ephemeral: true
+                allowedMentions: { parse: [] },
+                ephemeral: true,
             });
             return;
         }
@@ -229,37 +239,20 @@ client.on(discord_js_1.Events.InteractionCreate, async (interaction) => {
                 ? global.map((x, i) => `${i + 1}. <@${x}> (\`${x}\`)`).join('\n')
                 : '（なし）';
             await interaction.reply({
-                embeds: [{
+                embeds: [
+                    {
                         title: '🛡️ しばき免除リスト',
                         fields: [
                             { name: 'ギルド免除', value: textLocal },
-                            { name: 'グローバル免除（.env IMMUNE_IDS）', value: textGlobal }
-                        ]
-                    }],
-                allowedMentions: { parse: [] }, ephemeral: true
+                            { name: 'グローバル免除（.env IMMUNE_IDS）', value: textGlobal },
+                        ],
+                    },
+                ],
+                allowedMentions: { parse: [] },
+                ephemeral: true,
             });
             return;
         }
-    }
-    // /room
-    if (interaction.commandName === 'room') {
-        await (0, daimongamecenter_1.handleRoom)(interaction);
-        return;
-    }
-    // /help
-    if (interaction.commandName === 'help') {
-        await (0, help_1.handleHelp)(interaction);
-        return;
-    }
-    // /stats
-    if (interaction.commandName === 'stats') {
-        await (0, stats_1.handleStats)(interaction);
-        return;
-    }
-    // /reset
-    if (interaction.commandName === 'reset') {
-        await (0, reset_1.handleReset)(interaction);
-        return;
     }
 });
 client.login(process.env.TOKEN);
