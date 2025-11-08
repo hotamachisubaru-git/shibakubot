@@ -54,9 +54,5 @@ export async function handleReset(interaction: ChatInputCommandInteraction) {
     return;
   }
 
-  await interaction.reply({
-    content: '使い方: `/reset user:<ユーザー>` または `/reset all:true`',
-    ephemeral: true,
-  });
+  await interaction.reply({ content: 'リセット対象（`all: true` または `user`）を指定してください。', ephemeral: true });
 }
-

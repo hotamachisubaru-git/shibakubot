@@ -13,7 +13,7 @@ export async function handleRoom(interaction: ChatInputCommandInteraction) {
   // 入力値取得
   const game = interaction.options.getString('game', true);
   const area = interaction.options.getInteger('area', true);
-  const password = interaction.options.getString('password', true);
+  const password = interaction.options.getString('pass', true); // ★ コマンド定義に合わせて 'password' から 'pass' に変更が必要かもしれません
 
   // 表示文言を作成
   const text = `本日は**${game}**の**${area}**で、**${password}**で入れます。`;

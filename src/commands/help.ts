@@ -12,6 +12,7 @@ export async function handleHelp(interaction: ChatInputCommandInteraction) {
     { name: "/room", desc: "本日のルーム情報を投稿します" },
     { name: "/help", desc: "コマンド一覧を表示します" },
     { name: "/stats", desc: "全体統計を確認します（管理者専用）" },
+    { name: "/menu", desc: "クイック操作メニューを開きます" }, // ★ menu を追加
   ];
 
   const lines = commands.map((c) => `• **${c.name}** — ${c.desc}`).join("\n");

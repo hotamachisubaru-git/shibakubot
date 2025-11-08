@@ -48,14 +48,15 @@ export async function handleStats(interaction: ChatInputCommandInteraction) {
 
   const embed = new EmbedBuilder()
     .setTitle("📊 しばき統計情報")
+    .setDescription("現在のサーバー全体のしばかれ回数の統計です。")
     .addFields(
       { name: "総しばき回数", value: `${total} 回`, inline: true },
-      { name: "対象人数", value: `${members} 人`, inline: true },
-      { name: "平均しばかれ回数", value: `${average} 回`, inline: true },
-      { name: "上位5名", value: top }
+      { name: "登録メンバー数", value: `${members} 人`, inline: true },
+      { name: "平均しばかれ回数", value: `${average} 回/人`, inline: true },
+      { name: "しばかれ回数 TOP 5", value: top }
     )
-    .setFooter({ text: `生成: ${new Date().toLocaleString("ja-JP")}` })
-    .setColor(0xff8800);
+    .setFooter({ text: `最終更新: ${new Date().toLocaleString("ja-JP")}` })
+    .setColor(0x00ff7f);
 
   await interaction.reply({ embeds: [embed], ephemeral: true });
 }

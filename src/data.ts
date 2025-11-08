@@ -38,18 +38,15 @@ export function loadGuildStore(gid: string): GuildStore {
       // 壊れていたら初期化し直す
     }
   }
-  const init: GuildStore = { counts: {}, immune: [] };
-  fs.writeFileSync(file, JSON.stringify(init, null, 2));
-  return init;
+  return normalizeStore({});
 }
 
 export function saveGuildStore(gid: string, store: GuildStore) {
-  // 念のため正規化してから保存
-  const normalized = normalizeStore(store);
-  fs.writeFileSync(guildFile(gid), JSON.stringify(normalized, null, 2));
+  const file = guildFile(gid);
+  fs.writeFileSync(file, JSON.stringify(store, null, 2), 'utf8');
 }
 
-/** by 回まとめて加算（既定1）→ 新しい累計を返す */
+/** しばかれ回数を増やす */
 export function addCountGuild(gid: string, userId: string, by = 1): number {
   const store = loadGuildStore(gid);
   const next = (store.counts[userId] ?? 0) + by;
@@ -86,15 +83,12 @@ export function removeImmuneId(gid: string, userId: string) {
   return changed;
 }
 
-/** グローバル免除 + ギルド免除を判定（globalImmuneIds 未定義でもOK） */
-export function isImmune(
-  guildId: string | undefined,
-  userId: string,
-  globalImmuneIds?: string[]
-): boolean {
-  const globals = Array.isArray(globalImmuneIds) ? globalImmuneIds : [];
-  if (globals.includes(userId)) return true;
-  if (!guildId) return false;
-  const locals = getImmuneList(guildId);         // ここは常に配列
-  return locals.includes(userId);
+export function isImmune(gid: string, userId: string): boolean {
+  return getImmuneList(gid).includes(userId);
 }
+
+// 開発者ID（グローバル免除リスト。任意）
+export const IMMUNE_IDS = (process.env.IMMUNE_IDS || '')
+  .split(',')
+  .map(s => s.trim())
+  .filter(Boolean);
