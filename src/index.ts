@@ -105,7 +105,8 @@ client.on(Events.InteractionCreate, async interaction => {
       return;
     }
     // 免除チェック（グローバル + ギルド）
-    if (isImmune(gid, user.id, IMMUNE_IDS)) {
+if (isImmune(gid, user.id) || (IMMUNE_IDS?.includes?.(user.id) ?? false)) {
+
       await interaction.reply({
         content: 'このユーザーはしばき免除です。',
         ephemeral: true,
@@ -116,7 +117,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
     const reason = interaction.options.getString('reason', true);
     const raw = interaction.options.getInteger('count') ?? 1;
-    const countArg = Math.max(1, Math.min(20, raw)); // 上限は必要に応じて
+    const countArg = Math.max(1, Math.min(100, raw)); // 上限は必要に応じて
 
     const nextCount = addCountGuild(gid, user.id, countArg);
 
