@@ -57,7 +57,7 @@ function buildMenu(min: number, max: number) {
   const row2 = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setCustomId('menu_sbk').setLabel('しばく').setStyle(ButtonStyle.Danger),
     new ButtonBuilder().setCustomId('menu_room').setLabel('ルーム告知').setStyle(ButtonStyle.Success),
-    new ButtonBuilder().setCustomId('menu_limit').setLabel('上限設定').setStyle(ButtonStyle.Secondary), // ★追加
+    new ButtonBuilder().setCustomId('menu_limit').setLabel('上限設定').setStyle(ButtonStyle.Secondary),
   );
 
   const row3 = new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -132,11 +132,11 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
   }
 
   const gid = interaction.guildId!;
-  // しばく回数の現在範囲（ギルド設定→なければ既定）
   let { min: SBK_MIN, max: SBK_MAX } = getSbkRange(gid);
 
   let built = buildMenu(SBK_MIN, SBK_MAX);
-  await interaction.reply({ embeds: [built.embed], components: built.rows, ephemeral: true });
+  await interaction.deferReply({ ephemeral: true });
+  await interaction.editReply({ embeds: [built.embed], components: built.rows });
   const msg = await interaction.fetchReply();
 
   const collector = interaction.channel!.createMessageComponentCollector({
@@ -215,7 +215,6 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
 
         /* ===== しばく（UI） ===== */
         case 'menu_sbk': {
-          // 現在の範囲で回数セレクトを作る
           const countOptions = Array.from({ length: SBK_MAX - SBK_MIN + 1 }, (_, i) => i + SBK_MIN);
 
           const rowUser = new ActionRowBuilder<UserSelectMenuBuilder>()
@@ -279,6 +278,7 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
 
               const reason = submitted.fields.getTextInputValue('reason').trim();
               const gid2 = submitted.guildId!;
+              // ★ addCountGuild は「3引数」だけ渡す
               const next = addCountGuild(gid2, pickedUserId!, pickedCount);
               const name = await displayName(submitted.guild, pickedUserId!);
 
@@ -298,7 +298,7 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
           break;
         }
 
-        /* ===== 上限設定（管理者のみ） ===== */
+        /* ===== 上限設定（管理者/開発者） ===== */
         case 'menu_limit': {
           const isAdmin = btn.memberPermissions?.has(PermissionFlagsBits.Administrator) ?? false;
           const isDev = OWNER_IDS.includes(btn.user.id);
@@ -312,7 +312,7 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
             new ActionRowBuilder<TextInputBuilder>().addComponents(
               new TextInputBuilder()
                 .setCustomId('min')
-                .setLabel(`最小（現在 ${SBK_MIN}）`)
+                .setLabel('最小（1〜25）')
                 .setStyle(TextInputStyle.Short)
                 .setPlaceholder('1〜25')
                 .setRequired(true)
@@ -320,7 +320,7 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
             new ActionRowBuilder<TextInputBuilder>().addComponents(
               new TextInputBuilder()
                 .setCustomId('max')
-                .setLabel(`最大（現在 ${SBK_MAX}）`)
+                .setLabel('最大（最小以上〜25）')
                 .setStyle(TextInputStyle.Short)
                 .setPlaceholder('1〜25 / 最小以上')
                 .setRequired(true)
@@ -329,8 +329,7 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
 
           await btn.showModal(modal);
           const submitted = await btn.awaitModalSubmit({
-            time: 60_000,
-            filter: (m) => m.user.id === btn.user.id,
+            time: 60_000, filter: (m) => m.user.id === btn.user.id,
           }).catch(() => null);
           if (!submitted) return;
 
@@ -344,9 +343,8 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
           const { min, max } = setSbkRange(gid, minIn, maxIn);
           SBK_MIN = min; SBK_MAX = max;
 
-          // メニューを最新値で再描画
           built = buildMenu(SBK_MIN, SBK_MAX);
-          try { await interaction.editReply({ embeds: [built.embed], components: built.rows }); } catch {}
+          await interaction.editReply({ embeds: [built.embed], components: built.rows });
 
           await submitted.reply({ content: `✅ しばく回数の範囲を **${min}〜${max}** に変更しました。`, ephemeral: true });
           break;

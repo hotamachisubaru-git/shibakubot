@@ -1,3 +1,4 @@
+// src/index.ts
 import 'dotenv/config';
 import {
   Client, GatewayIntentBits, Events,
@@ -5,9 +6,9 @@ import {
 } from 'discord.js';
 
 import {
-  loadGuildStore, saveGuildStore, addCountGuild,
-  isImmune, getImmuneList, addImmuneId, removeImmuneId,
-  getSbkRange, // ★ これだけ使う
+  loadGuildStore, setCountGuild, isImmune, addCountGuild,
+  getImmuneList, addImmuneId, removeImmuneId,
+  getSbkRange,
 } from './data';
 
 import { handleTop } from './commands/top';
@@ -83,13 +84,17 @@ client.on(Events.InteractionCreate, async interaction => {
       return;
     }
 
-    // 免除チェック（グローバル + ギルド）
-    if (isImmune(gid, user.id) || (IMMUNE_IDS?.includes?.(user.id) ?? false)) {
+    // 免除チェック（ギルド + グローバル）
+    const isImmune =
+      getImmuneList(gid).includes(user.id) ||
+      (IMMUNE_IDS?.includes?.(user.id) ?? false);
+
+    if (isImmune) {
       await interaction.reply({ content: 'このユーザーはしばき免除です。', ephemeral: true, allowedMentions: { parse: [] } });
       return;
     }
 
-    // ★ ギルドごとの上限を参照
+    // ギルドごとの上限を参照
     const { min: SBK_MIN, max: SBK_MAX } = getSbkRange(gid);
     const countArg = Math.max(SBK_MIN, Math.min(SBK_MAX, interaction.options.getInteger('count') ?? SBK_MIN));
 
@@ -158,10 +163,11 @@ client.on(Events.InteractionCreate, async interaction => {
     const target = interaction.options.getUser('user', true);
     const newCountRaw = interaction.options.getInteger('count', true);
     const newCount = Math.max(0, newCountRaw);
+    const after = setCountGuild(gid, target.id, newCount);
 
     const store = loadGuildStore(gid);
     store.counts[target.id] = newCount;
-    saveGuildStore(gid, store);
+    
 
     const member = await interaction.guild!.members.fetch(target.id).catch(() => null);
     const displayName = member?.displayName ?? target.tag;

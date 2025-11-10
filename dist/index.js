@@ -1,5 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+// src/index.ts
 require("dotenv/config");
 const discord_js_1 = require("discord.js");
 const data_1 = require("./data");
@@ -64,12 +65,14 @@ client.on(discord_js_1.Events.InteractionCreate, async (interaction) => {
             await interaction.reply({ content: 'BOTは対象外です。', ephemeral: true, allowedMentions: { parse: [] } });
             return;
         }
-        // 免除チェック（グローバル + ギルド）
-        if ((0, data_1.isImmune)(gid, user.id) || (IMMUNE_IDS?.includes?.(user.id) ?? false)) {
+        // 免除チェック（ギルド + グローバル）
+        const isImmune = (0, data_1.getImmuneList)(gid).includes(user.id) ||
+            (IMMUNE_IDS?.includes?.(user.id) ?? false);
+        if (isImmune) {
             await interaction.reply({ content: 'このユーザーはしばき免除です。', ephemeral: true, allowedMentions: { parse: [] } });
             return;
         }
-        // ★ ギルドごとの上限を参照
+        // ギルドごとの上限を参照
         const { min: SBK_MIN, max: SBK_MAX } = (0, data_1.getSbkRange)(gid);
         const countArg = Math.max(SBK_MIN, Math.min(SBK_MAX, interaction.options.getInteger('count') ?? SBK_MIN));
         const nextCount = (0, data_1.addCountGuild)(gid, user.id, countArg);
@@ -148,9 +151,9 @@ client.on(discord_js_1.Events.InteractionCreate, async (interaction) => {
         const target = interaction.options.getUser('user', true);
         const newCountRaw = interaction.options.getInteger('count', true);
         const newCount = Math.max(0, newCountRaw);
+        const after = (0, data_1.setCountGuild)(gid, target.id, newCount);
         const store = (0, data_1.loadGuildStore)(gid);
         store.counts[target.id] = newCount;
-        (0, data_1.saveGuildStore)(gid, store);
         const member = await interaction.guild.members.fetch(target.id).catch(() => null);
         const displayName = member?.displayName ?? target.tag;
         await interaction.reply({

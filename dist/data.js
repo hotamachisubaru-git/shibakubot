@@ -3,104 +3,155 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.isImmune = isImmune;
-exports.loadGuildStore = loadGuildStore;
-exports.saveGuildStore = saveGuildStore;
-exports.addCountGuild = addCountGuild;
+exports.getAllCounts = getAllCounts;
 exports.getImmuneList = getImmuneList;
+exports.addCountGuild = addCountGuild;
+exports.setCountGuild = setCountGuild;
 exports.addImmuneId = addImmuneId;
 exports.removeImmuneId = removeImmuneId;
+exports.isImmune = isImmune;
 exports.getSbkRange = getSbkRange;
 exports.setSbkRange = setSbkRange;
+exports.loadGuildStore = loadGuildStore;
+// src/data.ts
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
-const config_1 = require("./config/config");
+const better_sqlite3_1 = __importDefault(require("better-sqlite3"));
 const DATA_DIR = path_1.default.join(process.cwd(), 'data', 'guilds');
-function ensureDir(p) {
-    if (!fs_1.default.existsSync(p))
-        fs_1.default.mkdirSync(p, { recursive: true });
+function ensureDir(p) { if (!fs_1.default.existsSync(p))
+    fs_1.default.mkdirSync(p, { recursive: true }); }
+function dbFile(gid) { ensureDir(DATA_DIR); return path_1.default.join(DATA_DIR, `${gid}.db`); }
+// 1. DB オープン＆スキーマ
+function openDb(gid) {
+    const db = new better_sqlite3_1.default(dbFile(gid));
+    db.pragma('journal_mode = WAL');
+    db.exec(`
+    CREATE TABLE IF NOT EXISTS counts(
+      userId   TEXT PRIMARY KEY,
+      count    INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE TABLE IF NOT EXISTS immune(
+      userId   TEXT PRIMARY KEY
+    );
+    CREATE TABLE IF NOT EXISTS settings(
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS logs(
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      at INTEGER NOT NULL,
+      actor TEXT,
+      target TEXT,
+      reason TEXT,
+      delta INTEGER NOT NULL
+    );
+  `);
+    return db;
 }
-function guildFile(gid) {
-    ensureDir(DATA_DIR);
-    return path_1.default.join(DATA_DIR, `${gid}.json`);
-}
-// しばき免除に含まれているか（ギルドローカル）
-function isImmune(gid, userId) {
-    const s = loadGuildStore(gid);
-    return Array.isArray(s.immune) && s.immune.includes(userId);
-}
-function loadGuildStore(gid) {
-    const file = guildFile(gid);
-    if (fs_1.default.existsSync(file)) {
-        try {
-            const v = JSON.parse(fs_1.default.readFileSync(file, 'utf8'));
-            // マイグレーション: 欠けてたら初期化
-            v.counts || (v.counts = {});
-            v.immune || (v.immune = []);
-            v.settings || (v.settings = {});
-            return v;
-        }
-        catch { /* fallthrough */ }
+// 2. 読み取り
+// ① 全件取得
+function getAllCounts(gid) {
+    const db = openDb(gid);
+    const rows = db
+        .prepare(`SELECT userId, count FROM counts ORDER BY count DESC`)
+        .all(); // ←型を明示
+    const map = {};
+    for (const r of rows) { // r は {userId, count}
+        map[r.userId] = r.count;
     }
-    const init = { counts: {}, immune: [], settings: {} };
-    fs_1.default.writeFileSync(file, JSON.stringify(init, null, 2));
-    return init;
+    return map;
 }
-function saveGuildStore(gid, store) {
-    fs_1.default.writeFileSync(guildFile(gid), JSON.stringify(store, null, 2));
+function getImmuneList(gid) {
+    const db = openDb(gid);
+    const rows = db
+        .prepare(`SELECT userId FROM immune`)
+        .all(); // ←型を明示
+    return rows.map(r => r.userId);
 }
-/** しばきカウント加算 */
-function addCountGuild(gid, userId, by = 1) {
-    const store = loadGuildStore(gid);
-    const next = (store.counts[userId] ?? 0) + by;
-    store.counts[userId] = next;
-    saveGuildStore(gid, store);
-    return next;
+// 3. しばき加算（UPSERT）
+function addCountGuild(gid, userId, by = 1, actor, reason) {
+    const db = openDb(gid);
+    const tx = db.transaction(() => {
+        db.prepare(`
+      INSERT INTO counts(userId, count) VALUES(?, ?)
+      ON CONFLICT(userId) DO UPDATE SET count = count + excluded.count
+    `).run(userId, by);
+        db.prepare(`INSERT INTO logs(at, actor, target, reason, delta) VALUES(?,?,?,?,?)`)
+            .run(Date.now(), actor ?? null, userId, reason ?? null, by);
+        const row = db
+            .prepare(`SELECT count FROM counts WHERE userId=?`)
+            .get(userId); // ←型を明示
+        return row?.count ?? by;
+    });
+    return tx();
 }
-/** 免除周り（既存そのまま） */
-function getImmuneList(guildId) {
-    if (!guildId)
-        return [];
-    const s = loadGuildStore(guildId);
-    return Array.isArray(s.immune) ? s.immune : [];
+// 4. しばき値を直接セット（/control 用）
+function setCountGuild(gid, userId, value) {
+    const db = openDb(gid);
+    db.prepare(`
+    INSERT INTO counts(userId, count) VALUES(?, ?)
+    ON CONFLICT(userId) DO UPDATE SET count = excluded.count
+  `).run(userId, Math.max(0, value));
+    const row = db
+        .prepare(`SELECT count FROM counts WHERE userId=?`)
+        .get(userId); // ←型を明示
+    return row?.count ?? 0;
 }
+// 5. 免除
 function addImmuneId(gid, userId) {
-    const s = loadGuildStore(gid);
-    if (s.immune.includes(userId))
-        return false;
-    s.immune.push(userId);
-    saveGuildStore(gid, s);
-    return true;
+    const db = openDb(gid);
+    const info = db.prepare(`INSERT OR IGNORE INTO immune(userId) VALUES(?)`).run(userId);
+    return info.changes > 0;
 }
 function removeImmuneId(gid, userId) {
-    const s = loadGuildStore(gid);
-    const n = s.immune.filter(x => x !== userId);
-    const changed = n.length !== s.immune.length;
-    if (changed) {
-        s.immune = n;
-        saveGuildStore(gid, s);
-    }
-    return changed;
+    const db = openDb(gid);
+    return db.prepare(`DELETE FROM immune WHERE userId=?`).run(userId).changes > 0;
 }
-/* ===================== 追加：SBK 上限・下限 ===================== */
-/** 現在の範囲（ギルド設定→無ければ既定）を取得 */
+function isImmune(gid, userId) {
+    const db = openDb(gid);
+    return !!db.prepare(`SELECT 1 FROM immune WHERE userId=?`).get(userId);
+}
+// 6. しばき範囲（settings テーブル）
+const SBK_MIN_KEY = 'sbkMin';
+const SBK_MAX_KEY = 'sbkMax';
+const SBK_MIN_DEFAULT = 1;
+const SBK_MAX_DEFAULT = 25;
 function getSbkRange(gid) {
-    const s = loadGuildStore(gid);
-    const min = s.settings?.sbkMin ?? config_1.SBK_MIN;
-    const max = s.settings?.sbkMax ?? config_1.SBK_MAX;
-    // 安全クランプ
-    const cmn = Math.max(1, Math.min(min, 25));
-    const cmx = Math.max(cmn, Math.min(max, 25));
-    return { min: cmn, max: cmx };
+    const db = openDb(gid);
+    const minRow = db
+        .prepare(`SELECT value FROM settings WHERE key=?`)
+        .get('sbkMin'); // ←型を明示
+    const maxRow = db
+        .prepare(`SELECT value FROM settings WHERE key=?`)
+        .get('sbkMax');
+    let min = Number(minRow?.value ?? 1);
+    let max = Number(maxRow?.value ?? 25);
+    min = Math.max(1, Math.min(min, 25));
+    max = Math.max(min, Math.min(max, 25));
+    return { min, max };
 }
-/** 範囲を更新して保存（値は1..25、かつ min<=max に整形） */
 function setSbkRange(gid, min, max) {
-    const store = loadGuildStore(gid);
-    const cmn = Math.max(1, Math.min(min, 25));
-    const cmx = Math.max(cmn, Math.min(max, 25));
-    store.settings || (store.settings = {});
-    store.settings.sbkMin = cmn;
-    store.settings.sbkMax = cmx;
-    saveGuildStore(gid, store);
-    return { min: cmn, max: cmx };
+    const db = openDb(gid);
+    min = Math.max(1, Math.min(min, 25));
+    max = Math.max(min, Math.min(max, 25));
+    const tx = db.transaction(() => {
+        db.prepare(`INSERT INTO settings(key, value) VALUES(?, ?)
+      ON CONFLICT(key) DO UPDATE SET value=excluded.value`).run(SBK_MIN_KEY, String(min));
+        db.prepare(`INSERT INTO settings(key, value) VALUES(?, ?)
+      ON CONFLICT(key) DO UPDATE SET value=excluded.value`).run(SBK_MAX_KEY, String(max));
+    });
+    tx();
+    return { min, max };
 }
+// 7. 互換ラッパ（既存コードが store.* を前提にしている箇所のため）
+function loadGuildStore(gid) {
+    return {
+        counts: getAllCounts(gid),
+        immune: getImmuneList(gid),
+        settings: (() => {
+            const { min, max } = getSbkRange(gid);
+            return { sbkMin: min, sbkMax: max };
+        })(),
+    };
+}
+// JSON 時代の saveGuildStore は不要。残ってるなら呼び出しを削除/置換してください。

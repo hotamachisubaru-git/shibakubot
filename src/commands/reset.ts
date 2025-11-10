@@ -1,6 +1,6 @@
 // src/commands/reset.ts
 import { ChatInputCommandInteraction, PermissionFlagsBits } from 'discord.js';
-import { loadGuildStore, saveGuildStore } from '../data';
+import { loadGuildStore} from '../data';
 
 // .env の OWNER_IDS=id1,id2,... を参照
 const OWNER_IDS = (process.env.OWNER_IDS || '')
@@ -34,7 +34,7 @@ export async function handleReset(interaction: ChatInputCommandInteraction) {
   if (resetAll) {
     const store = loadGuildStore(gid);
     store.counts = {};
-    saveGuildStore(gid, store);
+    
     await interaction.reply({ content: '全員のしばき回数を0にリセットしました。', ephemeral: true });
     return;
   }
@@ -42,8 +42,7 @@ export async function handleReset(interaction: ChatInputCommandInteraction) {
   if (target) {
     const store = loadGuildStore(gid);
     store.counts[target.id] = 0;
-    saveGuildStore(gid, store);
-
+    
     const member = await interaction.guild!.members.fetch(target.id).catch(() => null);
     const display = member?.displayName ?? target.tag;
     await interaction.reply({
