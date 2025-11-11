@@ -1,73 +1,90 @@
-// src/migrate-json-to-sqlite.ts
-import fs from 'fs';
-import path from 'path';
-import { openGuildDB } from './db';
+import fs from "fs";
+import path from "path";
+import Database from "better-sqlite3";
 
-type OldStore = {
-  counts: Record<string, number>;
-  immune?: string[];
-  settings?: { sbkMin?: number; sbkMax?: number };
-};
-
-const ROOT = path.join(process.cwd(), 'data', 'guilds');
-
-function listOldJson(): string[] {
-  if (!fs.existsSync(ROOT)) return [];
-  return fs.readdirSync(ROOT)
-    .filter(f => f.endsWith('.json'))
-    .map(f => path.join(ROOT, f));
+const GUILDS_DIR = path.join(process.cwd(), "data", "guilds");
+if (!fs.existsSync(GUILDS_DIR)) {
+  console.error("❌ data/guilds フォルダが見つかりません。");
+  process.exit(1);
 }
 
-(async () => {
-  const files = listOldJson();
-  if (files.length === 0) {
-    console.log('旧JSONファイルは見つかりませんでした。');
-    return;
+const files = fs.readdirSync(GUILDS_DIR).filter(f => f.endsWith(".json"));
+if (files.length === 0) {
+  console.log("✅ 旧 JSON ファイルが見つかりません。");
+  process.exit(0);
+}
+
+for (const file of files) {
+  const gid = path.basename(file, ".json");
+  const jsonPath = path.join(GUILDS_DIR, file);
+  const dbPath = path.join(GUILDS_DIR, `${gid}.db`);
+
+  console.log(`移行中: ${file} → ${gid}.db`);
+
+  // JSON を読み込み
+  let data: any;
+  try {
+    data = JSON.parse(fs.readFileSync(jsonPath, "utf8"));
+  } catch (e) {
+    console.error(`⚠️ JSON 読み込み失敗: ${file}`, e);
+    continue;
   }
 
-  for (const file of files) {
-    const gid = path.basename(file, '.json');
-    const dbPath = path.join(ROOT, `${gid}.db`);
-    if (fs.existsSync(dbPath)) {
-      console.log(`スキップ: ${gid}.db が既に存在します`);
-      continue;
+  const db = new Database(dbPath);
+  db.pragma("journal_mode = WAL");
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS counts(
+      userId TEXT PRIMARY KEY,
+      count  INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE TABLE IF NOT EXISTS immune(
+      userId TEXT PRIMARY KEY
+    );
+    CREATE TABLE IF NOT EXISTS settings(
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS logs(
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      at INTEGER NOT NULL,
+      actor TEXT,
+      target TEXT,
+      reason TEXT,
+      delta INTEGER NOT NULL
+    );
+  `);
+
+  const tx = db.transaction(() => {
+    // counts
+    if (data.counts) {
+      const stmt = db.prepare(`INSERT OR REPLACE INTO counts(userId, count) VALUES(?, ?)`);
+      for (const [uid, cnt] of Object.entries(data.counts)) {
+        stmt.run(uid, Number(cnt) || 0);
+      }
     }
 
-    console.log(`移行: ${file} → ${gid}.db`);
-    const raw = fs.readFileSync(file, 'utf8');
-    const oldData = JSON.parse(raw) as OldStore;
-
-    const db = openGuildDB(gid);
-    const trx = db.transaction(() => {
-      // counts
-      const ins = db.prepare(`
-        INSERT INTO counts(user_id, username, reason, count)
-        VALUES(?,?,?,?)
-        ON CONFLICT(user_id) DO UPDATE SET count=excluded.count
-      `);
-      for (const [uid, c] of Object.entries(oldData.counts ?? {})) {
-        // username はひとまず uid を格納（次回 /sbk 実行時に最新名へ更新される）
-        ins.run(uid, uid, '', Number(c) || 0);
+    // immune
+    if (data.immune) {
+      const stmt = db.prepare(`INSERT OR IGNORE INTO immune(userId) VALUES(?)`);
+      for (const uid of data.immune as string[]) {
+        stmt.run(uid);
       }
+    }
 
-      // immune
-      const insImm = db.prepare(`INSERT INTO immune(user_id) VALUES(?) ON CONFLICT DO NOTHING`);
-      for (const uid of oldData.immune ?? []) insImm.run(uid);
+    // settings
+    if (data.settings) {
+      const stmt = db.prepare(
+        `INSERT OR REPLACE INTO settings(key, value) VALUES(?, ?)`
+      );
+      if ("sbkMin" in data.settings)
+        stmt.run("sbkMin", String(data.settings.sbkMin));
+      if ("sbkMax" in data.settings)
+        stmt.run("sbkMax", String(data.settings.sbkMax));
+    }
+  });
+  tx();
 
-      // settings
-      if (oldData.settings?.sbkMin != null)
-        db.prepare(`INSERT INTO settings(key,value) VALUES('sbkMin', ?)
-                    ON CONFLICT(key) DO UPDATE SET value=excluded.value`)
-          .run(String(oldData.settings.sbkMin));
-      if (oldData.settings?.sbkMax != null)
-        db.prepare(`INSERT INTO settings(key,value) VALUES('sbkMax', ?)
-                    ON CONFLICT(key) DO UPDATE SET value=excluded.value`)
-          .run(String(oldData.settings.sbkMax));
-    });
-    trx();
+  console.log(`✅ 完了: ${gid}.db`);
+}
 
-    console.log(`完了: ${gid}.db`);
-  }
-
-  console.log('✅ すべての移行処理が完了しました。');
-})();
+console.log("\n🎉 すべての JSON → SQLite 移行が完了しました。");
