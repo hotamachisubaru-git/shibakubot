@@ -3,7 +3,7 @@ import {
   ActionRowBuilder, ButtonBuilder, ButtonStyle, ChatInputCommandInteraction,
   ComponentType, EmbedBuilder, ModalBuilder, TextInputBuilder, TextInputStyle,
   ButtonInteraction, UserSelectMenuBuilder, StringSelectMenuBuilder, ModalSubmitInteraction,
-  PermissionFlagsBits
+  PermissionFlagsBits, ChannelSelectMenuBuilder, ChannelType, MessageFlags
 } from 'discord.js';
 
 import {
@@ -11,15 +11,14 @@ import {
   setCountGuild, getImmuneList, addImmuneId, removeImmuneId
 } from '../data';
 
+/* ===== 設定 ===== */
 const OWNER_IDS = (process.env.OWNER_IDS || '')
   .split(',').map(s => s.trim()).filter(Boolean);
-
 const PAGE_SIZE = 10;
 
-/* ---------- ユーティリティ ---------- */
-// ここを修正
+/* ===== ユーティリティ ===== */
 async function displayNameFrom(
-  i: ChatInputCommandInteraction | ButtonInteraction | ModalSubmitInteraction, // ← 追加
+  i: ChatInputCommandInteraction | ButtonInteraction | ModalSubmitInteraction,
   userId: string
 ) {
   const g = i.guild;
@@ -35,9 +34,9 @@ async function guildTopEmbed(i: ChatInputCommandInteraction | ButtonInteraction)
   const gid = i.guildId!;
   const store = loadGuildStore(gid);
   const entries = Object.entries(store.counts);
-  if (!entries.length) {
+  if (!entries.length)
     return new EmbedBuilder().setTitle('しばきランキング').setDescription('まだ誰も しばかれていません。');
-  }
+
   const lines = await Promise.all(
     entries.sort((a, b) => b[1] - a[1]).slice(0, PAGE_SIZE).map(async ([uid, cnt], idx) => {
       const name = await displayNameFrom(i, uid);
@@ -65,6 +64,7 @@ async function guildMembersEmbed(i: ChatInputCommandInteraction | ButtonInteract
   rows.sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
   const top = rows.slice(0, 20);
   const lines = top.map((r, idx) => `#${idx + 1} \`${r.tag}\` × **${r.count}**`);
+
   return new EmbedBuilder()
     .setTitle('全メンバーのしばかれ回数（BOT除外）')
     .setDescription(lines.join('\n') || 'メンバーがいません（または全員 0）')
@@ -80,7 +80,7 @@ function disabledCopyOfRows(rows: ActionRowBuilder<ButtonBuilder>[]) {
   });
 }
 
-/* ---------- メニュー UI ---------- */
+/* ===== メニューUI ===== */
 function buildMenu(min: number, max: number) {
   const embed = new EmbedBuilder()
     .setTitle('しばくbot メニュー')
@@ -99,6 +99,7 @@ function buildMenu(min: number, max: number) {
     new ButtonBuilder().setCustomId('menu_sbk').setLabel('しばく').setStyle(ButtonStyle.Danger),
     new ButtonBuilder().setCustomId('menu_room').setLabel('ルーム告知').setStyle(ButtonStyle.Success),
     new ButtonBuilder().setCustomId('menu_limit').setLabel('上限設定').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('menu_movevc').setLabel('VC移動').setStyle(ButtonStyle.Primary),
   );
 
   const row3 = new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -111,18 +112,21 @@ function buildMenu(min: number, max: number) {
   return { embed, rows: [row1, row2, row3] };
 }
 
-/* ---------- メイン：/menu ---------- */
+/* ===== /menu メイン ===== */
 export async function handleMenu(interaction: ChatInputCommandInteraction) {
   if (!interaction.inGuild()) {
-    await interaction.reply({ content: 'サーバー内で使ってね。', ephemeral: true });
+    await interaction.reply({ content: '⚠️ このコマンドはサーバー内でのみ使用できます。', flags: MessageFlags.Ephemeral });
     return;
   }
 
-  const gid = interaction.guildId!;
-  let { min: SBK_MIN, max: SBK_MAX } = getSbkRange(gid);
+  // 1回だけACK。以後は editReply / followUp を使う
+  try { await interaction.deferReply({ flags: MessageFlags.Ephemeral }); }
+  catch (e) { console.warn('[menu] deferReply failed (possibly expired):', e); return; }
 
-  let built = buildMenu(SBK_MIN, SBK_MAX);
-  await interaction.deferReply({ ephemeral: true });
+  const gid = interaction.guildId!;
+  let { min: sbkMin, max: sbkMax } = getSbkRange(gid); // ← 後で更新するので let
+  let built = buildMenu(sbkMin, sbkMax);
+
   await interaction.editReply({ embeds: [built.embed], components: built.rows });
   const msg = await interaction.fetchReply();
 
@@ -138,15 +142,13 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
         /* --- ランキング --- */
         case 'menu_top': {
           await btn.deferUpdate();
-          const emb = await guildTopEmbed(btn);
-          await btn.followUp({ embeds: [emb], ephemeral: true });
+          await btn.followUp({ embeds: [await guildTopEmbed(btn)], ephemeral: true });
           break;
         }
         /* --- メンバー一覧 --- */
         case 'menu_members': {
           await btn.deferUpdate();
-          const emb = await guildMembersEmbed(btn);
-          await btn.followUp({ embeds: [emb], ephemeral: true });
+          await btn.followUp({ embeds: [await guildMembersEmbed(btn)], ephemeral: true });
           break;
         }
         /* --- 統計 --- */
@@ -157,15 +159,11 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
           const unique = Object.keys(store.counts).length;
           const immune = store.immune.length;
           await btn.followUp({
-            embeds: [
-              new EmbedBuilder()
-                .setTitle('サーバー統計')
-                .addFields(
-                  { name: '総しばき回数', value: String(total), inline: true },
-                  { name: '対象人数', value: String(unique), inline: true },
-                  { name: '免除ユーザー', value: String(immune), inline: true },
-                )
-            ],
+            embeds: [new EmbedBuilder().setTitle('サーバー統計').addFields(
+              { name: '総しばき回数', value: String(total), inline: true },
+              { name: '対象人数', value: String(unique), inline: true },
+              { name: '免除ユーザー', value: String(immune), inline: true },
+            )],
             ephemeral: true
           });
           break;
@@ -173,31 +171,26 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
         /* --- ルーム告知 --- */
         case 'menu_room': {
           const modal = new ModalBuilder().setCustomId('menu_room_modal').setTitle('ルーム告知');
-          const game = new TextInputBuilder().setCustomId('game').setLabel('ゲーム名（例: PPR）').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(16);
-          const area = new TextInputBuilder().setCustomId('area').setLabel('エリア番号（例: 156）').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(4);
-          const pass = new TextInputBuilder().setCustomId('pass').setLabel('パスワード（例: 10005）').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(18);
           modal.addComponents(
-            new ActionRowBuilder<TextInputBuilder>().addComponents(game),
-            new ActionRowBuilder<TextInputBuilder>().addComponents(area),
-            new ActionRowBuilder<TextInputBuilder>().addComponents(pass),
+            new ActionRowBuilder<TextInputBuilder>().addComponents(
+              new TextInputBuilder().setCustomId('game').setLabel('ゲーム名（例: PPR）').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(16)),
+            new ActionRowBuilder<TextInputBuilder>().addComponents(
+              new TextInputBuilder().setCustomId('area').setLabel('エリア番号（例: 156）').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(4)),
+            new ActionRowBuilder<TextInputBuilder>().addComponents(
+              new TextInputBuilder().setCustomId('pass').setLabel('パスワード（例: 10005）').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(18)),
           );
           await btn.showModal(modal);
-          const submitted = await btn.awaitModalSubmit({
-            time: 60_000, filter: (m: ModalSubmitInteraction) => m.user.id === btn.user.id
-          }).catch(() => null);
+          const submitted = await btn.awaitModalSubmit({ time: 60_000, filter: (m: ModalSubmitInteraction) => m.user.id === btn.user.id }).catch(() => null);
           if (!submitted) return;
           const g = submitted.fields.getTextInputValue('game').trim() || 'PPR';
           const a = Number(submitted.fields.getTextInputValue('area').trim() || '156');
           const p = submitted.fields.getTextInputValue('pass').trim() || '10005';
-          await submitted.reply({
-            content: `本日は **${g}** の **${isNaN(a) ? 156 : a}** で、**${p.slice(0, 16)}** で入れます。`,
-            allowedMentions: { parse: [] },
-          });
+          await submitted.reply({ content: `本日は **${g}** の **${isNaN(a) ? 156 : a}** で、**${p.slice(0, 16)}** で入れます。`, allowedMentions: { parse: [] } });
           break;
         }
         /* --- しばく（UI） --- */
         case 'menu_sbk': {
-          const counts = Array.from({ length: SBK_MAX - SBK_MIN + 1 }, (_, i) => i + SBK_MIN);
+          const counts = Array.from({ length: sbkMax - sbkMin + 1 }, (_, i) => i + sbkMin);
           const rowUser = new ActionRowBuilder<UserSelectMenuBuilder>()
             .addComponents(new UserSelectMenuBuilder().setCustomId('sbk_pick_user').setPlaceholder('しばく相手を選ぶ').setMaxValues(1));
           const rowCount = new ActionRowBuilder<StringSelectMenuBuilder>()
@@ -219,7 +212,7 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
 
           const panel = await btn.fetchReply();
           let pickedUserId: string | null = null;
-          let pickedCount = SBK_MIN;
+          let pickedCount = sbkMin;
 
           const sub = btn.channel!.createMessageComponentCollector({
             time: 60_000,
@@ -230,7 +223,7 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
             if (i.isUserSelectMenu() && i.customId === 'sbk_pick_user') {
               pickedUserId = i.values[0] ?? null; await i.deferUpdate();
             } else if (i.isStringSelectMenu() && i.customId === 'sbk_pick_count') {
-              pickedCount = Math.max(SBK_MIN, Math.min(SBK_MAX, Number(i.values[0] ?? SBK_MIN))); await i.deferUpdate();
+              pickedCount = Math.max(sbkMin, Math.min(sbkMax, Number(i.values[0] ?? sbkMin))); await i.deferUpdate();
             } else if (i.isButton() && i.customId === 'sbk_cancel') {
               await i.update({ content: 'キャンセルしました。', components: [] }); sub.stop('cancel');
             } else if (i.isButton() && i.customId === 'sbk_exec') {
@@ -240,23 +233,17 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
                 new TextInputBuilder().setCustomId('reason').setStyle(TextInputStyle.Paragraph).setLabel('理由（50文字まで）').setRequired(true).setMaxLength(50)
               ));
               await i.showModal(modal);
-              const submitted = await i.awaitModalSubmit({
-                time: 60_000, filter: (m: ModalSubmitInteraction) => m.user.id === i.user.id
-              }).catch(() => null);
+              const submitted = await i.awaitModalSubmit({ time: 60_000, filter: (m: ModalSubmitInteraction) => m.user.id === i.user.id }).catch(() => null);
               if (!submitted) return;
 
               const reason = submitted.fields.getTextInputValue('reason').trim();
               const next = addCountGuild(gid, pickedUserId!, pickedCount, i.user.username, reason);
               const name = await displayNameFrom(submitted, pickedUserId!);
               try { await (panel as any).edit({ components: [] }); } catch {}
-              await submitted.reply({
-                content: `**${name}** が ${pickedCount} 回 しばかれました！（累計 ${next} 回）\n理由: ${reason}`,
-                allowedMentions: { parse: [] },
-              });
+              await submitted.reply({ content: `**${name}** が ${pickedCount} 回 しばかれました！（累計 ${next} 回）\n理由: ${reason}`, allowedMentions: { parse: [] } });
               sub.stop('done');
             }
           });
-
           sub.on('end', async () => { try { await (panel as any).edit({ components: [] }); } catch {} });
           break;
         }
@@ -268,38 +255,35 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
 
           const modal = new ModalBuilder().setCustomId('limit_modal').setTitle('しばく回数の上限設定');
           modal.addComponents(
-            new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId('min').setLabel(`最小（現在 ${SBK_MIN}）`).setStyle(TextInputStyle.Short).setPlaceholder('1〜25').setRequired(true)),
-            new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId('max').setLabel(`最大（現在 ${SBK_MAX}）`).setStyle(TextInputStyle.Short).setPlaceholder('1〜25 / 最小以上').setRequired(true)),
+            new ActionRowBuilder<TextInputBuilder>().addComponents(
+              new TextInputBuilder().setCustomId('min').setLabel(`最小（現在 ${sbkMin}）`).setStyle(TextInputStyle.Short).setPlaceholder('1〜25').setRequired(true)),
+            new ActionRowBuilder<TextInputBuilder>().addComponents(
+              new TextInputBuilder().setCustomId('max').setLabel(`最大（現在 ${sbkMax}）`).setStyle(TextInputStyle.Short).setPlaceholder('1〜25 / 最小以上').setRequired(true)),
           );
           await btn.showModal(modal);
           const submitted = await btn.awaitModalSubmit({ time: 60_000, filter: m => m.user.id === btn.user.id }).catch(() => null);
           if (!submitted) return;
+
           const minIn = Number(submitted.fields.getTextInputValue('min'));
           const maxIn = Number(submitted.fields.getTextInputValue('max'));
           if (!Number.isFinite(minIn) || !Number.isFinite(maxIn)) { await submitted.reply({ content: '数値を入力してください。', ephemeral: true }); return; }
 
           const { min, max } = setSbkRange(gid, minIn, maxIn);
-          SBK_MIN = min; SBK_MAX = max;
-
-          built = buildMenu(SBK_MIN, SBK_MAX);
+          sbkMin = min; sbkMax = max;                // ← 反映
+          built = buildMenu(sbkMin, sbkMax);         // ← 再描画
           try { await interaction.editReply({ embeds: [built.embed], components: built.rows }); } catch {}
           await submitted.reply({ content: `✅ しばく回数の範囲を **${min}〜${max}** に変更しました。`, ephemeral: true });
           break;
         }
-        /* --- 免除管理（追加/削除/一覧） --- */
+        /* --- 免除管理 --- */
         case 'menu_immune': {
           const isAdmin = btn.memberPermissions?.has(PermissionFlagsBits.Administrator) ?? false;
           const isDev = OWNER_IDS.includes(btn.user.id);
           if (!isAdmin && !isDev) { await btn.reply({ content: '⚠️ 免除管理は管理者/開発者のみ。', ephemeral: true }); return; }
 
           const rowAct = new ActionRowBuilder<StringSelectMenuBuilder>()
-            .addComponents(new StringSelectMenuBuilder()
-              .setCustomId('imm_act').setPlaceholder('操作を選択')
-              .addOptions(
-                { label: '追加', value: 'add' },
-                { label: '削除', value: 'remove' },
-                { label: '一覧', value: 'list' },
-              ));
+            .addComponents(new StringSelectMenuBuilder().setCustomId('imm_act').setPlaceholder('操作を選択')
+              .addOptions({ label: '追加', value: 'add' }, { label: '削除', value: 'remove' }, { label: '一覧', value: 'list' }));
           const rowUser = new ActionRowBuilder<UserSelectMenuBuilder>()
             .addComponents(new UserSelectMenuBuilder().setCustomId('imm_user').setPlaceholder('対象ユーザー').setMaxValues(1));
 
@@ -312,6 +296,7 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
               )],
             ephemeral: true
           });
+
           const panel = await btn.fetchReply();
           let act: 'add'|'remove'|'list'|null = null;
           let target: string | null = null;
@@ -395,13 +380,82 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
           sub.on('end', async () => { try { await (panel as any).edit({ components: [] }); } catch {} });
           break;
         }
+        /* --- VC移動 --- */
+        case 'menu_movevc': {
+          const isAdmin = btn.memberPermissions?.has(PermissionFlagsBits.Administrator) ?? false;
+          const canMove = btn.memberPermissions?.has(PermissionFlagsBits.MoveMembers) ?? false;
+          const isDev   = OWNER_IDS.includes(btn.user.id);
+          if (!isAdmin && !canMove && !isDev) {
+            await btn.reply({ content: '⚠️ VC移動は管理者/MoveMembers権限/開発者のみ使えます。', ephemeral: true });
+            break;
+          }
+
+          const rowUsers = new ActionRowBuilder<UserSelectMenuBuilder>()
+            .addComponents(new UserSelectMenuBuilder().setCustomId('movevc_users').setPlaceholder('移動するメンバーを選択（複数可）').setMinValues(1).setMaxValues(10));
+          const rowDest = new ActionRowBuilder<ChannelSelectMenuBuilder>()
+            .addComponents(new ChannelSelectMenuBuilder().setCustomId('movevc_dest').setPlaceholder('移動先のボイスチャンネルを選択').addChannelTypes(ChannelType.GuildVoice, ChannelType.GuildStageVoice).setMinValues(1).setMaxValues(1));
+          const rowExec = new ActionRowBuilder<ButtonBuilder>()
+            .addComponents(new ButtonBuilder().setCustomId('movevc_exec').setLabel('移動を実行').setStyle(ButtonStyle.Success),
+                           new ButtonBuilder().setCustomId('movevc_cancel').setLabel('キャンセル').setStyle(ButtonStyle.Secondary));
+
+          await btn.reply({ content: '🎧 移動するメンバーと移動先VCを選んでください。', components: [rowUsers, rowDest, rowExec], ephemeral: true });
+
+          const panel = await btn.fetchReply();
+          let pickedUsers: string[] = [];
+          let destChannelId: string | null = null;
+
+          const sub = btn.channel!.createMessageComponentCollector({
+            time: 60_000, filter: i => i.user.id === btn.user.id && i.message.id === (panel as any).id,
+          });
+
+          sub.on('collect', async (i) => {
+            if (i.isUserSelectMenu() && i.customId === 'movevc_users') {
+              pickedUsers = i.values; await i.deferUpdate(); return;
+            }
+            if (i.isChannelSelectMenu() && i.customId === 'movevc_dest') {
+              destChannelId = i.values[0] ?? null; await i.deferUpdate(); return;
+            }
+            if (i.isButton() && i.customId === 'movevc_cancel') {
+              await i.update({ content: 'キャンセルしました。', components: [] }); sub.stop('cancel'); return;
+            }
+            if (i.isButton() && i.customId === 'movevc_exec') {
+              if (!pickedUsers.length) { await i.reply({ content: '移動するメンバーを選んでください。', ephemeral: true }); return; }
+              if (!destChannelId)     { await i.reply({ content: '移動先のVCを選んでください。',   ephemeral: true }); return; }
+
+              await i.deferUpdate();
+
+              const g = i.guild!;
+              const dest = await g.channels.fetch(destChannelId).catch(() => null);
+              if (!dest || (dest.type !== ChannelType.GuildVoice && dest.type !== ChannelType.GuildStageVoice)) {
+                await i.followUp({ content: '❌ 移動先がボイスチャンネルではありません。', ephemeral: true });
+                return;
+              }
+
+              const results: string[] = [];
+              for (const uid of pickedUsers) {
+                const m = await g.members.fetch(uid).catch(() => null);
+                if (!m) { results.push(`- <@${uid}>: 見つかりません`); continue; }
+                if (!m.voice?.channelId) { results.push(`- ${m.displayName}: VC未参加`); continue; }
+                try { await m.voice.setChannel(destChannelId!); results.push(`- ${m.displayName}: ✅ 移動しました`); }
+                catch { results.push(`- ${m.displayName}: ❌ 失敗（権限/接続状況を確認）`); }
+              }
+
+              try { await (panel as any).edit({ components: [] }); } catch {}
+              await i.followUp({ content: `📦 VC移動結果（→ <#${destChannelId}>）\n` + results.join('\n'), ephemeral: true, allowedMentions: { parse: [] } });
+              sub.stop('done');
+            }
+          });
+          sub.on('end', async () => { try { await (panel as any).edit({ components: [] }); } catch {} });
+          break;
+        }
         /* --- ヘルプ --- */
         case 'menu_help': {
           await btn.deferUpdate();
           await btn.followUp({
             embeds: [new EmbedBuilder().setTitle('ヘルプ').setDescription([
-              'このメニューから、ランキング/メンバー/統計/しばく/ルーム告知/上限設定/免除管理/値の直接設定 ができます。',
-              '※ 上限設定・免除管理・値の直接設定は管理者 or OWNER_IDS のみ。',
+              'このメニューから、ランキング/メンバー/統計/しばく/ルーム告知/上限設定/免除管理/値の直接設定/VC移動 が使えます。',
+              '※ 上限設定・免除管理・値の直接設定・VC移動は 管理者 or OWNER_IDS で利用可。',
+              `現在の回数レンジ: **${sbkMin}〜${sbkMax}**`,
             ].join('\n'))],
             ephemeral: true
           });
@@ -410,10 +464,7 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
         /* --- 閉じる --- */
         case 'menu_close': {
           await btn.deferUpdate();
-          try {
-            const disabled = disabledCopyOfRows(built.rows);
-            await btn.message.edit({ content: '✅ メニューを閉じました。', components: disabled });
-          } catch {}
+          try { await btn.message.edit({ content: '✅ メニューを閉じました。', components: disabledCopyOfRows(built.rows) }); } catch {}
           collector.stop('close');
           break;
         }
@@ -423,9 +474,6 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
   });
 
   collector.on('end', async () => {
-    try {
-      const disabled = disabledCopyOfRows(built.rows);
-      await (msg as any).edit({ components: disabled }).catch(() => {});
-    } catch {}
+    try { await (msg as any).edit({ components: disabledCopyOfRows(built.rows) }).catch(() => {}); } catch {}
   });
 }
