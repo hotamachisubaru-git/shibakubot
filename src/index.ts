@@ -2,7 +2,7 @@
 import 'dotenv/config';
 import {
   Client, GatewayIntentBits, Events,
-  ChannelType, TextChannel, ChatInputCommandInteraction, PermissionFlagsBits,
+  ChatInputCommandInteraction, PermissionFlagsBits,
 } from 'discord.js';
 
 import {
@@ -11,6 +11,7 @@ import {
   getSbkRange,
 } from './data';
 
+import { sendLog } from './logging';
 import { handleTop } from './commands/top';
 import { handleMembers } from './commands/members';
 import { handleMenu } from './commands/menu';
@@ -39,7 +40,6 @@ const client = new Client({
 });
 
 // ---- 定数 ----
-const LOG_CHANNEL_ID = process.env.LOG_CHANNEL_ID || '';
 const OWNER_IDS = (process.env.OWNER_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
 const IMMUNE_IDS = (process.env.IMMUNE_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
 
@@ -102,17 +102,20 @@ client.on(Events.InteractionCreate, async interaction => {
     const member = await interaction.guild!.members.fetch(user.id).catch(() => null);
     const display = member?.displayName ?? user.tag;
     const reason = interaction.options.getString('reason') ?? '理由なし';
+    await interaction.reply(
+      `**${display}** が ${countArg} 回 しばかれました！（累計 ${nextCount} 回）\n理由: ${reason}`
+    );
 
-    await interaction.reply(`**${display}** が ${countArg} 回 しばかれました！（累計 ${nextCount} 回）\n理由: ${reason}`);
+    // ← ここでログ送信（interaction / 実行者 / 対象 / 理由 / 今回 / 累計）
+    await sendLog(
+      interaction,
+      interaction.user.id, // しばいた人
+      user.id,             // しばかれた人
+      reason,
+      countArg,
+      nextCount
+    );
 
-    if (LOG_CHANNEL_ID) {
-      const ch = await interaction.guild!.channels.fetch(LOG_CHANNEL_ID).catch(() => null);
-      if (ch && ch.type === ChannelType.GuildText) {
-        await (ch as TextChannel).send(
-          `${interaction.user.tag} → ${display}\n理由: ${reason}\n今回: ${countArg} 回\n累計: ${nextCount} 回`
-        );
-      }
-    }
     return;
   }
 

@@ -4,6 +4,7 @@ import fs from 'fs';
 import path from 'path';
 
 const ROOT = path.join(process.cwd(), 'data', 'guilds');
+
 function ensureDir(p: string) { if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true }); }
 function dbPath(gid: string) { ensureDir(ROOT); return path.join(ROOT, `${gid}.db`); }
 
