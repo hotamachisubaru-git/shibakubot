@@ -17,12 +17,37 @@ if (!TOKEN || !CLIENT_ID || GUILD_IDS.length === 0) {
 
 // ---- ここで「/menu」だけを登録（他はUIから呼び出す前提） ----
 const commands = [
+  // /sbk 本体
+  new SlashCommandBuilder()
+    .setName('sbk')
+    .setDescription('ユーザーをしばく')
+    .addUserOption(opt =>
+      opt
+        .setName('user')
+        .setDescription('しばく相手')
+        .setRequired(true),
+    )
+    .addIntegerOption(opt =>
+      opt
+        .setName('count')
+        .setDescription('しばく回数（省略時は下限値）')
+        .setRequired(true),
+    )
+    .addStringOption(opt =>
+      opt
+        .setName('reason')
+        .setDescription('理由）')
+        .setRequired(true),
+    )
+    .toJSON(),
+
+  // /menu メニュー
   new SlashCommandBuilder()
     .setName('menu')
     .setDescription('しばくbot メニューを表示する')
-    // 何か将来の拡張用に、サブコマンドやオプションを足すならここに追加
     .toJSON(),
 ];
+
 
 const rest = new REST({ version: '10' }).setToken(TOKEN);
 

@@ -167,7 +167,7 @@ export function isImmune(gid: string, userId: string): boolean {
 const SBK_MIN_KEY = 'sbkMin';
 const SBK_MAX_KEY = 'sbkMax';
 const SBK_MIN_DEFAULT = 1;
-const SBK_MAX_DEFAULT = 25;
+const SBK_MAX_DEFAULT = 25; // 初期値としてだけ使う
 
 export function getSbkRange(gid: string): { min: number; max: number } {
   const db = openDb(gid);
@@ -180,15 +180,26 @@ export function getSbkRange(gid: string): { min: number; max: number } {
 
   let min = Number(minRow?.value ?? SBK_MIN_DEFAULT);
   let max = Number(maxRow?.value ?? SBK_MAX_DEFAULT);
-  min = Math.max(1, Math.min(min, 25));
-  max = Math.max(min, Math.min(max, 25));
+
+  // 数値チェック & 下限だけ守る（1以上・max は min 以上）
+  if (!Number.isFinite(min) || min < 1) min = SBK_MIN_DEFAULT;
+  if (!Number.isFinite(max) || max < min) max = min;
+
+  min = Math.floor(min);
+  max = Math.floor(max);
+
   return { min, max };
 }
 
 export function setSbkRange(gid: string, min: number, max: number) {
   const db = openDb(gid);
-  min = Math.max(1, Math.min(min, 25));
-  max = Math.max(min, Math.min(max, 25));
+
+  if (!Number.isFinite(min) || min < 1) min = SBK_MIN_DEFAULT;
+  if (!Number.isFinite(max) || max < min) max = min;
+
+  min = Math.floor(min);
+  max = Math.floor(max);
+
   db.transaction(() => {
     db.prepare(`
       INSERT INTO settings(key, value) VALUES(?, ?)
@@ -199,8 +210,10 @@ export function setSbkRange(gid: string, min: number, max: number) {
       ON CONFLICT(key) DO UPDATE SET value=excluded.value
     `).run(SBK_MAX_KEY, String(max));
   })();
+
   return { min, max };
 }
+
 
 // ---------- 互換ラッパ ----------
 export function loadGuildStore(gid: string) {
@@ -235,7 +248,6 @@ async function getMedalDB(): Promise<SqliteDatabase> {
   return medalDB;
 }
 
-// 残高取得
 // 残高取得（なければ自動で 1000 を付与）
 export async function getMedalBalance(userId: string): Promise<number> {
   const db = await getMedalDB();
@@ -258,6 +270,31 @@ export async function getMedalBalance(userId: string): Promise<number> {
 
   return 1000;
 }
+
+export async function getTopMedals(limit: number = 20): Promise<
+  Array<{ userId: string; balance: number }>
+> {
+  const db = await getMedalDB();
+
+  const rows = await db.all<{
+    user_id: string;
+    balance: number;
+  }[]>(
+    `
+      SELECT user_id, balance
+      FROM medals
+      ORDER BY balance DESC
+      LIMIT ?
+    `,
+    [limit]
+  );
+
+  return rows.map((r) => ({
+    userId: r.user_id,
+    balance: r.balance,
+  }));
+}
+
 
 
 // 残高を上書き
