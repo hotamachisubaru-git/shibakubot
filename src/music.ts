@@ -1,33 +1,39 @@
 // src/music.ts
 import { GuildMember, Message } from 'discord.js';
+import express from 'express';
+import path from 'path';
+import fs from 'fs';
+import crypto from 'node:crypto';
 
 const PREFIX = 's!';
+// ===== ファイルアップロード用の簡易サーバー設定 =====
+const UPLOAD_DIR = path.resolve(process.env.FILE_DIR || './files');
+//サーバー起動
+const app = express();
+app.use('/uploads', express.static(UPLOAD_DIR));
+const PORT = Number(process.env.FILE_PORT || 3001);
+app.listen(PORT,'0.0.0.0', () => {
+  console.log(`📦 Upload file server: http://192.168.11.2:${PORT}/uploads/`);
+});
 
-// ===== ユーザーごとの音量プリセット =====
-const MIN_VOL = 0;
-const MAX_VOL = 200;
-const DEFAULT_VOL = 100;
 
-// guildId -> (userId -> volume[%])
-const userVolumes = new Map<string, Map<string, number>>();
 
-function getUserVolume(guildId: string, userId: string): number {
-  const g = userVolumes.get(guildId);
-  return g?.get(userId) ?? DEFAULT_VOL;
+function makeInternalUrl(filename: string) {
+  // Lavalink が同じPCならこれが最強
+  const base = process.env.UPLOAD_INTERNAL_URL || 'http://192.168.11.2:3001/uploads';
+  return `${base}/${filename}`;
 }
 
-function setUserVolume(guildId: string, userId: string, vol: number) {
-  let g = userVolumes.get(guildId);
-  if (!g) {
-    g = new Map<string, number>();
-    userVolumes.set(guildId, g);
-  }
-  g.set(userId, vol);
+function makePublicUrl(filename: string) {
+  // 人に見せる用（任意）
+  const base = process.env.UPLOAD_BASE_URL || 'http://play.hotamachi.jp:3001/uploads';
+  return `${base}/${filename}`;
 }
+
 
 /**
  * メッセージコマンドのルーター
- *  s!play / s!skip / s!stop / s!queue / s!vol
+ *  s!play / s!skip / s!stop / s!queue/ s!upload
  */
 export async function handleMusicMessage(message: Message) {
   if (!message.guild) return;
@@ -36,10 +42,7 @@ export async function handleMusicMessage(message: Message) {
 
   const client: any = message.client as any;
   const lavalink = client.lavalink;
-  if (!lavalink) {
-    // lavalink 未初期化なら何もしない
-    return;
-  }
+  if (!lavalink) return;
 
   const [cmd, ...rest] = message.content.slice(PREFIX.length).trim().split(/\s+/);
   const command = cmd?.toLowerCase();
@@ -61,17 +64,13 @@ export async function handleMusicMessage(message: Message) {
 
     } else if (command === 'queue') {
       await handleQueue(message);
+   } else if (command === 'upload') {
+      await handleUpload(message);
+}
 
-    } else if (command === 'vol') {
-      // s!vol           → 現在(自分の)設定表示
-      // s!vol 80        → 80% に設定
-      await handleVolume(message, rest[0]);
-    }
   } catch (e) {
     console.error('[music] command error', e);
-    try {
-      await message.reply('❌ 音楽コマンドの処理中にエラーが発生しました。');
-    } catch {}
+    try { await message.reply('❌ 音楽コマンドの処理中にエラーが発生しました。'); } catch {}
   }
 }
 
@@ -82,27 +81,23 @@ async function getOrCreatePlayer(message: Message, voiceChannelId: string) {
   const client: any = message.client as any;
   const lavalink = client.lavalink;
   const guildId = message.guildId!;
-
-  // 既存プレイヤー取得
+  const FIXED_VOLUME = 20; // デフォルト固定音量（ユーザー個別設定は play 時に反映）
   let player = lavalink.players.get(guildId);
 
-  // なければ作成
   if (!player) {
-    player = await lavalink.createPlayer({
-      guildId,
-      voiceChannelId,
-      textChannelId: message.channelId,
-      selfDeaf: true,
-      selfMute: false,
-      volume: DEFAULT_VOL, // 初期値
-    });
+   player = await lavalink.createPlayer({
+  guildId,
+  voiceChannelId,
+  textChannelId: message.channelId,
+  selfDeaf: true,
+  selfMute: false,
+  volume: FIXED_VOLUME,
+  });
+
     await player.connect();
   } else if (player.voiceChannelId !== voiceChannelId) {
-    // 別の VC に居たら移動
     await player.updateVoiceChannel(voiceChannelId);
-    if (!player.connected) {
-      await player.connect();
-    }
+    if (!player.connected) await player.connect();
   }
 
   return player;
@@ -122,93 +117,50 @@ async function handlePlay(message: Message, query: string) {
 
   const player = await getOrCreatePlayer(message, voice.id);
 
-  // 呼び出した人のプリセット音量を反映
-  const volPref = getUserVolume(message.guildId!, message.author.id);
+  // ============================
+  // ✅ 音量は常に 20 に固定する
+  // （ユーザー別/DBの音量は使わない）
+  // ============================
+  const FIXED_VOLUME = 20;
   try {
-    await player.setVolume(volPref);
+    await player.setVolume(FIXED_VOLUME);
   } catch (e) {
     console.warn('[music] setVolume error (play)', e);
   }
 
-  // 🔍 検索（URL/キーワード両対応）
-  const result = await player.search(
-    { query, source: 'youtube' },   // URL でもキーワードでも OK
-    message.author,                 // requester
-  );
+  // URLならHTTP、キーワードならYouTube
+  const isHttpUrl = /^https?:\/\//i.test(query);
 
-  if (!result || !result.tracks?.length) {
+  let result: any;
+  if (isHttpUrl) {
+    result = await player.search({ query, source: 'http' }, message.author);
+  } else {
+    result = await player.search({ query, source: 'youtube' }, message.author);
+  }
+
+  console.log('[music] search query=', query);
+  console.log('[music] isHttpUrl=', isHttpUrl);
+  console.log('[music] loadType=', result?.loadType);
+  console.log('[music] tracks len=', result?.tracks?.length ?? 0);
+  console.log('[music] exception=', (result as any)?.exception);
+
+  if (!result?.tracks?.length) {
     await message.reply('🔍 曲が見つかりませんでした…。');
     return;
   }
 
-  // 1曲だけ採用（URLならその動画、キーワードなら先頭）
   const track = result.tracks[0];
-
   await player.queue.add(track);
 
   if (!player.playing && !player.paused) {
-    // 何も再生してなければすぐ再生
     await player.play();
-    await message.reply(`▶ 再生開始: **${track.info.title}**（音量: ${volPref}%）`);
+    await message.reply(`▶ 再生開始: **${track.info.title}**（音量: ${FIXED_VOLUME}）`);
   } else {
-    // 既に再生中ならキューへ
     const pos = player.queue.tracks.length;
     await message.reply(`⏱ キューに追加しました: **${track.info.title}**（位置: ${pos}）`);
   }
 }
 
-/* ---------- s!vol ---------- */
-async function handleVolume(message: Message, volArg?: string) {
-  if (!message.guildId) {
-    await message.reply('⚠️ サーバー内でのみ使用できます。');
-    return;
-  }
-
-  const client: any = message.client as any;
-  const lavalink = client.lavalink;
-  const guildId = message.guildId!;
-  const userId = message.author.id;
-
-  const player = lavalink.players.get(guildId);
-
-  // 引数なし → 現在の自分の設定 + 実際のプレイヤー音量を表示
-  if (!volArg) {
-    const pref = getUserVolume(guildId, userId);
-    const currentPlayerVol = player?.volume ?? pref;
-
-    await message.reply(
-      `🔊 あなたの音量設定: **${pref}%**\n` +
-      `🎧 現在のプレイヤー音量: **${currentPlayerVol}%**\n` +
-      '※ 実際に流れる音量は VC 全員共通です（最後に s!vol を実行した人の設定が適用されます）。'
-    );
-    return;
-  }
-
-  const num = Number(volArg);
-  if (!Number.isFinite(num)) {
-    await message.reply('⚠️ 音量は 0〜100 の数値で指定してください。例: `s!vol 80`');
-    return;
-  }
-
-  const clamped = Math.min(MAX_VOL, Math.max(MIN_VOL, Math.round(num)));
-
-  // 自分のプリセットを保存
-  setUserVolume(guildId, userId, clamped);
-
-  // プレイヤーがあれば即反映（＝このギルド全体の音量が変わる）
-  if (player) {
-    try {
-      await player.setVolume(clamped);
-    } catch (e) {
-      console.warn('[music] setVolume error (vol)', e);
-    }
-  }
-
-  await message.reply(
-    `🔊 あなたの音量設定を **${clamped}%** にしました。\n` +
-    'このギルドのプレイヤーも同じ音量に変更されています。'
-  );
-}
 
 /* ---------- s!skip ---------- */
 async function handleSkip(message: Message) {
@@ -218,8 +170,7 @@ async function handleSkip(message: Message) {
 
   const player = lavalink.players.get(guildId);
   const hasNext =
-    player &&
-    (player.current || (player.queue && player.queue.tracks && player.queue.tracks.length));
+    player && (player.current || (player.queue?.tracks?.length ?? 0) > 0);
 
   if (!hasNext) {
     await message.reply('⏹ スキップできる曲がありません。');
@@ -267,15 +218,70 @@ async function handleQueue(message: Message) {
   }
 
   const lines: string[] = [];
-  if (current) {
-    lines.push(`▶ 再生中: **${current.info.title}**`);
-  }
+  if (current) lines.push(`▶ 再生中: **${current.info.title}**`);
   if (tracks.length) {
     lines.push('', '📃 キュー:');
-    lines.push(
-      ...tracks.map((t: any, i: number) => `${i + 1}. **${t.info.title}**`),
-    );
+    lines.push(...tracks.map((t: any, i: number) => `${i + 1}. **${t.info.title}**`));
   }
 
   await message.reply(lines.join('\n'));
+}
+
+/* ---------- s!upload ---------- */
+async function handleUpload(message: Message) {
+  if (!message.guildId) {
+    await message.reply('⚠️ サーバー内でのみ使用できます。');
+    return;
+  }
+
+  const att = message.attachments.first();
+  if (!att) {
+    await message.reply('📎 mp3ファイルを添付して `s!upload` を送ってね。');
+    return;
+  }
+
+  const originalName = att.name ?? 'upload.mp3';
+  const ext = path.extname(originalName).toLowerCase();
+  if (ext !== '.mp3') {
+    await message.reply('⚠️ いまは **.mp3** のみ対応です。');
+    return;
+  }
+
+  // ★ 保存ディレクトリを必ず作る
+  fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+
+  const id = crypto.randomUUID();
+  const filename = `${id}.mp3`;
+  const savePath = path.join(UPLOAD_DIR, filename);
+
+  try {
+    const res = await fetch(att.url);
+    if (!res.ok) throw new Error(`download failed: ${res.status} ${res.statusText}`);
+
+    const buf = Buffer.from(await res.arrayBuffer());
+    fs.writeFileSync(savePath, buf);
+
+    const url = makePublicUrl(filename);
+
+   const publicUrl = makePublicUrl(filename);
+   const internalUrl = makeInternalUrl(filename);
+
+  await message.reply(
+    `✅ アップロード完了: **${originalName}**\n` +
+    `🌐 公開URL: ${publicUrl}\n` +
+    `▶ 再生します…`
+   );
+
+// ★再生は internalUrl を渡す（ここ重要）
+await handlePlay(message, internalUrl);
+
+
+    // ここでそのまま再生（URLをplayへ）
+    await handlePlay(message, internalUrl);
+
+  } catch (e) {
+    console.error('[music] upload error', e);
+    try { fs.existsSync(savePath) && fs.unlinkSync(savePath); } catch {}
+    await message.reply('❌ アップロード処理に失敗しました。');
+  }
 }

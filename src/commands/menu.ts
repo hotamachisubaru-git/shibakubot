@@ -1,17 +1,23 @@
 // src/commands/menu.ts
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import {
   ActionRowBuilder, ButtonBuilder, ButtonStyle, ChatInputCommandInteraction,
   ComponentType, EmbedBuilder, ModalBuilder, TextInputBuilder, TextInputStyle,
   ButtonInteraction, UserSelectMenuBuilder, StringSelectMenuBuilder, ModalSubmitInteraction,
-  PermissionFlagsBits, ChannelSelectMenuBuilder, ChannelType, MessageFlags
+  PermissionFlagsBits, ChannelSelectMenuBuilder, ChannelType, MessageFlags,
+  InteractionCollector, MessageComponentInteraction
 } from 'discord.js';
 import { handleMedalRankingButton, handleMedalSendButton } from './medal';
 import {
   loadGuildStore, addCountGuild, getSbkRange, setSbkRange,
   setCountGuild, getImmuneList, addImmuneId, removeImmuneId,
-  getMedalBalance,addMedals,setMedals,isImmune
+  getMedalBalance, addMedals, setMedals, isImmune,
+  getRecentLogs, getLogCount, getSetting, setSetting, openDb
 } from '../data';
-import {sendLog } from '../logging';
+import { LOG_CHANNEL_ID } from '../config';
+import { sendLog } from '../logging';
 import { displayNameFrom } from '../utils/displayNameUtil';
 /* ===== 設定 ===== */
 const OWNER_IDS = (process.env.OWNER_IDS || '')
@@ -19,6 +25,13 @@ const OWNER_IDS = (process.env.OWNER_IDS || '')
 const IMMUNE_IDS = (process.env.IMMUNE_IDS || '')
   .split(',').map(s => s.trim()).filter(Boolean);
 const PAGE_SIZE = 10;
+const AUDIT_LIMIT = 10;
+const BACKUP_LIST_LIMIT = 5;
+const LOG_CHANNEL_KEY = 'logChannelId';
+const DATA_ROOT = path.join(process.cwd(), 'data');
+const GUILD_DB_ROOT = path.join(DATA_ROOT, 'guilds');
+const MEDAL_DB_PATH = path.join(DATA_ROOT, 'medalbank.db');
+const BACKUP_ROOT = path.join(process.cwd(), 'backup');
 
 async function guildTopEmbed(i: ChatInputCommandInteraction | ButtonInteraction) {
   const gid = i.guildId!;
@@ -70,16 +83,118 @@ function disabledCopyOfRows(rows: ActionRowBuilder<ButtonBuilder>[]) {
   });
 }
 
+/* ===== ヘルパー ===== */
+function ensureDir(dir: string) {
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+}
+
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes)) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let size = bytes;
+  let idx = 0;
+  while (size >= 1024 && idx < units.length - 1) {
+    size /= 1024;
+    idx++;
+  }
+  const fixed = idx === 0 ? size.toFixed(0) : size.toFixed(size >= 10 ? 0 : 1);
+  return `${fixed} ${units[idx]}`;
+}
+
+function formatDuration(ms: number): string {
+  const totalSeconds = Math.floor(ms / 1000);
+  const days = Math.floor(totalSeconds / 86400);
+  const hours = Math.floor((totalSeconds % 86400) / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const parts = [];
+  if (days) parts.push(`${days}d`);
+  if (hours || parts.length) parts.push(`${hours}h`);
+  if (minutes || parts.length) parts.push(`${minutes}m`);
+  parts.push(`${seconds}s`);
+  return parts.join(' ');
+}
+
+function formatTimestamp(d = new Date()): string {
+  const pad = (n: number) => n.toString().padStart(2, '0');
+  return [
+    d.getFullYear(),
+    pad(d.getMonth() + 1),
+    pad(d.getDate()),
+  ].join('') + '-' + [
+    pad(d.getHours()),
+    pad(d.getMinutes()),
+    pad(d.getSeconds()),
+  ].join('');
+}
+
+function listBackupFiles(dir: string, limit: number): string[] {
+  if (!fs.existsSync(dir)) return [];
+  const files = fs.readdirSync(dir).filter(f => f.endsWith('.db')).sort().reverse();
+  return files.slice(0, limit).map(name => {
+    const full = path.join(dir, name);
+    const size = fs.existsSync(full) ? formatBytes(fs.statSync(full).size) : '0 B';
+    return `${name} (${size})`;
+  });
+}
+
+function copyDbWithWal(src: string, dest: string): string[] {
+  if (!fs.existsSync(src)) return [];
+  ensureDir(path.dirname(dest));
+  const copied: string[] = [];
+  fs.copyFileSync(src, dest);
+  copied.push(dest);
+  for (const suffix of ['-wal', '-shm']) {
+    const walSrc = `${src}${suffix}`;
+    if (fs.existsSync(walSrc)) {
+      const walDest = `${dest}${suffix}`;
+      fs.copyFileSync(walSrc, walDest);
+      copied.push(walDest);
+    }
+  }
+  return copied;
+}
+
+function looksLikeSnowflake(value: string): boolean {
+  return /^\d{17,20}$/.test(value);
+}
+
+async function requireAdminOrDev(i: MessageComponentInteraction, message = 'この操作は管理者/開発者のみ利用できます。') {
+  const isAdmin = i.memberPermissions?.has(PermissionFlagsBits.Administrator) ?? false;
+  const isDev = OWNER_IDS.includes(i.user.id);
+  if (!isAdmin && !isDev) {
+    await i.reply({ content: `⚠️ ${message}`, ephemeral: true });
+    return false;
+  }
+  return true;
+}
+
+async function showModalAndAwait(interactor: MessageComponentInteraction, modal: ModalBuilder, time = 60_000) {
+  await interactor.showModal(modal);
+  return interactor.awaitModalSubmit({
+    time,
+    filter: (m: ModalSubmitInteraction) => m.user.id === interactor.user.id,
+  }).catch(() => null);
+}
+
+function createPanelCollector(interaction: ButtonInteraction, panel: any, time = 60_000) {
+  return interaction.channel!.createMessageComponentCollector({
+    time,
+    filter: i => i.user.id === interaction.user.id && i.message.id === (panel as any).id,
+  });
+}
+
 /* ===== メニューUI ===== */
 function buildMenu(min: number, max: number, page: number = 1) {
   const maxPage = 4;
+  const pageName = page === 1 ? '基本' : page === 2 ? 'メダル' : page === 3 ? 'VC' : '管理者';
 
   const embed = new EmbedBuilder()
     .setTitle('しばくbot メニュー')
     .setDescription(
       `下のボタンから素早く操作できます（この表示は**あなたにだけ**見えます）。\n` +
       `現在のしばく回数: **${min}〜${max}**\n` +
-      `表示カテゴリ: **${page === 1 ? '基本' : page === 2 ? 'メダル' : 'VC'} (${page}/${maxPage})**`
+      `表示カテゴリ: **${pageName} (${page}/${maxPage})**`
     );
 
   // 基本操作
@@ -123,8 +238,6 @@ function buildMenu(min: number, max: number, page: number = 1) {
     new ButtonBuilder().setCustomId('menu_sysstats').setLabel('システム統計').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('menu_backup').setLabel('バックアップ作業').setStyle(ButtonStyle.Secondary),
   );
-   
- 
 
   // ページごとに出す行を切り替える
   const rows: ActionRowBuilder<ButtonBuilder>[] = [];
@@ -135,6 +248,8 @@ function buildMenu(min: number, max: number, page: number = 1) {
     rows.push(row3);             // メダル
   } else if (page === 3) {
     rows.push(row4);             // VC
+  } else if (page === 4) {
+    rows.push(row5);             // 管理者
   }
 
   // 下部ページナビ
@@ -154,7 +269,7 @@ function buildMenu(min: number, max: number, page: number = 1) {
     new ButtonBuilder()
       .setCustomId('menu_page_admin')
       .setLabel('管理者')
-      .setStyle(page === 4 ? ButtonStyle.Primary : ButtonStyle.Secondary),  
+      .setStyle(page === 4 ? ButtonStyle.Primary : ButtonStyle.Secondary),
   );
   rows.push(navRow);
 
@@ -190,7 +305,7 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
   // ★ メッセージオブジェクトは別途取得
   const msg = await interaction.fetchReply();
 
-    const collector = interaction.channel!.createMessageComponentCollector({
+  const collector = interaction.channel!.createMessageComponentCollector({
     componentType: ComponentType.Button,
     time: 60_000,
     filter: i => i.user.id === interaction.user.id && i.message.id === (msg as any).id,
@@ -286,13 +401,7 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
                 .setLabel('パスワード（例: 10005）'),
             ),
           );
-          await btn.showModal(modal);
-          const submitted = await btn
-            .awaitModalSubmit({
-              time: 60_000,
-              filter: (m: ModalSubmitInteraction) => m.user.id === btn.user.id,
-            })
-            .catch(() => null);
+          const submitted = await showModalAndAwait(btn, modal);
           if (!submitted) break;
 
           const g = submitted.fields.getTextInputValue('game').trim() || 'PPR';
@@ -335,10 +444,7 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
           const panel = await btn.fetchReply();
           let pickedUserId: string | null = null;
 
-          const sub = btn.channel!.createMessageComponentCollector({
-            time: 60_000,
-            filter: i => i.user.id === btn.user.id && i.message.id === (panel as any).id,
-          });
+          const sub = createPanelCollector(btn, panel);
 
           sub.on('collect', async (i) => {
             if (i.isUserSelectMenu() && i.customId === 'sbk_pick_user') {
@@ -380,13 +486,7 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
                 ),
               );
 
-              await i.showModal(modal);
-              const submitted = await i
-                .awaitModalSubmit({
-                  time: 60_000,
-                  filter: (m: ModalSubmitInteraction) => m.user.id === i.user.id,
-                })
-                .catch(() => null);
+              const submitted = await showModalAndAwait(i, modal);
               if (!submitted) return;
 
               const localImmune = isImmune(gid, pickedUserId!);
@@ -450,12 +550,7 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
 
         /* --- 上限設定 --- */
         case 'menu_limit': {
-          const isAdmin = btn.memberPermissions?.has(PermissionFlagsBits.Administrator) ?? false;
-          const isDev = OWNER_IDS.includes(btn.user.id);
-          if (!isAdmin && !isDev) {
-            await btn.reply({ content: '⚠️ 上限設定は管理者/開発者のみ。', ephemeral: true });
-            break;
-          }
+          if (!await requireAdminOrDev(btn, '上限設定は管理者/開発者のみ。')) break;
 
           const modal = new ModalBuilder().setCustomId('limit_modal').setTitle('しばく回数の上限設定');
           modal.addComponents(
@@ -477,13 +572,7 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
             ),
           );
 
-          await btn.showModal(modal);
-          const submitted = await btn
-            .awaitModalSubmit({
-              time: 60_000,
-              filter: m => m.user.id === btn.user.id,
-            })
-            .catch(() => null);
+          const submitted = await showModalAndAwait(btn, modal);
           if (!submitted) break;
 
           const minIn = Number(submitted.fields.getTextInputValue('min'));
@@ -509,12 +598,7 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
 
         /* --- 免除管理 --- */
         case 'menu_immune': {
-          const isAdmin = btn.memberPermissions?.has(PermissionFlagsBits.Administrator) ?? false;
-          const isDev = OWNER_IDS.includes(btn.user.id);
-          if (!isAdmin && !isDev) {
-            await btn.reply({ content: '⚠️ 免除管理は管理者/開発者のみ。', ephemeral: true });
-            break;
-          }
+          if (!await requireAdminOrDev(btn, '免除管理は管理者/開発者のみ。')) break;
 
           const rowAct = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
             new StringSelectMenuBuilder()
@@ -550,10 +634,7 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
           let act: 'add' | 'remove' | 'list' | null = null;
           let target: string | null = null;
 
-          const sub = btn.channel!.createMessageComponentCollector({
-            time: 60_000,
-            filter: i => i.user.id === btn.user.id && i.message.id === (panel as any).id,
-          });
+          const sub = createPanelCollector(btn, panel);
 
           sub.on('collect', async (i) => {
             if (i.isStringSelectMenu() && i.customId === 'imm_act') {
@@ -630,12 +711,7 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
 
         /* --- 値を直接設定 --- */
         case 'menu_control': {
-          const isAdmin = btn.memberPermissions?.has(PermissionFlagsBits.Administrator) ?? false;
-          const isDev = OWNER_IDS.includes(btn.user.id);
-          if (!isAdmin && !isDev) {
-            await btn.reply({ content: '⚠️ 値の直接設定は管理者/開発者のみ。', ephemeral: true });
-            break;
-          }
+          if (!await requireAdminOrDev(btn, '値の直接設定は管理者/開発者のみ。')) break;
 
           const rowUser = new ActionRowBuilder<UserSelectMenuBuilder>().addComponents(
             new UserSelectMenuBuilder()
@@ -659,10 +735,7 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
           const panel = await btn.fetchReply();
           let target: string | null = null;
 
-          const sub = btn.channel!.createMessageComponentCollector({
-            time: 60_000,
-            filter: i => i.user.id === btn.user.id && i.message.id === (panel as any).id,
-          });
+          const sub = createPanelCollector(btn, panel);
 
           sub.on('collect', async (i) => {
             if (i.isUserSelectMenu() && i.customId === 'ctl_user') {
@@ -693,14 +766,7 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
                     .setLabel('回数（0以上の整数）'),
                 ),
               );
-              await i.showModal(modal);
-
-              const submitted = await i
-                .awaitModalSubmit({
-                  time: 60_000,
-                  filter: m => m.user.id === i.user.id,
-                })
-                .catch(() => null);
+              const submitted = await showModalAndAwait(i, modal);
               if (!submitted) return;
 
               const value = Number(submitted.fields.getTextInputValue('value'));
@@ -777,10 +843,7 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
           let pickedUsers: string[] = [];
           let destChannelId: string | null = null;
 
-          const sub = btn.channel!.createMessageComponentCollector({
-            time: 60_000,
-            filter: i => i.user.id === btn.user.id && i.message.id === (panel as any).id,
-          });
+          const sub = createPanelCollector(btn, panel);
 
           sub.on('collect', async (i) => {
             if (i.isUserSelectMenu() && i.customId === 'movevc_users') {
@@ -900,10 +963,7 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
           const panel = await btn.fetchReply();
           let pickedUsers: string[] = [];
 
-          const sub = btn.channel!.createMessageComponentCollector({
-            time: 60_000,
-            filter: i => i.user.id === btn.user.id && i.message.id === (panel as any).id,
-          });
+          const sub = createPanelCollector(btn, panel);
 
           sub.on('collect', async (i) => {
             if (i.isUserSelectMenu() && i.customId === 'discvc_users') {
@@ -1001,10 +1061,7 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
           const panel = await btn.fetchReply();
           let pickedUsers: string[] = [];
 
-          const sub = btn.channel!.createMessageComponentCollector({
-            time: 60_000,
-            filter: i => i.user.id === btn.user.id && i.message.id === (panel as any).id,
-          });
+          const sub = createPanelCollector(btn, panel);
 
           sub.on('collect', async (i) => {
             if (i.isUserSelectMenu() && i.customId === 'mutevc_users') {
@@ -1102,10 +1159,7 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
           const panel = await btn.fetchReply();
           let pickedUsers: string[] = [];
 
-          const sub = btn.channel!.createMessageComponentCollector({
-            time: 60_000,
-            filter: i => i.user.id === btn.user.id && i.message.id === (panel as any).id,
-          });
+          const sub = createPanelCollector(btn, panel);
 
           sub.on('collect', async (i) => {
             if (i.isUserSelectMenu() && i.customId === 'unmutevc_users') {
@@ -1182,15 +1236,7 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
 
         /* --- メダル管理 --- */
         case 'menu_admin': {
-          const isAdmin = btn.memberPermissions?.has(PermissionFlagsBits.Administrator) ?? false;
-          const isDev = OWNER_IDS.includes(btn.user.id);
-          if (!isAdmin && !isDev) {
-            await btn.reply({
-              content: '⚠️ メダル管理は管理者/開発者のみ利用できます。',
-              ephemeral: true,
-            });
-            break;
-          }
+          if (!await requireAdminOrDev(btn, 'メダル管理は管理者/開発者のみ利用できます。')) break;
 
           const rowUser = new ActionRowBuilder<UserSelectMenuBuilder>().addComponents(
             new UserSelectMenuBuilder()
@@ -1215,10 +1261,7 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
           const panel = await btn.fetchReply();
           let targetId: string | null = null;
 
-          const sub = btn.channel!.createMessageComponentCollector({
-            time: 60_000,
-            filter: i => i.user.id === btn.user.id && i.message.id === (panel as any).id,
-          });
+          const sub = createPanelCollector(btn, panel);
 
           sub.on('collect', async (i) => {
             if (i.isUserSelectMenu() && i.customId === 'bank_user') {
@@ -1258,14 +1301,7 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
                 ),
               );
 
-              await i.showModal(modal);
-
-              const submitted = await i
-                .awaitModalSubmit({
-                  time: 60_000,
-                  filter: m => m.user.id === i.user.id,
-                })
-                .catch(() => null);
+              const submitted = await showModalAndAwait(i, modal);
               if (!submitted) return;
 
               const raw = submitted.fields.getTextInputValue('value');
@@ -1330,12 +1366,430 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
                 .setDescription(
                   [
                     'このメニューから、ランキング/メンバー/統計/ルーム告知/上限設定/免除管理/値の直接設定/VC移動/VC切断/VCミュート/VCミュート解除/メダル機能 が使えます。',
+                    '管理者ページから、監査ログ/サーバー設定/システム統計/バックアップ作業が利用できます。',
                     '※ 上限設定・免除管理・値の直接設定・VC移動・VC切断・VCミュート・ミュート解除・メダル管理は 管理者 or OWNER_IDS で利用可。',
+                    '※ 開発者ツール/メダルDBバックアップは OWNER_IDS のみ利用可。',
                     `現在の回数レンジ: **${sbkMin}〜${sbkMax}**`,
                   ].join('\n'),
                 ),
             ],
             ephemeral: true,
+          });
+          break;
+        }
+
+        /* --- 管理者: 監査ログ --- */
+        case 'menu_audit': {
+          if (!await requireAdminOrDev(btn, '監査ログは管理者/開発者のみ利用できます。')) break;
+
+          await btn.deferUpdate();
+
+          const logs = getRecentLogs(gid, AUDIT_LIMIT);
+          if (!logs.length) {
+            await btn.followUp({ content: '監査ログはまだありません。', ephemeral: true });
+            break;
+          }
+
+          const lines = await Promise.all(
+            logs.map(async (log) => {
+              const actorLabel = log.actor
+                ? (looksLikeSnowflake(log.actor)
+                  ? await displayNameFrom(btn, log.actor)
+                  : log.actor)
+                : '不明';
+              const targetLabel = await displayNameFrom(btn, log.target);
+              const delta = log.delta >= 0 ? `+${log.delta}` : `${log.delta}`;
+              const when = new Date(log.at).toLocaleString('ja-JP');
+              const reasonRaw = (log.reason ?? '').replace(/\s+/g, ' ').trim();
+              const reason = reasonRaw ? (reasonRaw.length > 40 ? `${reasonRaw.slice(0, 40)}...` : reasonRaw) : '（理由なし）';
+              return `- ${when} ${actorLabel} -> ${targetLabel} (${delta}) ${reason}`;
+            })
+          );
+
+          const total = getLogCount(gid);
+          const embed = new EmbedBuilder()
+            .setTitle('監査ログ（しばき）')
+            .setDescription(lines.join('\n'))
+            .setFooter({ text: `最新 ${logs.length} 件 / 全 ${total} 件` });
+
+          await btn.followUp({ embeds: [embed], ephemeral: true });
+          break;
+        }
+
+        /* --- 管理者: サーバー設定 --- */
+        case 'menu_settings': {
+          if (!await requireAdminOrDev(btn, 'サーバー設定は管理者/開発者のみ利用できます。')) break;
+
+          const current = getSetting(gid, LOG_CHANNEL_KEY);
+          const fallbackText = LOG_CHANNEL_ID
+            ? `<#${LOG_CHANNEL_ID}>（env）`
+            : '未設定';
+          const currentText = current ? `<#${current}>` : fallbackText;
+
+          const rowChannel = new ActionRowBuilder<ChannelSelectMenuBuilder>().addComponents(
+            new ChannelSelectMenuBuilder()
+              .setCustomId('settings_log_channel')
+              .setPlaceholder('ログ送信チャンネルを選択')
+              .addChannelTypes(ChannelType.GuildText)
+              .setMinValues(1)
+              .setMaxValues(1),
+          );
+
+          const rowExec = new ActionRowBuilder<ButtonBuilder>().addComponents(
+            new ButtonBuilder().setCustomId('settings_save').setLabel('保存').setStyle(ButtonStyle.Primary),
+            new ButtonBuilder().setCustomId('settings_clear').setLabel('クリア').setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder().setCustomId('settings_cancel').setLabel('キャンセル').setStyle(ButtonStyle.Danger),
+          );
+
+          await btn.reply({
+            content:
+              `現在のログチャンネル: ${currentText}\n` +
+              'チャンネルを選択して「保存」を押してください。',
+            components: [rowChannel, rowExec],
+            ephemeral: true,
+          });
+
+          const panel = await btn.fetchReply();
+          let pickedChannelId: string | null = null;
+
+          const sub = createPanelCollector(btn, panel);
+
+          sub.on('collect', async (i) => {
+            if (i.isChannelSelectMenu() && i.customId === 'settings_log_channel') {
+              pickedChannelId = i.values[0] ?? null;
+              await i.deferUpdate();
+              return;
+            }
+
+            if (i.isButton() && i.customId === 'settings_cancel') {
+              await i.update({ content: 'キャンセルしました。', components: [] });
+              sub.stop('cancel');
+              return;
+            }
+
+            if (i.isButton() && i.customId === 'settings_clear') {
+              setSetting(gid, LOG_CHANNEL_KEY, null);
+              await i.reply({
+                content: `ログチャンネル設定をクリアしました。現在: ${fallbackText}`,
+                ephemeral: true,
+              });
+              try {
+                await (panel as any).edit({ components: [] });
+              } catch {}
+              sub.stop('done');
+              return;
+            }
+
+            if (i.isButton() && i.customId === 'settings_save') {
+              if (!pickedChannelId) {
+                await i.reply({ content: 'チャンネルを選択してください。', ephemeral: true });
+                return;
+              }
+
+              setSetting(gid, LOG_CHANNEL_KEY, pickedChannelId);
+              await i.reply({
+                content: `ログチャンネルを <#${pickedChannelId}> に設定しました。`,
+                ephemeral: true,
+              });
+
+              try {
+                await (panel as any).edit({ components: [] });
+              } catch {}
+              sub.stop('done');
+            }
+          });
+
+          sub.on('end', async () => {
+            try {
+              await (panel as any).edit({ components: [] });
+            } catch {}
+          });
+          break;
+        }
+
+        /* --- 管理者: 開発者ツール --- */
+        case 'menu_devtools': {
+          const isDev = OWNER_IDS.includes(btn.user.id);
+          if (!isDev) {
+            await btn.reply({ content: '開発者ツールは OWNER_IDS のみ利用できます。', ephemeral: true });
+            break;
+          }
+
+          const rowAct = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+            new StringSelectMenuBuilder()
+              .setCustomId('dev_act')
+              .setPlaceholder('ツールを選択')
+              .addOptions(
+                { label: 'デバッグ情報', value: 'info' },
+                { label: 'WALチェックポイント', value: 'checkpoint' },
+                { label: 'DB最適化（VACUUM）', value: 'vacuum' },
+              ),
+          );
+          const rowExec = new ActionRowBuilder<ButtonBuilder>().addComponents(
+            new ButtonBuilder().setCustomId('dev_exec').setLabel('実行').setStyle(ButtonStyle.Primary),
+            new ButtonBuilder().setCustomId('dev_cancel').setLabel('キャンセル').setStyle(ButtonStyle.Secondary),
+          );
+
+          await btn.reply({
+            content: '実行する開発者ツールを選んでください。',
+            components: [rowAct, rowExec],
+            ephemeral: true,
+          });
+
+          const panel = await btn.fetchReply();
+          let act: 'info' | 'checkpoint' | 'vacuum' | null = null;
+          const sub = createPanelCollector(btn, panel);
+
+          sub.on('collect', async (i) => {
+            if (i.isStringSelectMenu() && i.customId === 'dev_act') {
+              act = i.values[0] as any;
+              await i.deferUpdate();
+              return;
+            }
+
+            if (i.isButton() && i.customId === 'dev_cancel') {
+              await i.update({ content: 'キャンセルしました。', components: [] });
+              sub.stop('cancel');
+              return;
+            }
+
+            if (i.isButton() && i.customId === 'dev_exec') {
+              if (!act) {
+                await i.reply({ content: 'ツールを選択してください。', ephemeral: true });
+                return;
+              }
+
+              await i.deferUpdate();
+
+              if (act === 'info') {
+                const db = openDb(gid);
+                try {
+                  const countRow = db.prepare(`SELECT COUNT(*) AS count FROM counts`).get() as { count: number };
+                  const immuneRow = db.prepare(`SELECT COUNT(*) AS count FROM immune`).get() as { count: number };
+                  const logRow = db.prepare(`SELECT COUNT(*) AS count FROM logs`).get() as { count: number };
+                  const settingsRow = db.prepare(`SELECT COUNT(*) AS count FROM settings`).get() as { count: number };
+                  const dbPath = path.join(GUILD_DB_ROOT, `${gid}.db`);
+                  const dbSize = fs.existsSync(dbPath) ? formatBytes(fs.statSync(dbPath).size) : '0 B';
+                  const logChannel = getSetting(gid, LOG_CHANNEL_KEY);
+                  const logLabel = logChannel
+                    ? `<#${logChannel}>`
+                    : (LOG_CHANNEL_ID ? `<#${LOG_CHANNEL_ID}>（env）` : '未設定');
+
+                  const embed = new EmbedBuilder()
+                    .setTitle('開発者ツール: デバッグ情報')
+                    .addFields(
+                      { name: 'ギルド', value: `${i.guild?.name ?? 'unknown'} (${gid})` },
+                      { name: 'DB', value: `size: ${dbSize}\ncounts: ${countRow.count}\nimmune: ${immuneRow.count}\nlogs: ${logRow.count}\nsettings: ${settingsRow.count}` },
+                      { name: 'ログチャンネル', value: logLabel },
+                      { name: 'SBKレンジ', value: `${sbkMin}〜${sbkMax}`, inline: true },
+                    );
+
+                  await i.followUp({ embeds: [embed], ephemeral: true });
+                } finally {
+                  db.close();
+                }
+              }
+
+              if (act === 'checkpoint') {
+                const db = openDb(gid);
+                try {
+                  db.pragma('wal_checkpoint(TRUNCATE)');
+                  await i.followUp({ content: 'WALチェックポイントを実行しました。', ephemeral: true });
+                } catch (e) {
+                  await i.followUp({ content: 'WALチェックポイントに失敗しました。', ephemeral: true });
+                } finally {
+                  db.close();
+                }
+              }
+
+              if (act === 'vacuum') {
+                const db = openDb(gid);
+                try {
+                  db.exec('VACUUM');
+                  await i.followUp({ content: 'VACUUM を実行しました。', ephemeral: true });
+                } catch {
+                  await i.followUp({ content: 'VACUUM に失敗しました。', ephemeral: true });
+                } finally {
+                  db.close();
+                }
+              }
+
+              try {
+                await (panel as any).edit({ components: [] });
+              } catch {}
+              sub.stop('done');
+            }
+          });
+
+          sub.on('end', async () => {
+            try {
+              await (panel as any).edit({ components: [] });
+            } catch {}
+          });
+          break;
+        }
+
+        /* --- 管理者: システム統計 --- */
+        case 'menu_sysstats': {
+          if (!await requireAdminOrDev(btn, 'システム統計は管理者/開発者のみ利用できます。')) break;
+
+          await btn.deferUpdate();
+
+          const mem = process.memoryUsage();
+          const totalMem = os.totalmem();
+          const freeMem = os.freemem();
+          const wsPing = btn.client.ws?.ping ?? -1;
+
+          const embed = new EmbedBuilder()
+            .setTitle('システム統計')
+            .addFields(
+              { name: '稼働時間', value: formatDuration(process.uptime() * 1000), inline: true },
+              { name: 'Node', value: process.version, inline: true },
+              { name: 'WS Ping', value: wsPing >= 0 ? `${Math.round(wsPing)}ms` : '不明', inline: true },
+              {
+                name: 'メモリ',
+                value: `RSS ${formatBytes(mem.rss)} / Heap ${formatBytes(mem.heapUsed)} / ${formatBytes(mem.heapTotal)}`,
+              },
+              { name: 'System', value: `${os.platform()} ${os.arch()} / CPU ${os.cpus().length} cores` },
+              { name: 'RAM', value: `${formatBytes(totalMem - freeMem)} / ${formatBytes(totalMem)}` },
+              {
+                name: 'Bot',
+                value: `Guilds ${btn.client.guilds.cache.size} / Users ${btn.client.users.cache.size} / Channels ${btn.client.channels.cache.size}`,
+              },
+            );
+
+          await btn.followUp({ embeds: [embed], ephemeral: true });
+          break;
+        }
+
+        /* --- 管理者: バックアップ作業 --- */
+        case 'menu_backup': {
+          if (!await requireAdminOrDev(btn, 'バックアップ作業は管理者/開発者のみ利用できます。')) break;
+
+          const rowAct = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+            new StringSelectMenuBuilder()
+              .setCustomId('backup_act')
+              .setPlaceholder('操作を選択')
+              .addOptions(
+                { label: 'ギルドDBをバックアップ', value: 'guild' },
+                { label: 'メダルDBをバックアップ（開発者のみ）', value: 'medal' },
+                { label: 'バックアップ一覧', value: 'list' },
+              ),
+          );
+          const rowExec = new ActionRowBuilder<ButtonBuilder>().addComponents(
+            new ButtonBuilder().setCustomId('backup_exec').setLabel('実行').setStyle(ButtonStyle.Primary),
+            new ButtonBuilder().setCustomId('backup_cancel').setLabel('キャンセル').setStyle(ButtonStyle.Secondary),
+          );
+
+          await btn.reply({
+            content: 'バックアップ操作を選んでください。',
+            components: [rowAct, rowExec],
+            ephemeral: true,
+          });
+
+          const panel = await btn.fetchReply();
+          let act: 'guild' | 'medal' | 'list' | null = null;
+          const sub = createPanelCollector(btn, panel);
+
+          sub.on('collect', async (i) => {
+            if (i.isStringSelectMenu() && i.customId === 'backup_act') {
+              act = i.values[0] as any;
+              await i.deferUpdate();
+              return;
+            }
+
+            if (i.isButton() && i.customId === 'backup_cancel') {
+              await i.update({ content: 'キャンセルしました。', components: [] });
+              sub.stop('cancel');
+              return;
+            }
+
+            if (i.isButton() && i.customId === 'backup_exec') {
+              if (!act) {
+                await i.reply({ content: '操作を選択してください。', ephemeral: true });
+                return;
+              }
+
+              await i.deferUpdate();
+
+              if (act === 'guild') {
+                const src = path.join(GUILD_DB_ROOT, `${gid}.db`);
+                if (!fs.existsSync(src)) {
+                  await i.followUp({ content: 'ギルドDBが見つかりません。', ephemeral: true });
+                } else {
+                  try {
+                    const db = openDb(gid);
+                    try {
+                      db.pragma('wal_checkpoint(TRUNCATE)');
+                    } finally {
+                      db.close();
+                    }
+                  } catch {}
+
+                  const stamp = formatTimestamp();
+                  const destDir = path.join(BACKUP_ROOT, 'guilds', gid);
+                  const dest = path.join(destDir, `${stamp}.db`);
+                  const copied = copyDbWithWal(src, dest);
+                  const list = copied.map(p => `- ${path.relative(process.cwd(), p)}`).join('\n');
+                  await i.followUp({
+                    content: copied.length ? `バックアップを作成しました:\n${list}` : 'バックアップに失敗しました。',
+                    ephemeral: true,
+                  });
+                }
+              }
+
+              if (act === 'medal') {
+                const isDev = OWNER_IDS.includes(i.user.id);
+                if (!isDev) {
+                  await i.followUp({ content: 'メダルDBのバックアップは開発者のみ利用できます。', ephemeral: true });
+                } else if (!fs.existsSync(MEDAL_DB_PATH)) {
+                  await i.followUp({ content: 'メダルDBが見つかりません。', ephemeral: true });
+                } else {
+                  const stamp = formatTimestamp();
+                  const destDir = path.join(BACKUP_ROOT, 'medalbank');
+                  const dest = path.join(destDir, `${stamp}.db`);
+                  const copied = copyDbWithWal(MEDAL_DB_PATH, dest);
+                  const list = copied.map(p => `- ${path.relative(process.cwd(), p)}`).join('\n');
+                  await i.followUp({
+                    content: copied.length ? `バックアップを作成しました:\n${list}` : 'バックアップに失敗しました。',
+                    ephemeral: true,
+                  });
+                }
+              }
+
+              if (act === 'list') {
+                const guildDir = path.join(BACKUP_ROOT, 'guilds', gid);
+                const guildList = listBackupFiles(guildDir, BACKUP_LIST_LIMIT);
+                const isDev = OWNER_IDS.includes(i.user.id);
+                const medalDir = path.join(BACKUP_ROOT, 'medalbank');
+                const medalList = isDev ? listBackupFiles(medalDir, BACKUP_LIST_LIMIT) : [];
+
+                const lines = [
+                  'ギルドDBバックアップ:',
+                  ...(guildList.length ? guildList.map(x => `- ${x}`) : ['（なし）']),
+                  'メダルDBバックアップ:',
+                  ...(isDev
+                    ? (medalList.length ? medalList.map(x => `- ${x}`) : ['（なし）'])
+                    : ['（開発者のみ）']),
+                ];
+
+                await i.followUp({
+                  content: lines.join('\n'),
+                  ephemeral: true,
+                });
+              }
+
+              try {
+                await (panel as any).edit({ components: [] });
+              } catch {}
+              sub.stop('done');
+            }
+          });
+
+          sub.on('end', async () => {
+            try {
+              await (panel as any).edit({ components: [] });
+            } catch {}
           });
           break;
         }
@@ -1355,7 +1809,7 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
 
         default: {
           // 何もしない（とりあえず更新だけしておく）
-          await btn.deferUpdate().catch(() => {});
+          await btn.deferUpdate().catch(() => { });
           break;
         }
       }
@@ -1367,6 +1821,6 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
   collector.on('end', async () => {
     try {
       await (msg as any).edit({ components: disabledCopyOfRows(built.rows) });
-    } catch {}
+    } catch { }
   });
 }

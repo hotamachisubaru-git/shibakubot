@@ -22,23 +22,21 @@ const commands = [
     .setName('sbk')
     .setDescription('ユーザーをしばく')
     .addUserOption(opt =>
-      opt
-        .setName('user')
-        .setDescription('しばく相手')
-        .setRequired(true),
-    )
-    .addIntegerOption(opt =>
-      opt
-        .setName('count')
-        .setDescription('しばく回数（省略時は下限値）')
-        .setRequired(true),
-    )
-    .addStringOption(opt =>
-      opt
-        .setName('reason')
-        .setDescription('理由）')
-        .setRequired(true),
-    )
+  opt.setName('user')
+     .setDescription('しばく対象')
+     .setRequired(true)
+)
+.addIntegerOption(opt =>
+  opt.setName('count')
+     .setDescription('しばく回数（省略可・ランダム）')
+     .setRequired(false)   // ← 重要
+)
+.addStringOption(opt =>
+  opt.setName('reason')
+     .setDescription('理由（省略可・ランダム）')
+     .setRequired(false)   // ← 重要
+)
+
     .toJSON(),
 
   // /menu メニュー

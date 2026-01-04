@@ -7,7 +7,10 @@ import {
   ModalSubmitInteraction,
 } from 'discord.js';
 import { LOG_CHANNEL_ID } from './config';
+import { getSetting } from './data';
 import { displayNameFrom, AnyInteraction } from './utils/displayNameUtil';
+
+const LOG_CHANNEL_KEY = 'logChannelId';
 
 export async function sendLog(
   interaction: AnyInteraction,
@@ -17,14 +20,24 @@ export async function sendLog(
   count: number,
   next: number,
 ): Promise<void> {
-  if (!LOG_CHANNEL_ID) return;
-
   const guild = interaction.guild;
   if (!guild) return;
 
-  const ch = await interaction.client.channels
-  .fetch(LOG_CHANNEL_ID)
-  .catch(() => null);
+  const guildId = interaction.guildId ?? guild.id;
+  const customChannelId = guildId ? getSetting(guildId, LOG_CHANNEL_KEY) : null;
+  let channelId = customChannelId || LOG_CHANNEL_ID;
+  if (!channelId) return;
+
+  let ch = await interaction.client.channels
+    .fetch(channelId)
+    .catch(() => null);
+
+  if (!ch && customChannelId && LOG_CHANNEL_ID && LOG_CHANNEL_ID !== customChannelId) {
+    channelId = LOG_CHANNEL_ID;
+    ch = await interaction.client.channels
+      .fetch(channelId)
+      .catch(() => null);
+  }
   
   if (!ch || ch.type !== ChannelType.GuildText) return;
 

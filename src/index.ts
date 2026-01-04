@@ -2,6 +2,10 @@
 import 'dotenv/config';
 import { ReadLine } from 'node:readline';
 import readline from 'node:readline';
+import express from 'express';
+import path from 'path';
+import fs from 'fs';
+import { randomInt, randomReason } from './utils/sbkRandom';
 import { LavalinkManager } from 'lavalink-client';
 import {
   Client,
@@ -27,7 +31,7 @@ import {
   getSbkRange,
 } from './data';
 
-//import { initLavalink} from './lavalink';
+
 import { sendLog } from './logging';
 import { handleTop } from './commands/top';
 import { handleMembers } from './commands/members';
@@ -37,6 +41,19 @@ import { handleHelp } from './commands/help';
 import { handleReset } from './commands/reset';
 import { handleStats } from './commands/stats';
 import { handleMusicMessage } from './music';
+
+const UPLOAD_DIR = path.resolve(process.env.FILE_DIR || './files');
+fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+
+const FILE_HOST = 'play.hotamachi.jp';
+const FILE_PORT = Number(process.env.FILE_PORT ?? '3001');
+
+const app = express();
+app.use('/uploads', express.static(UPLOAD_DIR));
+
+app.listen(FILE_PORT, FILE_HOST, () => {
+  console.log(`📦 Upload file server: http://${FILE_HOST}:${FILE_PORT}/uploads/`);
+});
 
 // ---- クライアント設定 ----
 // 🔹 追加: Lavalink をぶら下げたクライアント型
@@ -54,8 +71,7 @@ const client = new Client({
   ],
 }) as ShibakuClient;
 
-// LavalinkManager をセットアップ（この中で raw イベントも登録される）
-//initLavalink(client);
+// ---- Lavalink 接続設定 ----
 
 const lavalink = new LavalinkManager({
   nodes: [
@@ -147,54 +163,62 @@ client.on(Events.InteractionCreate, async (interaction: Interaction) => {
   }
 
   // /sbk
-  if (name === 'sbk') {
-    if (!interaction.inGuild()) {
-      await interaction.reply({ content: 'サーバー内で使ってね。', ephemeral: true });
-      return;
-    }
-    const gid = interaction.guildId!;
-    const user = interaction.options.getUser('user', true);
 
-    // BOTは不可
-    if (user.bot || user.id === interaction.client.user?.id) {
-      await interaction.reply({ content: 'BOTは対象外です。', ephemeral: true, allowedMentions: { parse: [] } });
-      return;
-    }
 
-    // 免除チェック（ギルド + グローバル）
-    const isImmune =
-      getImmuneList(gid).includes(user.id) ||
-      (IMMUNE_IDS?.includes?.(user.id) ?? false);
-
-    if (isImmune) {
-      await interaction.reply({ content: 'このユーザーはしばき免除です。', ephemeral: true, allowedMentions: { parse: [] } });
-      return;
-    }
-
-    // ギルドごとの上限を参照
-    const { min: SBK_MIN, max: SBK_MAX } = getSbkRange(gid);
-    const countArg = Math.max(SBK_MIN, Math.min(SBK_MAX, interaction.options.getInteger('count') ?? SBK_MIN));
-
-    const nextCount = addCountGuild(gid, user.id, countArg);
-    const member = await interaction.guild!.members.fetch(user.id).catch(() => null);
-    const display = member?.displayName ?? user.tag;
-    const reason = interaction.options.getString('reason') ?? '理由なし';
-    await interaction.reply(
-      `**${display}** が ${countArg} 回 しばかれました！（累計 ${nextCount} 回）\n理由: ${reason}`
-    );
-
-    // ← ここでログ送信（interaction / 実行者 / 対象 / 理由 / 今回 / 累計）
-    await sendLog(
-      interaction,
-      interaction.user.id, // しばいた人
-      user.id,             // しばかれた人
-      reason,
-      countArg,
-      nextCount
-    );
-
+if (name === 'sbk') {
+  if (!interaction.inGuild()) {
+    await interaction.reply({ content: 'サーバー内で使ってね。', ephemeral: true });
     return;
   }
+
+  const gid = interaction.guildId!;
+  const user = interaction.options.getUser('user', true);
+
+  if (user.bot || user.id === interaction.client.user?.id) {
+    await interaction.reply({ content: 'BOTは対象外です。', ephemeral: true });
+    return;
+  }
+
+  const { min: SBK_MIN, max: SBK_MAX } = getSbkRange(gid);
+
+  // ★ optional 取得
+  let count = interaction.options.getInteger('count');
+  let reason = interaction.options.getString('reason');
+
+  // ★ count 未指定 → ランダム
+  if (count == null) {
+    count = randomInt(SBK_MIN, SBK_MAX);
+  } else {
+    // 指定されていたら範囲補正
+    count = Math.max(SBK_MIN, Math.min(SBK_MAX, count));
+  }
+
+  // ★ reason 未指定 → ランダム
+  if (!reason) {
+    reason = randomReason();
+  }
+
+  const nextCount = addCountGuild(gid, user.id, count);
+
+  const member = await interaction.guild!.members.fetch(user.id).catch(() => null);
+  const display = member?.displayName ?? user.tag;
+
+  await interaction.reply(
+    `🎲 **ランダムしばき発動！**\n` +
+    `**${display}** が **${count} 回** しばかれました！（累計 ${nextCount} 回）\n` +
+    `理由: ${reason}`
+  );
+
+  await sendLog(
+    interaction,
+    interaction.user.id,
+    user.id,
+    reason,
+    count,
+    nextCount
+  );
+}
+
 
   // /check
   if (name === 'check') {
@@ -668,45 +692,64 @@ rl.on('line', async (input) => {
       await disconnectAll(args[1]);
 
     } else if (command === 'unmute' && args.length === 3) {
-      // サーバーミュート解除
+  // サーバーミュート解除
+  if (!client.isReady()) throw new Error('Client is not ready');
+
+  const guild = await client.guilds.fetch(args[1]).catch(() => null);
+  if (!guild) {
+    console.log('ギルドが見つかりません。');
+    return;
+  }
+
+  const member = await guild.members.fetch(args[2]).catch(() => null) as GuildMember | null;
+  if (!member) {
+    console.log('ユーザーが見つかりません。');
+    return;
+  }
+
+  if (!member.voice?.channel) {
+    console.log('ユーザーはどのVCにも接続していません。');
+    return;
+  }
+
+  try {
+    await member.voice.setMute(false, 'コンソールコマンドによるサーバーミュート解除');
+    console.log(`✅ ${member.user.tag} のサーバーミュートを解除しました。`);
+  } catch (err) {
+    console.error('サーバーミュート解除に失敗しました:', err);
+  }
+
+     
+          } else if (command === 'addrole' && args.length === 4) {
+      // ロール付与: addrole <guildId> <userId> <roleId>
       if (!client.isReady()) throw new Error('Client is not ready');
+
       const guild = await client.guilds.fetch(args[1]).catch(() => null);
       if (!guild) {
         console.log('ギルドが見つかりません。');
         return;
       }
+
       const member = await guild.members.fetch(args[2]).catch(() => null) as GuildMember | null;
       if (!member) {
         console.log('ユーザーが見つかりません。');
         return;
       }
-    }  else if (command === " addrole" && args.length === 4) {
-      // ロール付与
-      if (!client.isReady()) throw new Error('Client is not ready');
-      const guild = await client.guilds.fetch(args[1]).catch(() => null);
-      if (!guild) {
-        console.log('ギルドが見つかりません。');
-        return;
-      }
-      const member = await guild.members.fetch(args[2]).catch(() => null) as GuildMember | null;
-      if (!member) {
-        console.log('ユーザーが見つかりません。');
-        return;
-      }
+
       const role = await guild.roles.fetch(args[3]).catch(() => null);
       if (!role) {
         console.log('ロールが見つかりません。');
         return;
-    } else if (member.roles.cache.has(role.id)) {
-      console.log(`${member.user.tag} はすでにロール ${role.name} を持っています。`);
-      return;
-    }  
-    
+      }
+
+      if (member.roles.cache.has(role.id)) {
+        console.log(`${member.user.tag} はすでにロール ${role.name} を持っています。`);
+        return;
+      }
+
       await member.roles.add(role, 'コンソールコマンドによるロール付与');
       console.log(`✅ ${member.user.tag} にロール ${role.name} を付与しました。`);
-    
-    
-      
+
       
 
     } else if (command === 'help') {

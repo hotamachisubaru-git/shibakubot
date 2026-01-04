@@ -3,11 +3,20 @@ import fs from 'fs';
 import path from 'path';
 import Database from 'better-sqlite3';
 
+
 // メダル用（非同期 sqlite）
 import sqlite3 from 'sqlite3';
 import { open, Database as SqliteDatabase } from 'sqlite';
 
 export type CounterMap = Record<string, number>;
+export type SbkLogRow = {
+  id: number;
+  at: number;
+  actor: string | null;
+  target: string;
+  reason: string | null;
+  delta: number;
+};
 
 // ---------- パス系 ----------
 const DATA_DIR = path.join(process.cwd(), 'data', 'guilds');
@@ -49,6 +58,14 @@ function ensureSchema(db: Database.Database) {
       reason TEXT,
       delta  INTEGER NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS user_music_settings (
+      userId TEXT NOT NULL,
+      key    TEXT NOT NULL,
+      value  TEXT,
+      PRIMARY KEY (userId, key)
+    );
+
   `);
 
   // counts の列チェック（legacy: user / username → userId）
@@ -101,6 +118,24 @@ export function getImmuneList(gid: string): string[] {
     .prepare(`SELECT userId FROM immune`)
     .all() as Array<{ userId: string }>;
   return rows.map(r => r.userId);
+}
+
+// ---------- ログ ----------
+export function getRecentLogs(gid: string, limit = 20): SbkLogRow[] {
+  const db = openDb(gid);
+  const rows = db.prepare(`
+    SELECT id, at, actor, target, reason, delta
+    FROM logs
+    ORDER BY id DESC
+    LIMIT ?
+  `).all(limit) as SbkLogRow[];
+  return rows;
+}
+
+export function getLogCount(gid: string): number {
+  const db = openDb(gid);
+  const row = db.prepare(`SELECT COUNT(*) AS count FROM logs`).get() as { count: number } | undefined;
+  return row?.count ?? 0;
 }
 
 // ---------- 書き込み ----------
@@ -169,6 +204,26 @@ const SBK_MAX_KEY = 'sbkMax';
 const SBK_MIN_DEFAULT = 1;
 const SBK_MAX_DEFAULT = 25; // 初期値としてだけ使う
 
+export function getSetting(gid: string, key: string): string | null {
+  const db = openDb(gid);
+  const row = db
+    .prepare(`SELECT value FROM settings WHERE key=?`)
+    .get(key) as { value: string } | undefined;
+  return row?.value ?? null;
+}
+
+export function setSetting(gid: string, key: string, value: string | null) {
+  const db = openDb(gid);
+  if (value === null) {
+    db.prepare(`DELETE FROM settings WHERE key=?`).run(key);
+    return;
+  }
+  db.prepare(`
+    INSERT INTO settings(key, value) VALUES(?, ?)
+    ON CONFLICT(key) DO UPDATE SET value=excluded.value
+  `).run(key, value);
+}
+
 export function getSbkRange(gid: string): { min: number; max: number } {
   const db = openDb(gid);
   const minRow = db
@@ -189,6 +244,36 @@ export function getSbkRange(gid: string): { min: number; max: number } {
   max = Math.floor(max);
 
   return { min, max };
+}
+// ---------- 音量設定 ----------
+const MUSIC_VOL_KEY = 'musicVolume';
+const MUSIC_VOL_DEFAULT = 100;
+const MUSIC_VOL_MIN = 0;
+const MUSIC_VOL_MAX = 200;
+
+export function getUserMusicVolume(gid: string, userId: string): number {
+  const db = openDb(gid);
+  const row = db.prepare(
+    `SELECT value FROM user_music_settings WHERE userId=? AND key=?`
+  ).get(userId, MUSIC_VOL_KEY) as { value: string } | undefined;
+
+  const v = Number(row?.value ?? MUSIC_VOL_DEFAULT);
+  if (!Number.isFinite(v)) return MUSIC_VOL_DEFAULT;
+
+  return Math.min(MUSIC_VOL_MAX, Math.max(MUSIC_VOL_MIN, Math.round(v)));
+}
+
+export function setUserMusicVolume(gid: string, userId: string, vol: number): number {
+  const db = openDb(gid);
+
+  const clamped = Math.min(MUSIC_VOL_MAX, Math.max(MUSIC_VOL_MIN, Math.round(vol)));
+
+  db.prepare(`
+    INSERT INTO user_music_settings(userId, key, value) VALUES(?, ?, ?)
+    ON CONFLICT(userId, key) DO UPDATE SET value = excluded.value
+  `).run(userId, MUSIC_VOL_KEY, String(clamped));
+
+  return clamped;
 }
 
 export function setSbkRange(gid: string, min: number, max: number) {

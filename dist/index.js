@@ -1,9 +1,19 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 // src/index.ts
 require("dotenv/config");
+const node_readline_1 = __importDefault(require("node:readline"));
+const express_1 = __importDefault(require("express"));
+const path_1 = __importDefault(require("path"));
+const fs_1 = __importDefault(require("fs"));
+const sbkRandom_1 = require("./utils/sbkRandom");
+const lavalink_client_1 = require("lavalink-client");
 const discord_js_1 = require("discord.js");
 const data_1 = require("./data");
+const logging_1 = require("./logging");
 const top_1 = require("./commands/top");
 const members_1 = require("./commands/members");
 const menu_1 = require("./commands/menu");
@@ -11,27 +21,82 @@ const daimongamecenter_1 = require("./commands/daimongamecenter");
 const help_1 = require("./commands/help");
 const reset_1 = require("./commands/reset");
 const stats_1 = require("./commands/stats");
-// ---- ユーティリティ：表示名（ギルドのニックネーム優先）
-async function getDisplayName(interaction, userId) {
-    const g = interaction.guild;
-    if (g) {
-        const m = await g.members.fetch(userId).catch(() => null);
-        if (m?.displayName)
-            return m.displayName;
-    }
-    const u = await interaction.client.users.fetch(userId).catch(() => null);
-    return u?.tag ?? userId;
-}
-// ---- クライアント設定 ----
+const music_1 = require("./music");
+const UPLOAD_DIR = path_1.default.resolve(process.env.FILE_DIR || './files');
+fs_1.default.mkdirSync(UPLOAD_DIR, { recursive: true });
+const FILE_HOST = 'play.hotamachi.jp';
+const FILE_PORT = Number(process.env.FILE_PORT ?? '3001');
+const app = (0, express_1.default)();
+app.use('/uploads', express_1.default.static(UPLOAD_DIR));
+app.listen(FILE_PORT, FILE_HOST, () => {
+    console.log(`📦 Upload file server: http://${FILE_HOST}:${FILE_PORT}/uploads/`);
+});
 const client = new discord_js_1.Client({
-    intents: [discord_js_1.GatewayIntentBits.Guilds, discord_js_1.GatewayIntentBits.GuildMembers],
+    intents: [
+        discord_js_1.GatewayIntentBits.Guilds,
+        discord_js_1.GatewayIntentBits.GuildMembers,
+        discord_js_1.GatewayIntentBits.GuildMessages,
+        discord_js_1.GatewayIntentBits.MessageContent,
+        discord_js_1.GatewayIntentBits.GuildVoiceStates,
+    ],
+});
+// ---- Lavalink 接続設定 ----
+const lavalink = new lavalink_client_1.LavalinkManager({
+    nodes: [
+        {
+            id: 'local',
+            host: '127.0.0.1',
+            port: 2333,
+            authorization: 'youshallnotpass', // application.yml の password
+            secure: false,
+        },
+    ],
+    // 🔹 ここは sendPayload ではなく sendToShard
+    sendToShard: (guildId, payload) => {
+        const guild = client.guilds.cache.get(guildId);
+        if (!guild)
+            return;
+        guild.shard.send(payload);
+    },
+    client: {
+        id: '0', // ここはダミーでOK（後で init で上書き）
+        username: 'shibaku-bot',
+    },
+    // （オプション）お好みで
+    autoSkip: true,
+    playerOptions: {
+        defaultSearchPlatform: 'ytmsearch',
+        clientBasedPositionUpdateInterval: 150,
+        volumeDecrementer: 0.75,
+        onDisconnect: {
+            autoReconnect: true,
+            destroyPlayer: false,
+        },
+        onEmptyQueue: {
+            destroyAfterMs: 30000,
+        },
+    },
+    queueOptions: {
+        maxPreviousTracks: 25,
+    },
+});
+// client にぶら下げる
+client.lavalink = lavalink;
+// Discord の Raw イベントを Lavalink に渡す
+client.on('raw', (data) => {
+    client.lavalink.sendRawData(data);
 });
 // ---- 定数 ----
-const LOG_CHANNEL_ID = process.env.LOG_CHANNEL_ID || '';
 const OWNER_IDS = (process.env.OWNER_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
 const IMMUNE_IDS = (process.env.IMMUNE_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
-client.once(discord_js_1.Events.ClientReady, b => {
+// Ready
+client.once(discord_js_1.Events.ClientReady, async (b) => {
     console.log(`✅ ログイン完了: ${b.user.tag}`);
+    // Lavalink と Bot 情報を紐付け（ヘッダーは ASCII のみ）
+    await client.lavalink.init({
+        id: b.user.id,
+        username: 'shibakubot', // 日本語を入れない
+    });
 });
 // ---- コマンドハンドラ ----
 client.on(discord_js_1.Events.InteractionCreate, async (interaction) => {
@@ -60,33 +125,33 @@ client.on(discord_js_1.Events.InteractionCreate, async (interaction) => {
         }
         const gid = interaction.guildId;
         const user = interaction.options.getUser('user', true);
-        // BOTは不可
         if (user.bot || user.id === interaction.client.user?.id) {
-            await interaction.reply({ content: 'BOTは対象外です。', ephemeral: true, allowedMentions: { parse: [] } });
+            await interaction.reply({ content: 'BOTは対象外です。', ephemeral: true });
             return;
         }
-        // 免除チェック（ギルド + グローバル）
-        const isImmune = (0, data_1.getImmuneList)(gid).includes(user.id) ||
-            (IMMUNE_IDS?.includes?.(user.id) ?? false);
-        if (isImmune) {
-            await interaction.reply({ content: 'このユーザーはしばき免除です。', ephemeral: true, allowedMentions: { parse: [] } });
-            return;
-        }
-        // ギルドごとの上限を参照
         const { min: SBK_MIN, max: SBK_MAX } = (0, data_1.getSbkRange)(gid);
-        const countArg = Math.max(SBK_MIN, Math.min(SBK_MAX, interaction.options.getInteger('count') ?? SBK_MIN));
-        const nextCount = (0, data_1.addCountGuild)(gid, user.id, countArg);
+        // ★ optional 取得
+        let count = interaction.options.getInteger('count');
+        let reason = interaction.options.getString('reason');
+        // ★ count 未指定 → ランダム
+        if (count == null) {
+            count = (0, sbkRandom_1.randomInt)(SBK_MIN, SBK_MAX);
+        }
+        else {
+            // 指定されていたら範囲補正
+            count = Math.max(SBK_MIN, Math.min(SBK_MAX, count));
+        }
+        // ★ reason 未指定 → ランダム
+        if (!reason) {
+            reason = (0, sbkRandom_1.randomReason)();
+        }
+        const nextCount = (0, data_1.addCountGuild)(gid, user.id, count);
         const member = await interaction.guild.members.fetch(user.id).catch(() => null);
         const display = member?.displayName ?? user.tag;
-        const reason = interaction.options.getString('reason') ?? '理由なし';
-        await interaction.reply(`**${display}** が ${countArg} 回 しばかれました！（累計 ${nextCount} 回）\n理由: ${reason}`);
-        if (LOG_CHANNEL_ID) {
-            const ch = await interaction.guild.channels.fetch(LOG_CHANNEL_ID).catch(() => null);
-            if (ch && ch.type === discord_js_1.ChannelType.GuildText) {
-                await ch.send(`${interaction.user.tag} → ${display}\n理由: ${reason}\n今回: ${countArg} 回\n累計: ${nextCount} 回`);
-            }
-        }
-        return;
+        await interaction.reply(`🎲 **ランダムしばき発動！**\n` +
+            `**${display}** が **${count} 回** しばかれました！（累計 ${nextCount} 回）\n` +
+            `理由: ${reason}`);
+        await (0, logging_1.sendLog)(interaction, interaction.user.id, user.id, reason, count, nextCount);
     }
     // /check
     if (name === 'check') {
@@ -219,3 +284,375 @@ client.on(discord_js_1.Events.InteractionCreate, async (interaction) => {
     }
 });
 client.login(process.env.TOKEN);
+// ================== コンソールコマンド ==================
+// 時間指定を秒・分・時間で書けるようにする
+function parseDuration(input) {
+    const m = input.toLowerCase().match(/^(\d+)(s|m|h)?$/);
+    if (!m)
+        return null;
+    const value = Number(m[1]);
+    const unit = m[2] || 's'; // 省略 → 秒扱い
+    switch (unit) {
+        case 's': return value * 1000;
+        case 'm': return value * 60 * 1000;
+        case 'h': return value * 60 * 60 * 1000;
+        default: return null;
+    }
+}
+const rl = node_readline_1.default.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+});
+// 単体ユーザー: VC移動
+async function moveUser(guildId, userId, channelId) {
+    if (!client.isReady())
+        throw new Error('Client is not ready');
+    const guild = await client.guilds.fetch(guildId).catch(() => null);
+    if (!guild) {
+        console.log('ギルドが見つかりません。');
+        return;
+    }
+    const member = await guild.members.fetch(userId).catch(() => null);
+    if (!member) {
+        console.log('ユーザーが見つかりません。');
+        return;
+    }
+    const channel = await guild.channels.fetch(channelId).catch(() => null);
+    if (!channel || channel.type !== discord_js_1.ChannelType.GuildVoice) {
+        console.log('指定されたチャンネルIDはVCではありません。');
+        return;
+    }
+    await member.voice.setChannel(channel);
+    console.log(`✅ ${member.user.tag} を ${channel.name} に移動しました。`);
+}
+// 単体ユーザー: VC切断
+async function disconnectUser(guildId, userId) {
+    if (!client.isReady())
+        throw new Error('Client is not ready');
+    const guild = await client.guilds.fetch(guildId).catch(() => null);
+    if (!guild) {
+        console.log('ギルドが見つかりません。');
+        return;
+    }
+    const member = await guild.members.fetch(userId).catch(() => null);
+    if (!member) {
+        console.log('ユーザーが見つかりません。');
+        return;
+    }
+    if (!member.voice?.channel) {
+        console.log('ユーザーはどのVCにも接続していません。');
+        return;
+    }
+    await member.voice.disconnect();
+    console.log(`✅ ${member.user.tag} を VC から切断しました。`);
+}
+// 単体ユーザー: タイムアウト（durationMs=0 以下なら解除）
+async function timeoutUser(guildId, userId, durationMs, label) {
+    if (!client.isReady())
+        throw new Error('Client is not ready');
+    const guild = await client.guilds.fetch(guildId).catch(() => null);
+    if (!guild) {
+        console.log('ギルドが見つかりません。');
+        return;
+    }
+    const member = await guild.members.fetch(userId).catch(() => null);
+    if (!member) {
+        console.log('ユーザーが見つかりません。');
+        return;
+    }
+    if (!durationMs || durationMs <= 0) {
+        await member.timeout(null, 'コンソールコマンドによるタイムアウト解除');
+        console.log(`✅ ${member.user.tag} のタイムアウトを解除しました。`);
+        return;
+    }
+    await member.timeout(durationMs, 'コンソールコマンドによるタイムアウト');
+    // ★ ここを修正
+    const human = label ?? `${durationMs / 1000}秒`;
+    console.log(`✅ ${member.user.tag} を ${human} タイムアウトしました。`);
+}
+// 単体ユーザー: サーバーミュート（任意時間後に自動解除）
+async function serverUserMute(guildId, userId, durationMs, label) {
+    if (!client.isReady())
+        throw new Error('Client is not ready');
+    const guild = await client.guilds.fetch(guildId).catch(() => null);
+    if (!guild) {
+        console.log('ギルドが見つかりません。');
+        return;
+    }
+    const member = await guild.members.fetch(userId).catch(() => null);
+    if (!member) {
+        console.log('ユーザーが見つかりません。');
+        return;
+    }
+    if (!member.voice?.channel) {
+        console.log('ユーザーはどのVCにも接続していません。');
+        return;
+    }
+    try {
+        await member.voice.setMute(true, 'コンソールコマンドによるサーバーミュート');
+        const human = label ?? `${durationMs / 1000}秒`; // ★
+        console.log(`✅ ${member.user.tag} を ${human} サーバーミュートしました。`);
+        if (durationMs && durationMs > 0) {
+            setTimeout(async () => {
+                try {
+                    const refreshed = await guild.members.fetch(userId).catch(() => null);
+                    if (!refreshed)
+                        return;
+                    if (refreshed.voice?.channel) {
+                        await refreshed.voice.setMute(false, 'サーバーミュートの自動解除');
+                        console.log(`✅ ${refreshed.user.tag} のサーバーミュートを解除しました。`);
+                    }
+                }
+                catch (err) {
+                    console.error('自動解除でエラー:', err);
+                }
+            }, durationMs);
+        }
+    }
+    catch (err) {
+        console.error('サーバーミュートに失敗しました:', err);
+    }
+}
+// ===== 一括操作系 =====
+// ギルド内の全VC参加者を指定VCに移動
+async function moveAll(guildId, targetChannelId) {
+    if (!client.isReady())
+        throw new Error('Client is not ready');
+    const guild = await client.guilds.fetch(guildId).catch(() => null);
+    if (!guild) {
+        console.log('ギルドが見つかりません。');
+        return;
+    }
+    const target = await guild.channels.fetch(targetChannelId).catch(() => null);
+    if (!target || target.type !== discord_js_1.ChannelType.GuildVoice) {
+        console.log('指定されたチャンネルIDはVCではありません。');
+        return;
+    }
+    let count = 0;
+    for (const vs of guild.voiceStates.cache.values()) {
+        const member = vs.member;
+        if (!member || member.user.bot)
+            continue; // Bot は除外（必要なら外してOK）
+        try {
+            await member.voice.setChannel(target);
+            count++;
+        }
+        catch (err) {
+            console.error(`移動失敗: ${member.user.tag}`, err);
+        }
+    }
+    console.log(`✅ ${count}人を ${target.name} に移動しました。`);
+}
+// ギルド内の全VC参加者を切断
+async function disconnectAll(guildId) {
+    if (!client.isReady())
+        throw new Error('Client is not ready');
+    const guild = await client.guilds.fetch(guildId).catch(() => null);
+    if (!guild) {
+        console.log('ギルドが見つかりません。');
+        return;
+    }
+    let count = 0;
+    for (const vs of guild.voiceStates.cache.values()) {
+        const member = vs.member;
+        if (!member || member.user.bot)
+            continue;
+        try {
+            await member.voice.disconnect();
+            count++;
+        }
+        catch (err) {
+            console.error(`切断失敗: ${member.user.tag}`, err);
+        }
+    }
+    console.log(`✅ ${count}人を VC から切断しました。`);
+}
+// ギルド内の全VC参加者をサーバーミュート（任意時間後解除）
+async function muteAll(guildId, durationMs, label) {
+    if (!client.isReady())
+        throw new Error('Client is not ready');
+    const guild = await client.guilds.fetch(guildId).catch(() => null);
+    if (!guild) {
+        console.log('ギルドが見つかりません。');
+        return;
+    }
+    let count = 0;
+    for (const vs of guild.voiceStates.cache.values()) {
+        const member = vs.member;
+        if (!member || member.user.bot)
+            continue;
+        try {
+            await member.voice.setMute(true, 'コンソールコマンドによる一括サーバーミュート');
+            count++;
+        }
+        catch (err) {
+            console.error(`ミュート失敗: ${member?.user.tag}`, err);
+        }
+    }
+    const human = label ?? `${durationMs / 1000}秒`; // ★
+    console.log(`✅ ${count}人を ${human} サーバーミュートしました。`);
+    if (durationMs && durationMs > 0) {
+        setTimeout(async () => {
+            try {
+                let unmuted = 0;
+                for (const vs of guild.voiceStates.cache.values()) {
+                    const member = vs.member;
+                    if (!member || member.user.bot)
+                        continue;
+                    try {
+                        if (member.voice.serverMute) {
+                            await member.voice.setMute(false, '一括サーバーミュートの自動解除');
+                            unmuted++;
+                        }
+                    }
+                    catch (err) {
+                        console.error(`自動解除失敗: ${member?.user.tag}`, err);
+                    }
+                }
+                console.log(`✅ 一括サーバーミュートを解除しました。（${unmuted}人）`);
+            }
+            catch (err) {
+                console.error('一括自動解除でエラー:', err);
+            }
+        }, durationMs);
+    }
+}
+// ===== コンソール入力受付 =====
+console.log('コンソールコマンド:');
+console.log('  move <guildId> <userId> <voiceChannelId>');
+console.log('  disconnect <guildId> <userId>');
+console.log('  timeout <guildId> <userId> <second(s)/minute(s)/hour(s)>');
+console.log('  serverMute <guildId> <userId> <second(s)/minute(s)/hour(s)>');
+console.log('  moveAll <guildId> <voiceChannelId>');
+console.log('  disconnectAll <guildId>');
+console.log('  muteAll <guildId> <second(s)/minute(s)/hour(s)>');
+console.log('  unmute <guildId> <userId>');
+console.log('  addrole <guildId> <userId> <roleId>');
+console.log('例: move 123... 234... 345...');
+console.log('例: timeout 123... 234... 10m');
+console.log('例: serverMute 123... 234... 1h');
+console.log('例: moveAll 123... 345...');
+console.log('例: muteAll 123... 15m');
+console.log('例：unmute 123... 234...');
+console.log('help と入力するとコマンド一覧を表示します。');
+console.log('------------------------------');
+rl.on('line', async (input) => {
+    const args = input.trim().split(/\s+/);
+    const command = args[0];
+    try {
+        if (command === 'move' && args.length === 4) {
+            await moveUser(args[1], args[2], args[3]);
+        }
+        else if (command === 'disconnect' && args.length === 3) {
+            await disconnectUser(args[1], args[2]);
+        }
+        else if (command === 'timeout' && args.length === 4) {
+            const raw = args[3]; // ★ 元の文字列
+            const duration = parseDuration(raw);
+            if (duration === null) {
+                console.log('duration は 例: 10s, 5m, 2h, 300 (秒) の形式で指定してください。');
+                return;
+            }
+            await timeoutUser(args[1], args[2], duration, raw); // ★ 4番目に raw を渡す
+        }
+        else if (command === 'serverMute' && args.length === 4) {
+            const raw = args[3]; // ★
+            const duration = parseDuration(raw);
+            if (duration === null) {
+                console.log('duration は 例: 10s, 5m, 2h, 300 (秒) の形式で指定してください。');
+                return;
+            }
+            await serverUserMute(args[1], args[2], duration, raw); // ★
+        }
+        else if (command === 'muteAll' && args.length === 3) {
+            const raw = args[2]; // ★
+            const duration = parseDuration(raw);
+            if (duration === null) {
+                console.log('duration は 例: 10s, 5m, 2h, 300 (秒) の形式で指定してください。');
+                return;
+            }
+            await muteAll(args[1], duration, raw); // ★
+        }
+        else if (command === 'moveAll' && args.length === 3) {
+            await moveAll(args[1], args[2]);
+        }
+        else if (command === 'disconnectAll' && args.length === 2) {
+            await disconnectAll(args[1]);
+        }
+        else if (command === 'unmute' && args.length === 3) {
+            // サーバーミュート解除
+            if (!client.isReady())
+                throw new Error('Client is not ready');
+            const guild = await client.guilds.fetch(args[1]).catch(() => null);
+            if (!guild) {
+                console.log('ギルドが見つかりません。');
+                return;
+            }
+            const member = await guild.members.fetch(args[2]).catch(() => null);
+            if (!member) {
+                console.log('ユーザーが見つかりません。');
+                return;
+            }
+            if (!member.voice?.channel) {
+                console.log('ユーザーはどのVCにも接続していません。');
+                return;
+            }
+            try {
+                await member.voice.setMute(false, 'コンソールコマンドによるサーバーミュート解除');
+                console.log(`✅ ${member.user.tag} のサーバーミュートを解除しました。`);
+            }
+            catch (err) {
+                console.error('サーバーミュート解除に失敗しました:', err);
+            }
+        }
+        else if (command === 'addrole' && args.length === 4) {
+            // ロール付与: addrole <guildId> <userId> <roleId>
+            if (!client.isReady())
+                throw new Error('Client is not ready');
+            const guild = await client.guilds.fetch(args[1]).catch(() => null);
+            if (!guild) {
+                console.log('ギルドが見つかりません。');
+                return;
+            }
+            const member = await guild.members.fetch(args[2]).catch(() => null);
+            if (!member) {
+                console.log('ユーザーが見つかりません。');
+                return;
+            }
+            const role = await guild.roles.fetch(args[3]).catch(() => null);
+            if (!role) {
+                console.log('ロールが見つかりません。');
+                return;
+            }
+            if (member.roles.cache.has(role.id)) {
+                console.log(`${member.user.tag} はすでにロール ${role.name} を持っています。`);
+                return;
+            }
+            await member.roles.add(role, 'コンソールコマンドによるロール付与');
+            console.log(`✅ ${member.user.tag} にロール ${role.name} を付与しました。`);
+        }
+        else if (command === 'help') {
+            console.log('利用可能なコマンド:');
+            console.log('  move <guildId> <userId> <voiceChannelId>   - ユーザーを指定のVCに移動');
+            console.log('  disconnect <guildId> <userId>              - ユーザーをVCから切断');
+            console.log('  timeout <guildId> <userId> <second(s)/minute(s)/hour(s)>    - ユーザーをタイムアウト（0以下で解除）');
+            console.log('  serverMute <guildId> <userId> <second(s)/minute(s)/hour(s)> - サーバーミュート（0以下なら解除なし）');
+            console.log('  moveAll <guildId> <voiceChannelId>         - ギルド内の全VC参加者を指定VCへ移動');
+            console.log('  disconnectAll <guildId>                    - ギルド内の全VC参加者を切断');
+            console.log('  muteAll <guildId> <second(s)/minute(s)/hour(s)>             - ギルド内の全VC参加者を一括サーバーミュート');
+            console.log('  unmute <guildId> <userId>      - ユーザーのサーバーミュートを解除');
+            console.log('  help                               - このヘルプを表示');
+            console.log('  addrole <guildId> <userId> <roleId>         - ユーザーにロールを付与');
+        }
+        else if (command) {
+            console.log('不明なコマンドです。help で一覧を確認できます。');
+        }
+    }
+    catch (err) {
+        console.error('エラーが発生しました:', err);
+    }
+});
+// index.ts 最後あたり
+client.on('messageCreate', async (message) => {
+    await (0, music_1.handleMusicMessage)(message);
+});
