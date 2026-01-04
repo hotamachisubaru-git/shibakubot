@@ -1,11 +1,18 @@
 // src/music.ts
-import { GuildMember, Message } from 'discord.js';
+import { GuildMember, Message, PermissionFlagsBits } from 'discord.js';
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
 import crypto from 'node:crypto';
+import {
+  addMusicNgWord,
+  clearMusicNgWords,
+  getMusicNgWords,
+  removeMusicNgWord,
+} from './data';
 
 const PREFIX = 's!';
+const OWNER_IDS = (process.env.OWNER_IDS || '').split(',').map((s) => s.trim()).filter(Boolean);
 // ===== ファイルアップロード用の簡易サーバー設定 =====
 const UPLOAD_DIR = path.resolve(process.env.FILE_DIR || './files');
 //サーバー起動
@@ -30,10 +37,17 @@ function makePublicUrl(filename: string) {
   return `${base}/${filename}`;
 }
 
+function findNgWordMatch(texts: Array<string | undefined>, ngWords: string[]): string | null {
+  if (!ngWords.length) return null;
+  const haystack = texts.filter(Boolean).join(' ').toLowerCase();
+  if (!haystack) return null;
+  return ngWords.find((w) => w && haystack.includes(w)) ?? null;
+}
+
 
 /**
  * メッセージコマンドのルーター
- *  s!play / s!skip / s!stop / s!queue/ s!upload
+ *  s!play / s!skip / s!stop / s!queue / s!upload / s!ng
  */
 export async function handleMusicMessage(message: Message) {
   if (!message.guild) return;
@@ -64,9 +78,13 @@ export async function handleMusicMessage(message: Message) {
 
     } else if (command === 'queue') {
       await handleQueue(message);
-   } else if (command === 'upload') {
+
+    } else if (command === 'upload') {
       await handleUpload(message);
-}
+
+    } else if (command === 'ng' || command === 'ngword') {
+      await handleNgWordCommand(message, rest);
+    }
 
   } catch (e) {
     console.error('[music] command error', e);
@@ -150,6 +168,13 @@ async function handlePlay(message: Message, query: string) {
   }
 
   const track = result.tracks[0];
+  const ngWords = getMusicNgWords(message.guildId!);
+  const ngMatch = findNgWordMatch([track.info?.title, track.info?.author], ngWords);
+  if (ngMatch) {
+    await message.reply('🚫 NGワードが含まれているため再生できません。');
+    return;
+  }
+
   await player.queue.add(track);
 
   if (!player.playing && !player.paused) {
@@ -227,6 +252,85 @@ async function handleQueue(message: Message) {
   await message.reply(lines.join('\n'));
 }
 
+/* ---------- s!ng ---------- */
+async function handleNgWordCommand(message: Message, args: string[]) {
+  if (!message.guildId) {
+    await message.reply('⚠️ サーバー内でのみ使用できます。');
+    return;
+  }
+
+  const sub = args[0]?.toLowerCase();
+  const isAdmin = message.member?.permissions.has(PermissionFlagsBits.Administrator) ?? false;
+  const isOwner = message.guild?.ownerId === message.author.id;
+  const isDev = OWNER_IDS.includes(message.author.id);
+  const canManage = isAdmin || isOwner || isDev;
+
+  if (!sub || sub === 'help') {
+    await message.reply(
+      '使い方: `s!ng add <word>` / `s!ng remove <word>` / `s!ng list` / `s!ng clear`'
+    );
+    return;
+  }
+
+  if (!canManage) {
+    await message.reply('⚠️ 権限がありません。（管理者のみ）');
+    return;
+  }
+
+  const gid = message.guildId;
+
+  if (sub === 'list') {
+    const list = getMusicNgWords(gid);
+    if (!list.length) {
+      await message.reply('📭 NGワードは登録されていません。');
+      return;
+    }
+    const lines = list.map((w, i) => `${i + 1}. ${w}`).join('\n');
+    await message.reply(`🚫 NGワード一覧:\n${lines}`);
+    return;
+  }
+
+  if (sub === 'add') {
+    const word = args.slice(1).join(' ').trim();
+    if (!word) {
+      await message.reply('⚠️ 追加するワードを指定してください。');
+      return;
+    }
+    const result = addMusicNgWord(gid, word);
+    await message.reply(
+      result.added
+        ? `✅ NGワードを追加しました: **${word}**`
+        : `⚠️ すでに登録済みです: **${word}**`
+    );
+    return;
+  }
+
+  if (sub === 'remove' || sub === 'del' || sub === 'delete') {
+    const word = args.slice(1).join(' ').trim();
+    if (!word) {
+      await message.reply('⚠️ 削除するワードを指定してください。');
+      return;
+    }
+    const result = removeMusicNgWord(gid, word);
+    await message.reply(
+      result.removed
+        ? `✅ NGワードを削除しました: **${word}**`
+        : `⚠️ NGワードにありません: **${word}**`
+    );
+    return;
+  }
+
+  if (sub === 'clear') {
+    clearMusicNgWords(gid);
+    await message.reply('✅ NGワードをすべて削除しました。');
+    return;
+  }
+
+  await message.reply(
+    '⚠️ コマンドが不明です。`s!ng help` で使い方を確認できます。'
+  );
+}
+
 /* ---------- s!upload ---------- */
 async function handleUpload(message: Message) {
   if (!message.guildId) {
@@ -234,16 +338,42 @@ async function handleUpload(message: Message) {
     return;
   }
 
+  const allowedExts = ['.mp3', '.wav', '.flac', '.m4a', '.aac', '.ogg'];
+  const allowedExtsLabel = allowedExts.map((ext) => ext.replace('.', '')).join(', ');
+  const contentTypeToExt: Record<string, string> = {
+    'audio/mpeg': '.mp3',
+    'audio/wav': '.wav',
+    'audio/x-wav': '.wav',
+    'audio/flac': '.flac',
+    'audio/x-flac': '.flac',
+    'audio/mp4': '.m4a',
+    'audio/aac': '.aac',
+    'audio/ogg': '.ogg',
+  };
+
   const att = message.attachments.first();
   if (!att) {
-    await message.reply('📎 mp3ファイルを添付して `s!upload` を送ってね。');
+    await message.reply(`📎 対応形式 (${allowedExtsLabel}) のファイルを添付して \`s!upload\` を送ってね。`);
     return;
   }
 
-  const originalName = att.name ?? 'upload.mp3';
-  const ext = path.extname(originalName).toLowerCase();
-  if (ext !== '.mp3') {
-    await message.reply('⚠️ いまは **.mp3** のみ対応です。');
+  const originalName = att.name ?? 'upload';
+  let ext = path.extname(originalName).toLowerCase();
+  if (!ext && att.contentType) {
+    ext = contentTypeToExt[att.contentType] ?? '';
+  }
+  if (!ext || !allowedExts.includes(ext)) {
+    await message.reply(`⚠️ 対応形式は **${allowedExtsLabel}** です。`);
+    return;
+  }
+  const displayName = ext
+    ? `${path.basename(originalName, path.extname(originalName))}${ext}`
+    : originalName;
+
+  const ngWords = getMusicNgWords(message.guildId);
+  const ngMatch = findNgWordMatch([displayName], ngWords);
+  if (ngMatch) {
+    await message.reply('🚫 このファイル名はNGワードが含まれているためアップロードできません。');
     return;
   }
 
@@ -251,7 +381,7 @@ async function handleUpload(message: Message) {
   fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
   const id = crypto.randomUUID();
-  const filename = `${id}.mp3`;
+  const filename = `${id}${ext}`;
   const savePath = path.join(UPLOAD_DIR, filename);
 
   try {
@@ -261,23 +391,18 @@ async function handleUpload(message: Message) {
     const buf = Buffer.from(await res.arrayBuffer());
     fs.writeFileSync(savePath, buf);
 
-    const url = makePublicUrl(filename);
+    const publicUrl = makePublicUrl(filename);
+    const internalUrl = makeInternalUrl(filename);
 
-   const publicUrl = makePublicUrl(filename);
-   const internalUrl = makeInternalUrl(filename);
+    await message.reply(
+      `✅ アップロード完了: **${displayName}**\n` +
+      `🌐 公開URL: ${publicUrl}\n` +
+      `▶ 再生します…`
+    );
 
-  await message.reply(
-    `✅ アップロード完了: **${originalName}**\n` +
-    `🌐 公開URL: ${publicUrl}\n` +
-    `▶ 再生します…`
-   );
-
-// ★再生は internalUrl を渡す（ここ重要）
-await handlePlay(message, internalUrl);
-
-
-    // ここでそのまま再生（URLをplayへ）
+    // ★再生は internalUrl を渡す（ここ重要）
     await handlePlay(message, internalUrl);
+
 
   } catch (e) {
     console.error('[music] upload error', e);

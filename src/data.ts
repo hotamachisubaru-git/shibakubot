@@ -276,6 +276,67 @@ export function setUserMusicVolume(gid: string, userId: string, vol: number): nu
   return clamped;
 }
 
+// ---------- 音楽 NG ワード ----------
+const MUSIC_NG_KEY = 'musicNgWords';
+
+function normalizeNgWord(word: string): string {
+  return word.trim().toLowerCase();
+}
+
+function saveMusicNgWords(gid: string, words: string[]): string[] {
+  const normalized = Array.from(
+    new Set(words.map(normalizeNgWord).filter((w) => w.length > 0))
+  ).sort();
+  setSetting(gid, MUSIC_NG_KEY, JSON.stringify(normalized));
+  return normalized;
+}
+
+export function getMusicNgWords(gid: string): string[] {
+  const raw = getSetting(gid, MUSIC_NG_KEY);
+  if (!raw) return [];
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return Array.from(
+      new Set(
+        parsed
+          .filter((w) => typeof w === 'string')
+          .map((w) => normalizeNgWord(w))
+          .filter((w) => w.length > 0)
+      )
+    ).sort();
+  } catch {
+    return [];
+  }
+}
+
+export function addMusicNgWord(gid: string, word: string): { added: boolean; list: string[] } {
+  const current = getMusicNgWords(gid);
+  const normalized = normalizeNgWord(word);
+  if (!normalized) return { added: false, list: current };
+  if (current.includes(normalized)) return { added: false, list: current };
+
+  const list = saveMusicNgWords(gid, [...current, normalized]);
+  return { added: true, list };
+}
+
+export function removeMusicNgWord(gid: string, word: string): { removed: boolean; list: string[] } {
+  const current = getMusicNgWords(gid);
+  const normalized = normalizeNgWord(word);
+  if (!normalized) return { removed: false, list: current };
+
+  const next = current.filter((w) => w !== normalized);
+  if (next.length === current.length) return { removed: false, list: current };
+
+  const list = saveMusicNgWords(gid, next);
+  return { removed: true, list };
+}
+
+export function clearMusicNgWords(gid: string): void {
+  setSetting(gid, MUSIC_NG_KEY, JSON.stringify([]));
+}
+
 export function setSbkRange(gid: string, min: number, max: number) {
   const db = openDb(gid);
 

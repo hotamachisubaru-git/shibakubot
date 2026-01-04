@@ -18,6 +18,10 @@ exports.setSetting = setSetting;
 exports.getSbkRange = getSbkRange;
 exports.getUserMusicVolume = getUserMusicVolume;
 exports.setUserMusicVolume = setUserMusicVolume;
+exports.getMusicNgWords = getMusicNgWords;
+exports.addMusicNgWord = addMusicNgWord;
+exports.removeMusicNgWord = removeMusicNgWord;
+exports.clearMusicNgWords = clearMusicNgWords;
 exports.setSbkRange = setSbkRange;
 exports.loadGuildStore = loadGuildStore;
 exports.getMedalBalance = getMedalBalance;
@@ -254,6 +258,57 @@ function setUserMusicVolume(gid, userId, vol) {
     ON CONFLICT(userId, key) DO UPDATE SET value = excluded.value
   `).run(userId, MUSIC_VOL_KEY, String(clamped));
     return clamped;
+}
+// ---------- 音楽 NG ワード ----------
+const MUSIC_NG_KEY = 'musicNgWords';
+function normalizeNgWord(word) {
+    return word.trim().toLowerCase();
+}
+function saveMusicNgWords(gid, words) {
+    const normalized = Array.from(new Set(words.map(normalizeNgWord).filter((w) => w.length > 0))).sort();
+    setSetting(gid, MUSIC_NG_KEY, JSON.stringify(normalized));
+    return normalized;
+}
+function getMusicNgWords(gid) {
+    const raw = getSetting(gid, MUSIC_NG_KEY);
+    if (!raw)
+        return [];
+    try {
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed))
+            return [];
+        return Array.from(new Set(parsed
+            .filter((w) => typeof w === 'string')
+            .map((w) => normalizeNgWord(w))
+            .filter((w) => w.length > 0))).sort();
+    }
+    catch {
+        return [];
+    }
+}
+function addMusicNgWord(gid, word) {
+    const current = getMusicNgWords(gid);
+    const normalized = normalizeNgWord(word);
+    if (!normalized)
+        return { added: false, list: current };
+    if (current.includes(normalized))
+        return { added: false, list: current };
+    const list = saveMusicNgWords(gid, [...current, normalized]);
+    return { added: true, list };
+}
+function removeMusicNgWord(gid, word) {
+    const current = getMusicNgWords(gid);
+    const normalized = normalizeNgWord(word);
+    if (!normalized)
+        return { removed: false, list: current };
+    const next = current.filter((w) => w !== normalized);
+    if (next.length === current.length)
+        return { removed: false, list: current };
+    const list = saveMusicNgWords(gid, next);
+    return { removed: true, list };
+}
+function clearMusicNgWords(gid) {
+    setSetting(gid, MUSIC_NG_KEY, JSON.stringify([]));
 }
 function setSbkRange(gid, min, max) {
     const db = openDb(gid);
