@@ -18,6 +18,7 @@ import {
   setMedals,
   getTopMedals,
 } from '../data';
+import { parseBigIntInput } from '../utils/bigint';
 
 /* ユーザーID → ニックネーム(あれば) / tag の簡易ユーティリティ */
 async function displayNameFromInteraction(
@@ -158,8 +159,8 @@ export async function handleMedalSendButton(btn: ButtonInteraction) {
         
        
       const raw = submitted.fields.getTextInputValue('value');
-      const amount = Number(raw);
-      if (!Number.isFinite(amount) || amount <= 0) {
+      const amount = parseBigIntInput(raw);
+      if (amount === null || amount <= 0n) {
         await submitted.reply({
           content: '1以上の整数を入力してください。',
           ephemeral: true,

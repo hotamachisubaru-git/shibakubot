@@ -179,6 +179,13 @@ if (name === 'sbk') {
     return;
   }
 
+  const localImmune = isImmune(gid, user.id);
+  const globalImmune = IMMUNE_IDS.includes(user.id);
+  if (localImmune || globalImmune) {
+    await interaction.reply({ content: 'このユーザーはしばき免除のため実行できません。', ephemeral: true });
+    return;
+  }
+
   const { min: SBK_MIN, max: SBK_MAX } = getSbkRange(gid);
 
   // ★ optional 取得
@@ -198,7 +205,8 @@ if (name === 'sbk') {
     reason = randomReason();
   }
 
-  const nextCount = addCountGuild(gid, user.id, count);
+  const countBig = BigInt(count);
+  const nextCount = addCountGuild(gid, user.id, countBig);
 
   const member = await interaction.guild!.members.fetch(user.id).catch(() => null);
   const display = member?.displayName ?? user.tag;
@@ -214,7 +222,7 @@ if (name === 'sbk') {
     interaction.user.id,
     user.id,
     reason,
-    count,
+    countBig,
     nextCount
   );
 }
@@ -229,7 +237,7 @@ if (name === 'sbk') {
     const gid = interaction.guildId!;
     const target = interaction.options.getUser('user', true);
     const store = loadGuildStore(gid);
-    const count = store.counts[target.id] ?? 0;
+    const count = store.counts[target.id] ?? 0n;
 
     const member = await interaction.guild!.members.fetch(target.id).catch(() => null);
     const displayName = member?.displayName ?? target.tag;
@@ -266,18 +274,18 @@ if (name === 'sbk') {
     const gid = interaction.guildId!;
     const target = interaction.options.getUser('user', true);
     const newCountRaw = interaction.options.getInteger('count', true);
-    const newCount = Math.max(0, newCountRaw);
+    const newCount = newCountRaw < 0 ? 0n : BigInt(newCountRaw);
     const after = setCountGuild(gid, target.id, newCount);
 
     const store = loadGuildStore(gid);
-    store.counts[target.id] = newCount;
+    store.counts[target.id] = after;
     
 
     const member = await interaction.guild!.members.fetch(target.id).catch(() => null);
     const displayName = member?.displayName ?? target.tag;
 
     await interaction.reply({
-      content: `**${displayName}** のしばかれ回数を **${newCount} 回** に設定しました。`,
+      content: `**${displayName}** のしばかれ回数を **${after} 回** に設定しました。`,
       allowedMentions: { parse: [] },
       ephemeral: true,
     });
@@ -625,6 +633,31 @@ async function muteAll(
 }
 
 
+async function deleteMessage(channelId: string, messageId: string) {
+  if (!client.isReady()) throw new Error('Client is not ready');
+
+  const channel = await client.channels.fetch(channelId).catch(() => null);
+  if (!channel || !channel.isTextBased()) {
+    console.log('指定されたチャンネルIDはテキストチャンネルではありません。');
+    return;
+  }
+
+  const message = await channel.messages.fetch(messageId).catch(() => null);
+  if (!message) {
+    console.log('メッセージが見つかりません。');
+    return;
+  }
+
+  if (!message.deletable) {
+    console.log('メッセージを削除できません。（権限不足の可能性）');
+    return;
+  }
+
+  await message.delete();
+  console.log(`✅ メッセージを削除しました。 id=${message.id}`);
+}
+
+
 // ===== コンソール入力受付 =====
 
 console.log('コンソールコマンド:');
@@ -637,12 +670,14 @@ console.log('  disconnectAll <guildId>');
 console.log('  muteAll <guildId> <second(s)/minute(s)/hour(s)>');
 console.log('  unmute <guildId> <userId>');
 console.log('  addrole <guildId> <userId> <roleId>');
+console.log('  delmsg <channelId> <messageId>');
 console.log('例: move 123... 234... 345...');
 console.log('例: timeout 123... 234... 10m');
 console.log('例: serverMute 123... 234... 1h');
 console.log('例: moveAll 123... 345...');
 console.log('例: muteAll 123... 15m');
 console.log('例：unmute 123... 234...');
+console.log('例: delmsg 123... 456...');
 console.log('help と入力するとコマンド一覧を表示します。');
 console.log('------------------------------');
 
@@ -720,6 +755,9 @@ rl.on('line', async (input) => {
   }
 
      
+          } else if (command === 'delmsg' && args.length === 3) {
+      await deleteMessage(args[1], args[2]);
+
           } else if (command === 'addrole' && args.length === 4) {
       // ロール付与: addrole <guildId> <userId> <roleId>
       if (!client.isReady()) throw new Error('Client is not ready');
@@ -764,6 +802,7 @@ rl.on('line', async (input) => {
       console.log('  unmute <guildId> <userId>      - ユーザーのサーバーミュートを解除');
       console.log('  help                               - このヘルプを表示');
       console.log('  addrole <guildId> <userId> <roleId>         - ユーザーにロールを付与');
+      console.log('  delmsg <channelId> <messageId>             - メッセージを削除');
     } else if (command) {
       console.log('不明なコマンドです。help で一覧を確認できます。');
     }
@@ -776,3 +815,4 @@ rl.on('line', async (input) => {
 client.on('messageCreate', async (message: Message)=> {
   await handleMusicMessage(message);
 });
+

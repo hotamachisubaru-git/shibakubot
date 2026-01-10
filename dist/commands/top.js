@@ -4,6 +4,7 @@ exports.handleTop = handleTop;
 // src/commands/top.ts
 const discord_js_1 = require("discord.js");
 const data_1 = require("../data");
+const bigint_1 = require("../utils/bigint");
 const PAGE_SIZE = 10;
 /** ギルドでは displayName（ニックネーム） → なければ user.tag → 最後にID */
 async function getDisplayName(interaction, userId) {
@@ -54,7 +55,7 @@ async function handleTop(interaction) {
     await interaction.deferReply({ ephemeral: false });
     const store = (0, data_1.loadGuildStore)(interaction.guildId);
     const entries = Object.entries(store.counts);
-    const sorted = entries.sort((a, b) => b[1] - a[1]);
+    const sorted = entries.sort((a, b) => (0, bigint_1.compareBigIntDesc)(a[1], b[1]));
     if (sorted.length === 0) {
         await interaction.editReply({
             embeds: [new discord_js_1.EmbedBuilder().setTitle('🏆 しばきランキング').setDescription('まだ誰も しばかれていません。')],

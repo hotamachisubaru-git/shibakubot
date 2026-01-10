@@ -8,6 +8,7 @@ import {
   type ChatInputCommandInteraction,
 } from 'discord.js';
 import { loadGuildStore } from '../data';
+import { compareBigIntDesc } from '../utils/bigint';
 
 const PAGE_SIZE = 10;
 
@@ -28,7 +29,7 @@ async function getDisplayName(
 /** 指定ページの埋め込みを作る（0-based page） */
 async function makePageEmbed(
   interaction: ChatInputCommandInteraction,
-  sortedEntries: Array<[string, number]>,
+  sortedEntries: Array<[string, bigint]>,
   page: number
 ) {
   const totalPages = Math.max(1, Math.ceil(sortedEntries.length / PAGE_SIZE));
@@ -78,7 +79,7 @@ export async function handleTop(interaction: ChatInputCommandInteraction) {
 
   const store = loadGuildStore(interaction.guildId!);
   const entries = Object.entries(store.counts);
-  const sorted = entries.sort((a, b) => b[1] - a[1]);
+  const sorted = entries.sort((a, b) => compareBigIntDesc(a[1], b[1]));
 
   if (sorted.length === 0) {
     await interaction.editReply({

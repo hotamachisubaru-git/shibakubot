@@ -19,6 +19,8 @@ import {
 import { LOG_CHANNEL_ID } from '../config';
 import { sendLog } from '../logging';
 import { displayNameFrom } from '../utils/displayNameUtil';
+import { compareBigIntDesc, formatSignedBigInt, parseBigIntInput } from '../utils/bigint';
+import { fetchGuildMembersSafe } from '../utils/memberFetch';
 /* ===== 設定 ===== */
 const OWNER_IDS = (process.env.OWNER_IDS || '')
   .split(',').map(s => s.trim()).filter(Boolean);
@@ -41,7 +43,10 @@ async function guildTopEmbed(i: ChatInputCommandInteraction | ButtonInteraction)
     return new EmbedBuilder().setTitle('しばきランキング').setDescription('まだ誰も しばかれていません。');
 
   const lines = await Promise.all(
-    entries.sort((a, b) => b[1] - a[1]).slice(0, PAGE_SIZE).map(async ([uid, cnt], idx) => {
+    entries
+      .sort((a, b) => compareBigIntDesc(a[1], b[1]))
+      .slice(0, PAGE_SIZE)
+      .map(async ([uid, cnt], idx) => {
       const name = await displayNameFrom(i, uid);
       return `#${idx + 1} ${name} × **${cnt}**`;
     })
@@ -55,23 +60,28 @@ async function guildTopEmbed(i: ChatInputCommandInteraction | ButtonInteraction)
 async function guildMembersEmbed(i: ChatInputCommandInteraction | ButtonInteraction) {
   const gid = i.guildId!;
   const store = loadGuildStore(gid);
-  const members = await i.guild!.members.fetch();
+  const { members, fromCache } = await fetchGuildMembersSafe(i.guild!);
   const humans = members.filter(m => !m.user.bot);
 
   const rows = await Promise.all(humans.map(async m => ({
     tag: m.displayName || m.user.tag,
     id: m.id,
-    count: store.counts[m.id] ?? 0,
+    count: store.counts[m.id] ?? 0n,
   })));
 
-  rows.sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
+  rows.sort((a, b) => {
+    const cmp = compareBigIntDesc(a.count, b.count);
+    return cmp !== 0 ? cmp : a.tag.localeCompare(b.tag);
+  });
   const top = rows.slice(0, 20);
   const lines = top.map((r, idx) => `#${idx + 1} \`${r.tag}\` × **${r.count}**`);
 
   return new EmbedBuilder()
     .setTitle('全メンバーのしばかれ回数（BOT除外）')
     .setDescription(lines.join('\n') || 'メンバーがいません（または全員 0）')
-    .setFooter({ text: `合計 ${rows.length} 名 • ${new Date().toLocaleString('ja-JP')}` });
+    .setFooter({
+      text: `合計 ${rows.length} 名${fromCache ? '（キャッシュのみ）' : ''} • ${new Date().toLocaleString('ja-JP')}`,
+    });
 }
 
 function disabledCopyOfRows(rows: ActionRowBuilder<ButtonBuilder>[]) {
@@ -354,7 +364,7 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
         case 'menu_stats': {
           await btn.deferUpdate();
           const store = loadGuildStore(gid);
-          const total = Object.values(store.counts).reduce((a, b) => a + b, 0);
+          const total = Object.values(store.counts).reduce((a, b) => a + b, 0n);
           const unique = Object.keys(store.counts).length;
           const immune = store.immune.length;
           await btn.followUp({
@@ -500,11 +510,13 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
               }
 
               const countRaw = submitted.fields.getTextInputValue('count').trim();
-              const pickedCount = Number(countRaw);
+              const pickedCount = parseBigIntInput(countRaw);
+              const minBig = BigInt(sbkMin);
+              const maxBig = BigInt(sbkMax);
               if (
-                !Number.isInteger(pickedCount) ||
-                pickedCount < sbkMin ||
-                pickedCount > sbkMax
+                pickedCount === null ||
+                pickedCount < minBig ||
+                pickedCount > maxBig
               ) {
                 await submitted.reply({
                   content: `回数は ${sbkMin}〜${sbkMax} の整数で入力してください。`,
@@ -769,8 +781,8 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
               const submitted = await showModalAndAwait(i, modal);
               if (!submitted) return;
 
-              const value = Number(submitted.fields.getTextInputValue('value'));
-              if (!Number.isFinite(value) || value < 0) {
+              const value = parseBigIntInput(submitted.fields.getTextInputValue('value'));
+              if (value === null || value < 0n) {
                 await submitted.reply({ content: '0以上の数値を入力してください。', ephemeral: true });
                 return;
               }
@@ -1305,13 +1317,17 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
               if (!submitted) return;
 
               const raw = submitted.fields.getTextInputValue('value');
-              const num = Number(raw);
-              if (!Number.isFinite(num)) {
+              const num = parseBigIntInput(raw);
+              if (num === null) {
                 await submitted.reply({ content: '数値を入力してください。', ephemeral: true });
                 return;
               }
+              if (mode === 'set' && num < 0n) {
+                await submitted.reply({ content: '0以上の数値を入力してください。', ephemeral: true });
+                return;
+              }
 
-              let after: number;
+              let after: bigint;
               if (mode === 'set') {
                 after = await setMedals(targetId!, num);
               } else {
@@ -1329,7 +1345,7 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
                   `💰 **${targetName}** のメダル残高を更新しました。\n` +
                   (mode === 'set'
                     ? `新しい残高: **${after} 枚**`
-                    : `変化量: ${num >= 0 ? '+' : ''}${num} 枚 → 残高: **${after} 枚**`),
+                    : `変化量: ${formatSignedBigInt(num)} 枚 → 残高: **${after} 枚**`),
                 ephemeral: true,
               });
 
@@ -1398,7 +1414,7 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
                   : log.actor)
                 : '不明';
               const targetLabel = await displayNameFrom(btn, log.target);
-              const delta = log.delta >= 0 ? `+${log.delta}` : `${log.delta}`;
+              const delta = formatSignedBigInt(log.delta);
               const when = new Date(log.at).toLocaleString('ja-JP');
               const reasonRaw = (log.reason ?? '').replace(/\s+/g, ' ').trim();
               const reason = reasonRaw ? (reasonRaw.length > 40 ? `${reasonRaw.slice(0, 40)}...` : reasonRaw) : '（理由なし）';

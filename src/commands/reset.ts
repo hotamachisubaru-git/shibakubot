@@ -41,7 +41,7 @@ export async function handleReset(interaction: ChatInputCommandInteraction) {
 
   if (target) {
     const store = loadGuildStore(gid);
-    store.counts[target.id] = 0;
+    store.counts[target.id] = 0n;
     
     const member = await interaction.guild!.members.fetch(target.id).catch(() => null);
     const display = member?.displayName ?? target.tag;

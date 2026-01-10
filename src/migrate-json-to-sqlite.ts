@@ -2,6 +2,21 @@ import fs from "fs";
 import path from "path";
 import Database from "better-sqlite3";
 
+const BIGINT_RE = /^-?\d+$/;
+
+function toCountText(value: unknown): string {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (BIGINT_RE.test(trimmed)) return trimmed;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(Math.trunc(value));
+  }
+  const num = Number(value);
+  if (Number.isFinite(num)) return String(Math.trunc(num));
+  return "0";
+}
+
 const GUILDS_DIR = path.join(process.cwd(), "data", "guilds");
 if (!fs.existsSync(GUILDS_DIR)) {
   console.error("❌ data/guilds フォルダが見つかりません。");
@@ -35,7 +50,7 @@ for (const file of files) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS counts(
       userId TEXT PRIMARY KEY,
-      count  INTEGER NOT NULL DEFAULT 0
+      count  TEXT NOT NULL DEFAULT '0'
     );
     CREATE TABLE IF NOT EXISTS immune(
       userId TEXT PRIMARY KEY
@@ -50,7 +65,7 @@ for (const file of files) {
       actor TEXT,
       target TEXT,
       reason TEXT,
-      delta INTEGER NOT NULL
+      delta TEXT NOT NULL
     );
   `);
 
@@ -59,7 +74,7 @@ for (const file of files) {
     if (data.counts) {
       const stmt = db.prepare(`INSERT OR REPLACE INTO counts(userId, count) VALUES(?, ?)`);
       for (const [uid, cnt] of Object.entries(data.counts)) {
-        stmt.run(uid, Number(cnt) || 0);
+        stmt.run(uid, toCountText(cnt));
       }
     }
 

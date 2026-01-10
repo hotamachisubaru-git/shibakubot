@@ -17,8 +17,8 @@ export async function sendLog(
   actorId: string,
   targetId: string,
   reason: string,
-  count: number,
-  next: number,
+  count: bigint,
+  next: bigint,
 ): Promise<void> {
   const guild = interaction.guild;
   if (!guild) return;

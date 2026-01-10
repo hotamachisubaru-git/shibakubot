@@ -18,7 +18,7 @@ export function openGuildDB(gid: string) {
       user_id   TEXT PRIMARY KEY,
       username  TEXT NOT NULL,
       reason    TEXT DEFAULT '',
-      count     INTEGER NOT NULL DEFAULT 0
+      count     TEXT NOT NULL DEFAULT '0'
     );
     CREATE TABLE IF NOT EXISTS immune (
       user_id TEXT PRIMARY KEY

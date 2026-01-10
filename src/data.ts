@@ -8,15 +8,50 @@ import Database from 'better-sqlite3';
 import sqlite3 from 'sqlite3';
 import { open, Database as SqliteDatabase } from 'sqlite';
 
-export type CounterMap = Record<string, number>;
+export type CounterMap = Record<string, bigint>;
 export type SbkLogRow = {
   id: number;
   at: number;
   actor: string | null;
   target: string;
   reason: string | null;
-  delta: number;
+  delta: bigint;
 };
+
+const BIGINT_RE = /^-?\d+$/;
+
+function hasTextAffinity(type?: string | null): boolean {
+  const t = (type ?? '').toUpperCase();
+  return t.includes('TEXT') || t.includes('CHAR') || t.includes('CLOB');
+}
+
+function coerceBigInt(value: unknown, fallback: bigint = 0n): bigint {
+  if (typeof value === 'bigint') return value;
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) return fallback;
+    return BigInt(Math.trunc(value));
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!BIGINT_RE.test(trimmed)) return fallback;
+    try {
+      return BigInt(trimmed);
+    } catch {
+      return fallback;
+    }
+  }
+  return fallback;
+}
+
+function toBigIntInput(value: bigint | number): bigint {
+  if (typeof value === 'bigint') return value;
+  if (!Number.isFinite(value)) return 0n;
+  return BigInt(Math.trunc(value));
+}
+
+function toDbText(value: bigint): string {
+  return value.toString();
+}
 
 // ---------- パス系 ----------
 const DATA_DIR = path.join(process.cwd(), 'data', 'guilds');
@@ -38,7 +73,7 @@ function ensureSchema(db: Database.Database) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS counts (
       userId TEXT PRIMARY KEY,
-      count  INTEGER NOT NULL DEFAULT 0
+      count  TEXT NOT NULL DEFAULT '0'
     );
 
     CREATE TABLE IF NOT EXISTS immune (
@@ -56,7 +91,7 @@ function ensureSchema(db: Database.Database) {
       actor  TEXT,
       target TEXT NOT NULL,
       reason TEXT,
-      delta  INTEGER NOT NULL
+      delta  TEXT NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS user_music_settings (
@@ -69,7 +104,7 @@ function ensureSchema(db: Database.Database) {
   `);
 
   // counts の列チェック（legacy: user / username → userId）
-  const cols = db.prepare(`PRAGMA table_info(counts)`).all() as Array<{ name: string }>;
+  let cols = db.prepare(`PRAGMA table_info(counts)`).all() as Array<{ name: string; type: string }>;
   const hasUserId   = cols.some(c => c.name === 'userId');
   const hasUser     = cols.some(c => c.name === 'user');
   const hasUsername = cols.some(c => c.name === 'username');
@@ -81,14 +116,56 @@ function ensureSchema(db: Database.Database) {
       db.exec(`
         CREATE TABLE counts (
           userId TEXT PRIMARY KEY,
-          count  INTEGER NOT NULL DEFAULT 0
+          count  TEXT NOT NULL DEFAULT '0'
         );
       `);
       db.exec(`
         INSERT INTO counts(userId, count)
-        SELECT ${sourceCol}, count FROM counts_legacy;
+        SELECT ${sourceCol}, CAST(count AS TEXT) FROM counts_legacy;
       `);
       db.exec(`DROP TABLE counts_legacy;`);
+    })();
+  }
+
+  cols = db.prepare(`PRAGMA table_info(counts)`).all() as Array<{ name: string; type: string }>;
+  const countCol = cols.find(c => c.name === 'count');
+  if (countCol && !hasTextAffinity(countCol.type)) {
+    db.transaction(() => {
+      db.exec(`ALTER TABLE counts RENAME TO counts_text_legacy;`);
+      db.exec(`
+        CREATE TABLE counts (
+          userId TEXT PRIMARY KEY,
+          count  TEXT NOT NULL DEFAULT '0'
+        );
+      `);
+      db.exec(`
+        INSERT INTO counts(userId, count)
+        SELECT userId, CAST(count AS TEXT) FROM counts_text_legacy;
+      `);
+      db.exec(`DROP TABLE counts_text_legacy;`);
+    })();
+  }
+
+  const logCols = db.prepare(`PRAGMA table_info(logs)`).all() as Array<{ name: string; type: string }>;
+  const deltaCol = logCols.find(c => c.name === 'delta');
+  if (deltaCol && !hasTextAffinity(deltaCol.type)) {
+    db.transaction(() => {
+      db.exec(`ALTER TABLE logs RENAME TO logs_text_legacy;`);
+      db.exec(`
+        CREATE TABLE logs (
+          id     INTEGER PRIMARY KEY AUTOINCREMENT,
+          at     INTEGER NOT NULL,
+          actor  TEXT,
+          target TEXT NOT NULL,
+          reason TEXT,
+          delta  TEXT NOT NULL
+        );
+      `);
+      db.exec(`
+        INSERT INTO logs(id, at, actor, target, reason, delta)
+        SELECT id, at, actor, target, reason, CAST(delta AS TEXT) FROM logs_text_legacy;
+      `);
+      db.exec(`DROP TABLE logs_text_legacy;`);
     })();
   }
 }
@@ -105,10 +182,10 @@ export function openDb(gid: string) {
 export function getAllCounts(gid: string): CounterMap {
   const db = openDb(gid);
   const rows = db
-    .prepare(`SELECT userId, count FROM counts ORDER BY count DESC`)
-    .all() as Array<{ userId: string; count: number }>;
+    .prepare(`SELECT userId, count FROM counts`)
+    .all() as Array<{ userId: string; count: unknown }>;
   const map: CounterMap = {};
-  for (const r of rows) map[r.userId] = r.count;
+  for (const r of rows) map[r.userId] = coerceBigInt(r.count);
   return map;
 }
 
@@ -128,8 +205,18 @@ export function getRecentLogs(gid: string, limit = 20): SbkLogRow[] {
     FROM logs
     ORDER BY id DESC
     LIMIT ?
-  `).all(limit) as SbkLogRow[];
-  return rows;
+  `).all(limit) as Array<{
+    id: number;
+    at: number;
+    actor: string | null;
+    target: string;
+    reason: string | null;
+    delta: unknown;
+  }>;
+  return rows.map((row) => ({
+    ...row,
+    delta: coerceBigInt(row.delta),
+  }));
 }
 
 export function getLogCount(gid: string): number {
@@ -142,40 +229,46 @@ export function getLogCount(gid: string): number {
 export function addCountGuild(
   gid: string,
   userId: string,
-  by = 1,
+  by: bigint | number = 1,
   actor?: string,
   reason?: string
-): number {
+): bigint {
   const db = openDb(gid);
   const tx = db.transaction(() => {
+    const delta = toBigIntInput(by);
+    const currentRow = db
+      .prepare(`SELECT count FROM counts WHERE userId=?`)
+      .get(userId) as { count: unknown } | undefined;
+    const current = coerceBigInt(currentRow?.count);
+    const next = current + delta;
+
     db.prepare(`
       INSERT INTO counts(userId, count) VALUES(?, ?)
-      ON CONFLICT(userId) DO UPDATE SET count = count + excluded.count
-    `).run(userId, by);
+      ON CONFLICT(userId) DO UPDATE SET count = excluded.count
+    `).run(userId, toDbText(next));
 
     db.prepare(`
       INSERT INTO logs(at, actor, target, reason, delta)
       VALUES(?,?,?,?,?)
-    `).run(Date.now(), actor ?? null, userId, reason ?? null, by);
+    `).run(Date.now(), actor ?? null, userId, reason ?? null, toDbText(delta));
 
-    const row = db
-      .prepare(`SELECT count FROM counts WHERE userId=?`)
-      .get(userId) as { count: number } | undefined;
-    return row?.count ?? by;
+    return next;
   });
   return tx();
 }
 
-export function setCountGuild(gid: string, userId: string, value: number): number {
+export function setCountGuild(gid: string, userId: string, value: bigint | number): bigint {
   const db = openDb(gid);
+  const next = toBigIntInput(value);
+  const clamped = next < 0n ? 0n : next;
   db.prepare(`
     INSERT INTO counts(userId, count) VALUES(?, ?)
     ON CONFLICT(userId) DO UPDATE SET count = excluded.count
-  `).run(userId, Math.max(0, value));
+  `).run(userId, toDbText(clamped));
   const row = db
     .prepare(`SELECT count FROM counts WHERE userId=?`)
-    .get(userId) as { count: number } | undefined;
-  return row?.count ?? 0;
+    .get(userId) as { count: unknown } | undefined;
+  return row ? coerceBigInt(row.count) : clamped;
 }
 
 // ---------- 免除 ----------
@@ -387,15 +480,39 @@ async function getMedalDB(): Promise<SqliteDatabase> {
     await medalDB.exec(`
       CREATE TABLE IF NOT EXISTS medals (
         user_id TEXT PRIMARY KEY,
-        balance INTEGER NOT NULL
+        balance TEXT NOT NULL DEFAULT '0'
       );
     `);
+
+    const cols = await medalDB.all<{ name: string; type: string }[]>(`PRAGMA table_info(medals)`);
+    const balanceCol = cols.find(c => c.name === 'balance');
+    if (balanceCol && !hasTextAffinity(balanceCol.type)) {
+      await medalDB.exec('BEGIN');
+      try {
+        await medalDB.exec(`ALTER TABLE medals RENAME TO medals_text_legacy;`);
+        await medalDB.exec(`
+          CREATE TABLE medals (
+            user_id TEXT PRIMARY KEY,
+            balance TEXT NOT NULL DEFAULT '0'
+          );
+        `);
+        await medalDB.exec(`
+          INSERT INTO medals(user_id, balance)
+          SELECT user_id, CAST(balance AS TEXT) FROM medals_text_legacy;
+        `);
+        await medalDB.exec(`DROP TABLE medals_text_legacy;`);
+        await medalDB.exec('COMMIT');
+      } catch (e) {
+        await medalDB.exec('ROLLBACK');
+        throw e;
+      }
+    }
   }
   return medalDB;
 }
 
 // 残高取得（なければ自動で 1000 を付与）
-export async function getMedalBalance(userId: string): Promise<number> {
+export async function getMedalBalance(userId: string): Promise<bigint> {
   const db = await getMedalDB();
 
   const row = await db.get(
@@ -404,32 +521,33 @@ export async function getMedalBalance(userId: string): Promise<number> {
   );
 
   if (row) {
-    return row.balance;
+    return coerceBigInt((row as { balance?: unknown }).balance);
   }
 
   // ★ ここ：未登録ユーザー → 自動で 1000 を保存
+  const defaultBalance = 1000n;
   await db.run(
     'INSERT INTO medals (user_id, balance) VALUES (?, ?)',
     userId,
-    1000
+    toDbText(defaultBalance)
   );
 
-  return 1000;
+  return defaultBalance;
 }
 
 export async function getTopMedals(limit: number = 20): Promise<
-  Array<{ userId: string; balance: number }>
+  Array<{ userId: string; balance: bigint }>
 > {
   const db = await getMedalDB();
 
   const rows = await db.all<{
     user_id: string;
-    balance: number;
+    balance: unknown;
   }[]>(
     `
       SELECT user_id, balance
       FROM medals
-      ORDER BY balance DESC
+      ORDER BY LENGTH(balance) DESC, balance DESC
       LIMIT ?
     `,
     [limit]
@@ -437,15 +555,16 @@ export async function getTopMedals(limit: number = 20): Promise<
 
   return rows.map((r) => ({
     userId: r.user_id,
-    balance: r.balance,
+    balance: coerceBigInt(r.balance),
   }));
 }
 
 
 
 // 残高を上書き
-export async function setMedals(userId: string, amount: number): Promise<number> {
+export async function setMedals(userId: string, amount: bigint | number): Promise<bigint> {
   const db = await getMedalDB();
+  const next = toBigIntInput(amount);
   await db.run(
     `
       INSERT INTO medals (user_id, balance)
@@ -453,16 +572,18 @@ export async function setMedals(userId: string, amount: number): Promise<number>
       ON CONFLICT(user_id) DO UPDATE SET balance = excluded.balance;
     `,
     userId,
-    amount
+    toDbText(next)
   );
-  return amount;
+  return next;
 }
 
 // 増減
-export async function addMedals(userId: string, diff: number): Promise<number> {
+export async function addMedals(userId: string, diff: bigint | number): Promise<bigint> {
   const db = await getMedalDB();
   const before = await getMedalBalance(userId);
-  const after = Math.max(0, before + diff);
+  const delta = toBigIntInput(diff);
+  const next = before + delta;
+  const after = next < 0n ? 0n : next;
   await db.run(
     `
       INSERT INTO medals (user_id, balance)
@@ -470,7 +591,7 @@ export async function addMedals(userId: string, diff: number): Promise<number> {
       ON CONFLICT(user_id) DO UPDATE SET balance = excluded.balance;
     `,
     userId,
-    after
+    toDbText(after)
   );
   return after;
 }
