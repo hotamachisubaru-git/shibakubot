@@ -26,7 +26,7 @@ const commands = [
      .setDescription('しばく対象')
      .setRequired(true)
 )
-.addIntegerOption(opt =>
+.addStringOption(opt =>
   opt.setName('count')
      .setDescription('しばく回数（省略可・ランダム）')
      .setRequired(false)   // ← 重要

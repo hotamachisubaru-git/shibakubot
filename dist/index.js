@@ -136,27 +136,41 @@ client.on(discord_js_1.Events.InteractionCreate, async (interaction) => {
             return;
         }
         const { min: SBK_MIN, max: SBK_MAX } = (0, data_1.getSbkRange)(gid);
-        // ★ optional 取得
-        let count = interaction.options.getInteger('count');
+        // ★ optional 取得（count は string で受ける）
+        const countStr = interaction.options.getString('count');
         let reason = interaction.options.getString('reason');
-        // ★ count 未指定 → ランダム
-        if (count == null) {
-            count = (0, sbkRandom_1.randomInt)(SBK_MIN, SBK_MAX);
+        // ★ count の決定（BigInt）
+        let countBig;
+        if (!countStr) {
+            // 未指定 → ランダム（この時だけ範囲内）
+            const n = (0, sbkRandom_1.randomInt)(SBK_MIN, SBK_MAX);
+            countBig = BigInt(n);
         }
         else {
-            // 指定されていたら範囲補正
-            count = Math.max(SBK_MIN, Math.min(SBK_MAX, count));
+            // 指定 → BigIntとしてそのまま通す（上限で丸めない）
+            if (!/^\d+$/.test(countStr)) {
+                await interaction.reply({ content: 'count は数字で入力してね。', ephemeral: true });
+                return;
+            }
+            countBig = BigInt(countStr);
+            // 0回やマイナス（今回は許してない）を防ぐ最低保証
+            if (countBig < 1n)
+                countBig = 1n;
         }
+        // 範囲補正（BigIntでやる）
+        const minB = BigInt(SBK_MIN);
+        const maxB = BigInt(SBK_MAX);
+        if (countBig < minB)
+            countBig = minB;
+        if (countBig > maxB)
+            countBig = maxB;
         // ★ reason 未指定 → ランダム
-        if (!reason) {
+        if (!reason)
             reason = (0, sbkRandom_1.randomReason)();
-        }
-        const countBig = BigInt(count);
         const nextCount = (0, data_1.addCountGuild)(gid, user.id, countBig);
         const member = await interaction.guild.members.fetch(user.id).catch(() => null);
         const display = member?.displayName ?? user.tag;
-        await interaction.reply(`🎲 **ランダムしばき発動！**\n` +
-            `**${display}** が **${count} 回** しばかれました！（累計 ${nextCount} 回）\n` +
+        await interaction.reply(`**${display}** が **${countBig.toString()} 回** しばかれました！（累計 ${nextCount.toString()} 回）\n` +
             `理由: ${reason}`);
         await (0, logging_1.sendLog)(interaction, interaction.user.id, user.id, reason, countBig, nextCount);
     }
@@ -221,8 +235,16 @@ client.on(discord_js_1.Events.InteractionCreate, async (interaction) => {
         }
         const gid = interaction.guildId;
         const target = interaction.options.getUser('user', true);
-        const newCountRaw = interaction.options.getInteger('count', true);
-        const newCount = newCountRaw < 0 ? 0n : BigInt(newCountRaw);
+        const newCountRaw = interaction.options.getString('count', true);
+        let newCount;
+        try {
+            newCount = BigInt(newCountRaw);
+            if (newCount < 0n)
+                newCount = 0n;
+        }
+        catch {
+            newCount = 0n;
+        }
         const after = (0, data_1.setCountGuild)(gid, target.id, newCount);
         const store = (0, data_1.loadGuildStore)(gid);
         store.counts[target.id] = after;

@@ -23,7 +23,7 @@ const commands = [
         .addUserOption(opt => opt.setName('user')
         .setDescription('しばく対象')
         .setRequired(true))
-        .addIntegerOption(opt => opt.setName('count')
+        .addStringOption(opt => opt.setName('count')
         .setDescription('しばく回数（省略可・ランダム）')
         .setRequired(false) // ← 重要
     )
