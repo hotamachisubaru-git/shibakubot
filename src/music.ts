@@ -1,5 +1,6 @@
 // src/music.ts
 import { GuildMember, Message, PermissionFlagsBits } from 'discord.js';
+import * as mm from 'music-metadata';
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
@@ -12,7 +13,16 @@ import {
 } from './data';
 
 const PREFIX = 's!';
+const MAX_TRACK_MINUTES = Number(process.env.MUSIC_MAX_MINUTES || 15); // デフォ15分
+const MAX_TRACK_MS = MAX_TRACK_MINUTES * 60 * 1000;
 const OWNER_IDS = (process.env.OWNER_IDS || '').split(',').map((s) => s.trim()).filter(Boolean);
+const MAX_SELECTION_RESULTS = 10;
+const PENDING_SEARCH_TTL_MS = 5 * 60 * 1000;
+const pendingSearches = new Map<string, {
+  tracks: any[];
+  query: string;
+  expiresAt: number;
+}>();
 // ===== ファイルアップロード用の簡易サーバー設定 =====
 const UPLOAD_DIR = path.resolve(process.env.FILE_DIR || './files');
 //サーバー起動
@@ -20,7 +30,7 @@ const app = express();
 app.use('/uploads', express.static(UPLOAD_DIR));
 const PORT = Number(process.env.FILE_PORT || 3001);
 app.listen(PORT,'0.0.0.0', () => {
-  console.log(`📦 Upload file server: http://192.168.11.2:${PORT}/uploads/`);
+  // console.log(`📦 Upload file server: http://192.168.11.2:${PORT}/uploads/`);
 });
 
 
@@ -44,6 +54,179 @@ function findNgWordMatch(texts: Array<string | undefined>, ngWords: string[]): s
   return ngWords.find((w) => w && haystack.includes(w)) ?? null;
 }
 
+function makePendingKey(message: Message) {
+  return `${message.guildId}:${message.author.id}`;
+}
+
+function getPendingSearch(message: Message) {
+  const key = makePendingKey(message);
+  const pending = pendingSearches.get(key);
+  if (!pending) return null;
+  if (pending.expiresAt <= Date.now()) {
+    pendingSearches.delete(key);
+    return null;
+  }
+  return pending;
+}
+
+function setPendingSearch(message: Message, tracks: any[], query: string) {
+  const key = makePendingKey(message);
+  pendingSearches.set(key, {
+    tracks,
+    query,
+    expiresAt: Date.now() + PENDING_SEARCH_TTL_MS,
+  });
+}
+
+function clearPendingSearch(message: Message) {
+  pendingSearches.delete(makePendingKey(message));
+}
+
+function formatTrackDuration(lengthMs: number) {
+  if (!Number.isFinite(lengthMs) || lengthMs <= 0) return '';
+  const totalSeconds = Math.floor(lengthMs / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+}
+
+function decodeAttachmentName(name: string) {
+  if (!/%[0-9A-Fa-f]{2}/.test(name)) return name;
+  try {
+    return decodeURIComponent(name);
+  } catch {
+    return name;
+  }
+}
+
+function getAttachmentNameFromUrl(url: string) {
+  try {
+    const pathname = new URL(url).pathname;
+    const base = pathname.split('/').pop() ?? '';
+    return decodeAttachmentName(base);
+  } catch {
+    return '';
+  }
+}
+
+function pickAttachmentName(att: { name?: string | null; url: string }) {
+  // まずは discord.js の name を信じる（これが一番正しいことが多い）
+  const fromName = decodeAttachmentName(att.name ?? '');
+  if (fromName) return fromName;
+
+  // name が空のときだけ URL から拾う
+  const fromUrl = getAttachmentNameFromUrl(att.url);
+  return fromUrl || 'upload';
+}
+
+function trimId3Text(value: string) {
+  return value.replace(/\0/g, '').trim();
+}
+
+function swapUtf16ByteOrder(value: Buffer) {
+  const swapped = Buffer.allocUnsafe(value.length);
+  for (let i = 0; i + 1 < value.length; i += 2) {
+    swapped[i] = value[i + 1];
+    swapped[i + 1] = value[i];
+  }
+  if (value.length % 2 === 1) {
+    swapped[value.length - 1] = value[value.length - 1];
+  }
+  return swapped;
+}
+
+function decodeId3Text(data: Buffer, encodingByte: number) {
+  if (!data.length) return '';
+  switch (encodingByte) {
+    case 0:
+      return data.toString('latin1');
+    case 1: {
+      if (data.length >= 2) {
+        const bom = data.readUInt16BE(0);
+        if (bom === 0xfffe) return data.slice(2).toString('utf16le');
+        if (bom === 0xfeff) return swapUtf16ByteOrder(data.slice(2)).toString('utf16le');
+      }
+      return data.toString('utf16le');
+    }
+    case 2:
+      return swapUtf16ByteOrder(data).toString('utf16le');
+    case 3:
+      return data.toString('utf8');
+    default:
+      return data.toString('utf8');
+  }
+}
+
+function decodeSynchsafeInt(bytes: Buffer) {
+  if (bytes.length < 4) return 0;
+  return ((bytes[0] & 0x7f) << 21) |
+    ((bytes[1] & 0x7f) << 14) |
+    ((bytes[2] & 0x7f) << 7) |
+    (bytes[3] & 0x7f);
+}
+
+function readId3v2Title(buffer: Buffer) {
+  if (buffer.length < 10) return null;
+  if (buffer.toString('ascii', 0, 3) !== 'ID3') return null;
+  const version = buffer[3];
+  if (version !== 3 && version !== 4) return null;
+
+  const flags = buffer[5];
+  const tagSize = decodeSynchsafeInt(buffer.slice(6, 10));
+  let offset = 10;
+
+  if (flags & 0x40) {
+    if (offset + 4 <= buffer.length) {
+      if (version === 3) {
+        const extSize = buffer.readUInt32BE(offset);
+        offset += 4 + extSize;
+      } else {
+        const extSize = decodeSynchsafeInt(buffer.slice(offset, offset + 4));
+        offset += extSize;
+      }
+    }
+  }
+
+  const tagEnd = Math.min(buffer.length, offset + tagSize);
+  while (offset + 10 <= tagEnd) {
+    const frameId = buffer.toString('ascii', offset, offset + 4);
+    if (!/^[A-Z0-9]{4}$/.test(frameId)) break;
+    const frameSize = version === 4
+      ? decodeSynchsafeInt(buffer.slice(offset + 4, offset + 8))
+      : buffer.readUInt32BE(offset + 4);
+    if (!frameSize) break;
+
+    const frameDataStart = offset + 10;
+    const frameDataEnd = frameDataStart + frameSize;
+    if (frameDataEnd > buffer.length) break;
+
+    if (frameId === 'TIT2') {
+      const encodingByte = buffer[frameDataStart];
+      const title = trimId3Text(
+        decodeId3Text(buffer.slice(frameDataStart + 1, frameDataEnd), encodingByte)
+      );
+      return title || null;
+    }
+
+    offset = frameDataEnd;
+  }
+
+  return null;
+}
+
+function readId3v1Title(buffer: Buffer) {
+  if (buffer.length < 128) return null;
+  const start = buffer.length - 128;
+  if (buffer.toString('ascii', start, start + 3) !== 'TAG') return null;
+  const raw = buffer.slice(start + 3, start + 33).toString('latin1');
+  const title = trimId3Text(raw);
+  return title || null;
+}
+
+function getId3TitleFromBuffer(buffer: Buffer) {
+  return readId3v2Title(buffer) ?? readId3v1Title(buffer);
+}
+
 
 /**
  * メッセージコマンドのルーター
@@ -63,9 +246,26 @@ export async function handleMusicMessage(message: Message) {
 
   try {
     if (command === 'play') {
-      const query = rest.join(' ');
+      const query = rest.join(' ').trim();
       if (!query) {
         await message.reply('🎵 再生したい曲の URL か キーワード を入力してください。');
+        return;
+      }
+      const pick = query.match(/^(10|[1-9])$/);
+      if (pick) {
+        const pending = getPendingSearch(message);
+        if (pending) {
+          const index = Number(pick[1]) - 1;
+          const track = pending.tracks[index];
+          if (!track) {
+            await message.reply(`?? 選択番号は 1〜${pending.tracks.length} で指定してください。`);
+            return;
+          }
+          clearPendingSearch(message);
+          await handlePlay(message, query, { selectedTrack: track });
+          return;
+        }
+        await message.reply('⚠️ その番号を選択できる候補がありません。先に s!play で曲を検索してください。');
         return;
       }
       await handlePlay(message, query);
@@ -122,7 +322,11 @@ async function getOrCreatePlayer(message: Message, voiceChannelId: string) {
 }
 
 /* ---------- s!play ---------- */
-async function handlePlay(message: Message, query: string) {
+async function handlePlay(
+  message: Message,
+  query: string,
+  options?: { titleFallback?: string; forceTitle?: boolean; selectedTrack?: any },
+) {
   const member = message.member as GuildMember | null;
   const voice = member?.voice?.channel;
   if (!voice) {
@@ -146,28 +350,91 @@ async function handlePlay(message: Message, query: string) {
     console.warn('[music] setVolume error (play)', e);
   }
 
-  // URLならHTTP、キーワードならYouTube
-  const isHttpUrl = /^https?:\/\//i.test(query);
+  let track: any;
 
-  let result: any;
-  if (isHttpUrl) {
-    result = await player.search({ query, source: 'http' }, message.author);
+  if (options?.selectedTrack) {
+    track = options.selectedTrack;
   } else {
-    result = await player.search({ query, source: 'youtube' }, message.author);
+    // URLならHTTP、キーワードならYouTube
+    const isHttpUrl = /^https?:\/\//i.test(query);
+    const isYouTubeUrl =
+      /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be|music\.youtube\.com)\//i.test(query);
+
+    let result: any;
+    if (isHttpUrl) {
+      result = await player.search(
+        { query, source: isYouTubeUrl ? 'youtube' : 'http' },
+        message.author,
+      );
+    } else {
+      result = await player.search({ query: `ytsearch:${query}`, source: 'youtube' }, message.author);
+    }
+
+    // console.log('[music] search query=', query);
+    // console.log('[music] isHttpUrl=', isHttpUrl);
+    // console.log('[music] loadType=', result?.loadType);
+    // console.log('[music] tracks len=', result?.tracks?.length ?? 0);
+    // console.log('[music] exception=', (result as any)?.exception);
+
+    if (!result?.tracks?.length) {
+      await message.reply('🔍 曲が見つかりませんでした…。');
+      return;
+    }
+
+    if (!isHttpUrl && result.tracks.length > 1) {
+      const selectionTracks = result.tracks.slice(0, MAX_SELECTION_RESULTS);
+      setPendingSearch(message, selectionTracks, query);
+      const lines = selectionTracks.map((t: any, i: number) => {
+        const title = t.info?.title ?? 'Unknown title';
+        const author = t.info?.author ? ` - ${t.info.author}` : '';
+        const duration = formatTrackDuration(Number(t.info?.length ?? 0));
+        const durationText = duration ? ` (${duration})` : '';
+        return `${i + 1}. ${title}${author}${durationText}`;
+      });
+      await message.reply(
+        `🔎 候補が複数見つかりました。番号で選んでください。\n` +
+        `${lines.join('\n')}\n` +
+        `\n\`s!play 1\`〜\`s!play ${lines.length}\``
+      );
+      return;
+    }
+
+    track = result.tracks[0];
   }
 
-  console.log('[music] search query=', query);
-  console.log('[music] isHttpUrl=', isHttpUrl);
-  console.log('[music] loadType=', result?.loadType);
-  console.log('[music] tracks len=', result?.tracks?.length ?? 0);
-  console.log('[music] exception=', (result as any)?.exception);
+  clearPendingSearch(message);
 
-  if (!result?.tracks?.length) {
-    await message.reply('🔍 曲が見つかりませんでした…。');
+  const lengthMs = Number(track.info?.length ?? 0);
+  const rawIsStream = (track.info as any)?.isStream ?? (track as any)?.isStream;
+  const isStream =
+    rawIsStream === true || rawIsStream === 'true' || rawIsStream === 1;
+  const hasDuration = Number.isFinite(lengthMs) && lengthMs > 0;
+
+  const titleFallback = options?.titleFallback?.trim();
+  const trackTitle = track.info?.title?.trim();
+  const isUnknownTitle =
+    !trackTitle || trackTitle.toLowerCase() === 'unknown title';
+  if (titleFallback && (options?.forceTitle || isUnknownTitle)) {
+    track.info.title = titleFallback;
+  }
+
+  // ライブ/ストリームっぽいものは弾く（必要なら許可に変えられる）
+  if (isStream) {
+    await message.reply(
+      `🚫 ライブ配信/長さ不明の曲は再生できません。（最大 ${MAX_TRACK_MINUTES} 分まで）`
+    );
     return;
   }
 
-  const track = result.tracks[0];
+  if (hasDuration && lengthMs > MAX_TRACK_MS) {
+    const mins = Math.floor(lengthMs / 60000);
+    const secs = Math.floor((lengthMs % 60000) / 1000);
+    await message.reply(
+      `🚫 この曲は長すぎます（${mins}:${secs.toString().padStart(2, '0')}）。最大 ${MAX_TRACK_MINUTES} 分までです。`
+    );
+    return;
+  }
+
   const ngWords = getMusicNgWords(message.guildId!);
   const ngMatch = findNgWordMatch([track.info?.title, track.info?.author], ngWords);
   if (ngMatch) {
@@ -352,12 +619,12 @@ async function handleUpload(message: Message) {
   };
 
   const att = message.attachments.first();
-  if (!att) {
-    await message.reply(`📎 対応形式 (${allowedExtsLabel}) のファイルを添付して \`s!upload\` を送ってね。`);
-    return;
-  }
+if (!att) {
+  await message.reply('📎 ファイルを添付してね。');
+  return;
+}
 
-  const originalName = att.name ?? 'upload';
+  const originalName = pickAttachmentName(att);
   let ext = path.extname(originalName).toLowerCase();
   if (!ext && att.contentType) {
     ext = contentTypeToExt[att.contentType] ?? '';
@@ -367,7 +634,9 @@ async function handleUpload(message: Message) {
     return;
   }
   const displayName = ext
-    ? `${path.basename(originalName, path.extname(originalName))}${ext}`
+    ? originalName.toLowerCase().endsWith(ext)
+      ? originalName
+      : `${originalName}${ext}`
     : originalName;
 
   const ngWords = getMusicNgWords(message.guildId);
@@ -389,19 +658,43 @@ async function handleUpload(message: Message) {
     if (!res.ok) throw new Error(`download failed: ${res.status} ${res.statusText}`);
 
     const buf = Buffer.from(await res.arrayBuffer());
+   let playbackTitle = displayName;
+
+try {
+  const meta = await mm.parseBuffer(buf, att.contentType ?? undefined);
+  const title = meta.common.title?.trim();
+  if (title) playbackTitle = title;
+} catch (e) {
+  // メタ取得失敗しても無視でOK
+}
+
     fs.writeFileSync(savePath, buf);
 
     const publicUrl = makePublicUrl(filename);
     const internalUrl = makeInternalUrl(filename);
 
     await message.reply(
-      `✅ アップロード完了: **${displayName}**\n` +
+      `✅ アップロード完了: **${playbackTitle}**\n` +
       `🌐 公開URL: ${publicUrl}\n` +
       `▶ 再生します…`
     );
 
     // ★再生は internalUrl を渡す（ここ重要）
-    await handlePlay(message, internalUrl);
+    await handlePlay(message, internalUrl, {
+      titleFallback: playbackTitle,
+      forceTitle: true,
+    });
+    try {
+      await handlePlay(message, internalUrl, {
+        titleFallback: playbackTitle,
+        forceTitle: true,
+      });
+    } catch (e) {
+      await handlePlay(message, publicUrl, {
+        titleFallback: playbackTitle,
+        forceTitle: true,
+      });
+    }
 
 
   } catch (e) {
@@ -410,3 +703,4 @@ async function handleUpload(message: Message) {
     await message.reply('❌ アップロード処理に失敗しました。');
   }
 }
+

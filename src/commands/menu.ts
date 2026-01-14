@@ -48,7 +48,8 @@ async function guildTopEmbed(i: ChatInputCommandInteraction | ButtonInteraction)
       .slice(0, PAGE_SIZE)
       .map(async ([uid, cnt], idx) => {
       const name = await displayNameFrom(i, uid);
-      return `#${idx + 1} ${name} × **${cnt}**`;
+      return `#${idx + 1} ${name} × **${formatCountForRanking(cnt)}**`;
+
     })
   );
   return new EmbedBuilder()
@@ -74,7 +75,10 @@ async function guildMembersEmbed(i: ChatInputCommandInteraction | ButtonInteract
     return cmp !== 0 ? cmp : a.tag.localeCompare(b.tag);
   });
   const top = rows.slice(0, 20);
-  const lines = top.map((r, idx) => `#${idx + 1} \`${r.tag}\` × **${r.count}**`);
+const lines = top.map((r, idx) =>
+  `#${idx + 1} \`${r.tag}\` × **${formatCountForRanking(r.count)}**`
+);
+
 
   return new EmbedBuilder()
     .setTitle('全メンバーのしばかれ回数（BOT除外）')
@@ -94,6 +98,50 @@ function disabledCopyOfRows(rows: ActionRowBuilder<ButtonBuilder>[]) {
 }
 
 /* ===== ヘルパー ===== */
+// ===== 数値フォーマット（BigInt -> 日本語単位） =====
+const JP_UNITS = [
+  { value: 10n ** 28n, label: '穣' },
+  { value: 10n ** 24n, label: '秭' },
+  { value: 10n ** 20n, label: '垓' },
+  { value: 10n ** 16n, label: '京' },
+  { value: 10n ** 12n, label: '兆' },
+  { value: 10n ** 8n,  label: '億' },
+  { value: 10n ** 4n,  label: '万' },
+] as const;
+
+function formatBigIntJP(n: bigint, maxParts = 3): string {
+  if (n < 10_000n) return n.toString();
+
+  let rest = n;
+  const parts: string[] = [];
+
+  for (const { value, label } of JP_UNITS) {
+    if (rest >= value) {
+      const q = rest / value;
+      rest %= value;
+      parts.push(`${q}${label}`);
+      if (parts.length >= maxParts) break;
+    }
+  }
+  return parts.join('');
+}
+
+function safeCount(n: bigint, maxLen = 20): string {
+  const s = formatBigIntJP(n);
+  return s.length > maxLen ? s.slice(0, maxLen) + '…' : s;
+}
+
+function formatWithComma(v: bigint): string {
+  return v.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+
+function formatCountForRanking(v: bigint): string {
+  const jp = formatBigIntJP(v);        // 例: 60億1035万
+  const exact = formatWithComma(v);    // 例: 6,010,350,000
+  return `${jp}回（${exact}回）`;
+}
+
+
 function ensureDir(dir: string) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 }
