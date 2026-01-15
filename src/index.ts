@@ -41,7 +41,7 @@ import { handleHelp } from './commands/help';
 import { handleReset } from './commands/reset';
 import { handleStats } from './commands/stats';
 import { handleMusicMessage } from './music';
-
+import { formatBigIntJP } from './utils/formatCount';
 const UPLOAD_DIR = path.resolve(process.env.FILE_DIR || './files');
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
@@ -107,7 +107,7 @@ const lavalink = new LavalinkManager({
       destroyPlayer: false,
     },
     onEmptyQueue: {
-      destroyAfterMs: 30_000,
+      destroyAfterMs: 60_000,
     },
   },
   queueOptions: {
@@ -223,11 +223,17 @@ if (name === 'sbk') {
 
   const member = await interaction.guild!.members.fetch(user.id).catch(() => null);
   const display = member?.displayName ?? user.tag;
+  const MAX_REASON = 2000;
+const safeReason =
+  reason.length > MAX_REASON ? reason.slice(0, MAX_REASON) + '…' : reason;
 
-  await interaction.reply(
-    `**${display}** が **${countBig.toString()} 回** しばかれました！（累計 ${nextCount.toString()} 回）\n` +
-    `理由: ${reason}`
-  );
+await interaction.reply(
+  `**${display}** が **${formatBigIntJP(countBig)}回** しばかれました！` +
+  `（累計 ${formatBigIntJP(nextCount)}回）\n` +
+  `理由: ${safeReason}`
+);
+  
+
 
   await sendLog(
     interaction,

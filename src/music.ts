@@ -284,7 +284,21 @@ export async function handleMusicMessage(message: Message) {
 
     } else if (command === 'ng' || command === 'ngword') {
       await handleNgWordCommand(message, rest);
+    } else if (command === 'help') {
+      await message.reply(
+        '🎵 音楽コマンド一覧:\n' +
+        '`s!play <URL or キーワード>` - 曲を再生・キューに追加\n' +
+        '`s!skip` - 曲をスキップ\n' +
+        '`s!stop` - 再生を停止し、VCから退出\n' +
+        '`s!queue` - 再生中・キュー中の曲一覧を表示\n' +
+        '`s!upload` - 音楽ファイルをアップロードして再生（対応形式: mp3, wav, flac, m4a, aac, ogg）\n' +
+        '`s!ng <サブコマンド>` - 音楽NGワード管理コマンド（管理者のみ）\n' +
+        '（例: `s!ng add <ワード>` / `s!ng remove <ワード>` / `s!ng list` / `s!ng clear`）'
+      );
+    } else if (command === 'remove' || command === 'delete') {
+      await handleRemoveCommand(message, rest);
     }
+
 
   } catch (e) {
     console.error('[music] command error', e);
@@ -703,4 +717,31 @@ try {
     await message.reply('❌ アップロード処理に失敗しました。');
   }
 }
+async function handleRemoveCommand(message: Message, rest: string[]) {
+  const client: any = message.client as any;
+  const lavalink = client.lavalink;
+  const guildId = message.guildId!;
+
+  const player = lavalink.players.get(guildId);
+  if (!player || !player.queue?.tracks?.length) {
+    await message.reply('⏹ キューに曲がありません。');
+    return;
+  }
+
+  const indexStr = rest[0];
+  if (!indexStr || !/^\d+$/.test(indexStr)) {
+    await message.reply('⚠️ 削除する曲の番号を指定してください。（例: `s!remove 2`）');
+    return;
+  }
+
+  const index = Number(indexStr) - 1;
+  if (index < 0 || index >= player.queue.tracks.length) {
+    await message.reply(`⚠️ 番号は 1〜${player.queue.tracks.length} で指定してください。`);
+    return;
+  }
+
+  const removed = player.queue.tracks.splice(index, 1)[0];
+  await message.reply(`🗑 キューから削除しました: **${removed.info.title}**`);
+}
+
 

@@ -7,7 +7,7 @@ import {
   ComponentType, EmbedBuilder, ModalBuilder, TextInputBuilder, TextInputStyle,
   ButtonInteraction, UserSelectMenuBuilder, StringSelectMenuBuilder, ModalSubmitInteraction,
   PermissionFlagsBits, ChannelSelectMenuBuilder, ChannelType, MessageFlags,
-  InteractionCollector, MessageComponentInteraction
+  MessageComponentInteraction
 } from 'discord.js';
 import { handleMedalRankingButton, handleMedalSendButton } from './medal';
 import {
@@ -21,6 +21,8 @@ import { sendLog } from '../logging';
 import { displayNameFrom } from '../utils/displayNameUtil';
 import { compareBigIntDesc, formatSignedBigInt, parseBigIntInput } from '../utils/bigint';
 import { fetchGuildMembersSafe } from '../utils/memberFetch';
+import { formatBigIntJP as formatBigIntJPFull } from '../utils/formatCount';
+
 /* ===== 設定 ===== */
 const OWNER_IDS = (process.env.OWNER_IDS || '')
   .split(',').map(s => s.trim()).filter(Boolean);
@@ -34,58 +36,113 @@ const DATA_ROOT = path.join(process.cwd(), 'data');
 const GUILD_DB_ROOT = path.join(DATA_ROOT, 'guilds');
 const MEDAL_DB_PATH = path.join(DATA_ROOT, 'medalbank.db');
 const BACKUP_ROOT = path.join(process.cwd(), 'backup');
+const EMBED_DESC_LIMIT = 4096; // ← ここは自由に変更OK
+
+function joinLinesWithLimitOrNull(lines: string[], limit: number): string | null {
+  let len = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const add = lines[i].length + (i === 0 ? 0 : 1); // 改行分
+    if (len + add > limit) return null;
+    len += add;
+  }
+  return lines.join('\n');
+}
+function buildTooLongEmbed(title: string, actual: number, limit: number) {
+  const dow = new Date().getDay(); // 0=日 ... 6=土
+
+  const messageByDow = [
+    '日曜日：明日はげっつようび！げっつようび！やったねぇ！！',
+    '月曜日：ムカムカしてもしょうがないよっ！！',
+    '火曜日：大阪や！！おめえら他レギオンぶっ潰すぞ！！',
+    '水曜日：botぶっ壊したらDMしやがれください。',
+    '木曜日：大阪や！！レギオンぶっ潰さないと追放だぞわかったか！！',
+    '金曜日：二次会行く？ 終電逃すなよ？？ 飲みすぎ注意！',
+    '土曜日：とりあえず課金しろ。',
+  ];
+
+  return new EmbedBuilder()
+    .setTitle(title)
+    .setDescription(
+      [
+        `⚠️ ${messageByDow[dow]}`,
+        '',
+        `現在の文字数: ${actual}`,
+        `上限: ${limit}`,
+        '',
+        'PAGE_SIZE を減らすか、表示形式を短くしてください。',
+      ].join('\n')
+    );
+}
 
 async function guildTopEmbed(i: ChatInputCommandInteraction | ButtonInteraction) {
   const gid = i.guildId!;
   const store = loadGuildStore(gid);
   const entries = Object.entries(store.counts);
-  if (!entries.length)
-    return new EmbedBuilder().setTitle('しばきランキング').setDescription('まだ誰も しばかれていません。');
+
+  if (!entries.length) {
+    return new EmbedBuilder()
+      .setTitle('しばきランキング')
+      .setDescription('まだ誰も しばかれていません。');
+  }
 
   const lines = await Promise.all(
     entries
       .sort((a, b) => compareBigIntDesc(a[1], b[1]))
       .slice(0, PAGE_SIZE)
       .map(async ([uid, cnt], idx) => {
-      const name = await displayNameFrom(i, uid);
-      return `#${idx + 1} ${name} × **${formatCountForRanking(cnt)}**`;
-
-    })
+        const name = await displayNameFrom(i, uid);
+        return `#${idx + 1} ${name} × **${formatCountWithReading(cnt)}**`;
+      })
   );
+
+  const joined = lines.join('\n');
+  const desc = joinLinesWithLimitOrNull(lines, EMBED_DESC_LIMIT);
+
+  if (desc === null) {
+    return buildTooLongEmbed('しばきランキング（エラー）', joined.length, EMBED_DESC_LIMIT);
+  }
+
   return new EmbedBuilder()
     .setTitle('しばきランキング')
-    .setDescription(lines.join('\n'))
+    .setDescription(desc)
     .setFooter({ text: `上位 ${PAGE_SIZE} を表示 • ${new Date().toLocaleString('ja-JP')}` });
 }
 
 async function guildMembersEmbed(i: ChatInputCommandInteraction | ButtonInteraction) {
   const gid = i.guildId!;
   const store = loadGuildStore(gid);
-  const { members, fromCache } = await fetchGuildMembersSafe(i.guild!);
+  const { members } = await fetchGuildMembersSafe(i.guild!);
   const humans = members.filter(m => !m.user.bot);
 
-  const rows = await Promise.all(humans.map(async m => ({
-    tag: m.displayName || m.user.tag,
-    id: m.id,
-    count: store.counts[m.id] ?? 0n,
-  })));
+  const rows = await Promise.all(
+    humans.map(async m => ({
+      tag: m.displayName || m.user.tag,
+      id: m.id,
+      count: store.counts[m.id] ?? 0n,
+    }))
+  );
 
   rows.sort((a, b) => {
     const cmp = compareBigIntDesc(a.count, b.count);
     return cmp !== 0 ? cmp : a.tag.localeCompare(b.tag);
   });
-  const top = rows.slice(0, 20);
-const lines = top.map((r, idx) =>
-  `#${idx + 1} \`${r.tag}\` × **${formatCountForRanking(r.count)}**`
-);
 
+  const top = rows.slice(0, 20);
+
+  const lines = top.map(
+    (r, idx) => `#${idx + 1} \`${r.tag}\` × **${formatCountWithReading(r.count)}**`
+  );
+
+  const joined = lines.join('\n');
+  const desc = joinLinesWithLimitOrNull(lines, EMBED_DESC_LIMIT);
+
+  if (desc === null) {
+    return buildTooLongEmbed('メンバー一覧（エラー）', joined.length, EMBED_DESC_LIMIT);
+  }
 
   return new EmbedBuilder()
-    .setTitle('全メンバーのしばかれ回数（BOT除外）')
-    .setDescription(lines.join('\n') || 'メンバーがいません（または全員 0）')
-    .setFooter({
-      text: `合計 ${rows.length} 名${fromCache ? '（キャッシュのみ）' : ''} • ${new Date().toLocaleString('ja-JP')}`,
-    });
+    .setTitle('メンバー一覧')
+    .setDescription(desc);
 }
 
 function disabledCopyOfRows(rows: ActionRowBuilder<ButtonBuilder>[]) {
@@ -131,16 +188,22 @@ function safeCount(n: bigint, maxLen = 20): string {
   return s.length > maxLen ? s.slice(0, maxLen) + '…' : s;
 }
 
+function formatCountWithReading(n: bigint): string {
+  const short = safeCount(n);
+  const full = formatBigIntJPFull(n);
+  if (full === short) return `${short}回`;
+  return `${short}回（${full}回）`;
+}
+
 function formatWithComma(v: bigint): string {
   return v.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 }
 
-function formatCountForRanking(v: bigint): string {
-  const jp = formatBigIntJP(v);        // 例: 60億1035万
-  const exact = formatWithComma(v);    // 例: 6,010,350,000
-  return `${jp}回（${exact}回）`;
-}
-
+const TOO_LONG_MESSAGE = '⚠️ ちょっとあんたたち！ランキング出せないじゃないの！\n' +
+  '・少しは以下の工夫くらいしなさいよね！！\n' +
+  '・数値表示をもっと簡略化とか！！\n' +
+  '・あと、げっつようび！げっつようび！\n' +
+  'ルンルン、ルンルン、げっつようび！';
 
 function ensureDir(dir: string) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -251,7 +314,7 @@ function buildMenu(min: number, max: number, page: number = 1) {
     .setTitle('しばくbot メニュー')
     .setDescription(
       `下のボタンから素早く操作できます（この表示は**あなたにだけ**見えます）。\n` +
-      `現在のしばく回数: **${min}〜${max}**\n` +
+      `現在のしばく回数: **${safeCount(BigInt(min))}〜${safeCount(BigInt(max))}回**\n` +
       `表示カテゴリ: **${pageName} (${page}/${maxPage})**`
     );
 
@@ -420,7 +483,7 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
               new EmbedBuilder()
                 .setTitle('サーバー統計')
                 .addFields(
-                  { name: '総しばき回数', value: String(total), inline: true },
+                  { name: '総しばき回数', value: formatCountWithReading(total), inline: true },
                   { name: '対象人数', value: String(unique), inline: true },
                   { name: '免除ユーザー', value: String(immune), inline: true },
                 ),
@@ -532,7 +595,7 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
                     .setCustomId('count')
                     .setStyle(TextInputStyle.Short)
                     .setRequired(true)
-                    .setLabel(`回数（${sbkMin}〜${sbkMax} の整数）`),
+                .setLabel(`回数（${safeCount(BigInt(sbkMin))}〜${safeCount(BigInt(sbkMax))}回 の整数）`),
                 ),
                 new ActionRowBuilder<TextInputBuilder>().addComponents(
                   new TextInputBuilder()
@@ -567,7 +630,7 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
                 pickedCount > maxBig
               ) {
                 await submitted.reply({
-                  content: `回数は ${sbkMin}〜${sbkMax} の整数で入力してください。`,
+                content: `回数は ${safeCount(BigInt(sbkMin))}〜${safeCount(BigInt(sbkMax))}回 の整数で入力してください。`,
                   ephemeral: true,
                 });
                 return;
@@ -582,7 +645,7 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
               } catch {}
 
               await submitted.reply({
-                content: `**${name}** が ${pickedCount} 回 しばかれました！（累計 ${next} 回）\n理由: ${reason}`,
+                content: `**${name}** が ${safeCount(pickedCount)} 回 しばかれました！（累計 ${safeCount(next)} 回）\n理由: ${reason}`,
                 allowedMentions: { parse: [] },
               });
 
@@ -620,7 +683,7 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
                 .setStyle(TextInputStyle.Short)
                 .setPlaceholder('1以上の整数')
                 .setRequired(true)
-                .setLabel(`最小（現在 ${sbkMin}）`),
+                .setLabel(`最小（現在 ${safeCount(BigInt(sbkMin))}回）`),
             ),
             new ActionRowBuilder<TextInputBuilder>().addComponents(
               new TextInputBuilder()
@@ -628,7 +691,7 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
                 .setStyle(TextInputStyle.Short)
                 .setPlaceholder('最小以上の整数')
                 .setRequired(true)
-                .setLabel(`最大（現在 ${sbkMax}）`),
+                .setLabel(`最大（現在 ${safeCount(BigInt(sbkMax))}回）`),
             ),
           );
 
@@ -650,7 +713,7 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
             await interaction.editReply({ embeds: [built.embed], components: built.rows });
           } catch {}
           await submitted.reply({
-            content: `✅ しばく回数の範囲を **${min}〜${max}** に変更しました。`,
+            content: `✅ しばく回数の範囲を **${safeCount(BigInt(min))}〜${safeCount(BigInt(max))}回** に変更しました。`,
             ephemeral: true,
           });
           break;
@@ -843,7 +906,7 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
               } catch {}
 
               await submitted.reply({
-                content: `**${tag}** のしばかれ回数を **${next} 回** に設定しました。`,
+                content: `**${tag}** のしばかれ回数を **${safeCount(next)} 回** に設定しました。`,
                 ephemeral: true,
               });
 
@@ -1433,7 +1496,7 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
                     '管理者ページから、監査ログ/サーバー設定/システム統計/バックアップ作業が利用できます。',
                     '※ 上限設定・免除管理・値の直接設定・VC移動・VC切断・VCミュート・ミュート解除・メダル管理は 管理者 or OWNER_IDS で利用可。',
                     '※ 開発者ツール/メダルDBバックアップは OWNER_IDS のみ利用可。',
-                    `現在の回数レンジ: **${sbkMin}〜${sbkMax}**`,
+                    `現在の回数レンジ: **${safeCount(BigInt(sbkMin))}〜${safeCount(BigInt(sbkMax))}回**`,
                   ].join('\n'),
                 ),
             ],
@@ -1645,7 +1708,7 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
                       { name: 'ギルド', value: `${i.guild?.name ?? 'unknown'} (${gid})` },
                       { name: 'DB', value: `size: ${dbSize}\ncounts: ${countRow.count}\nimmune: ${immuneRow.count}\nlogs: ${logRow.count}\nsettings: ${settingsRow.count}` },
                       { name: 'ログチャンネル', value: logLabel },
-                      { name: 'SBKレンジ', value: `${sbkMin}〜${sbkMax}`, inline: true },
+                      { name: 'SBKレンジ', value: `${safeCount(BigInt(sbkMin))}〜${safeCount(BigInt(sbkMax))}回`, inline: true },
                     );
 
                   await i.followUp({ embeds: [embed], ephemeral: true });
