@@ -436,24 +436,31 @@ async function handlePlay(
     console.warn('[music] setVolume error (play)', e);
   }
 
-  let track: any;
+  let track: any = options?.selectedTrack;
+  let isHttpUrl = false;
 
-  if (options?.selectedTrack) {
-    track = options.selectedTrack;
-  } else {
-    // URLならHTTP、キーワードならYouTube
-    const isHttpUrl = /^https?:\/\//i.test(query);
-    const isYouTubeUrl =
-      /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be|music\.youtube\.com)\//i.test(query);
-
+  if (!track) {
     let result: any;
-    if (isHttpUrl) {
-      result = await player.search(
-        { query, source: isYouTubeUrl ? 'youtube' : 'http' },
-        message.author,
-      );
-    } else {
-      result = await player.search({ query: `ytsearch:${query}`, source: 'youtube' }, message.author);
+    isHttpUrl = /^https?:\/\//i.test(query);
+    const identifier = isHttpUrl ? query : `ytsearch:${query}`;
+
+    try {
+      // v4: identifier を使う
+      result = await player.search({ identifier }, message.author);
+    } catch (e) {
+      console.warn('[music] search error (identifier)', e);
+    }
+
+    if (!result?.tracks?.length && !isHttpUrl) {
+      try {
+        // 旧式の search へフォールバック
+        result = await player.search(
+          { query: `ytsearch:${query}`, source: 'youtube' },
+          message.author
+        );
+      } catch (e) {
+        console.warn('[music] search error (legacy)', e);
+      }
     }
 
     // console.log('[music] search query=', query);
@@ -467,7 +474,7 @@ async function handlePlay(
       return;
     }
 
-    if (!isHttpUrl && result.tracks.length > 1) {
+    if (!isHttpUrl) {
       const selectionTracks = result.tracks.slice(0, MAX_SELECTION_RESULTS);
       setPendingSearch(message, selectionTracks, query);
       const lines = selectionTracks.map((t: any, i: number) => {
@@ -478,7 +485,7 @@ async function handlePlay(
         return `${i + 1}. ${title}${author}${durationText}`;
       });
       await message.reply(
-        `🔎 候補が複数見つかりました。番号で選んでください。\n` +
+        `🔎 候補が見つかりました。番号で選んでください。\n` +
         `${lines.join('\n')}\n` +
         `\n\`s!play 1\`〜\`s!play ${lines.length}\``
       );
@@ -489,6 +496,10 @@ async function handlePlay(
   }
 
   clearPendingSearch(message);
+  if (!track) {
+    await message.reply('🔍 曲が見つかりませんでした…。');
+    return;
+  }
 
   const lengthMs = Number(track.info?.length ?? 0);
   const rawIsStream = (track.info as any)?.isStream ?? (track as any)?.isStream;
@@ -863,5 +874,3 @@ async function handleEnable(message: Message) {
   setMusicEnabled(message.guildId, true);
   await message.reply('🔊 音楽機能を有効化しました。');
 }
-
-
