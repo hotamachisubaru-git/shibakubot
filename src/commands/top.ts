@@ -6,16 +6,16 @@ import {
   ButtonStyle,
   ComponentType,
   type ChatInputCommandInteraction,
-} from 'discord.js';
-import { loadGuildStore } from '../data';
-import { compareBigIntDesc } from '../utils/bigint';
+} from "discord.js";
+import { loadGuildStore } from "../data";
+import { compareBigIntDesc } from "../utils/bigint";
 
 const PAGE_SIZE = 10;
 
 /** ギルドでは displayName（ニックネーム） → なければ user.tag → 最後にID */
 async function getDisplayName(
   interaction: ChatInputCommandInteraction,
-  userId: string
+  userId: string,
 ): Promise<string> {
   const g = interaction.guild;
   if (g) {
@@ -30,7 +30,7 @@ async function getDisplayName(
 async function makePageEmbed(
   interaction: ChatInputCommandInteraction,
   sortedEntries: Array<[string, bigint]>,
-  page: number
+  page: number,
 ) {
   const totalPages = Math.max(1, Math.ceil(sortedEntries.length / PAGE_SIZE));
   const start = page * PAGE_SIZE;
@@ -41,14 +41,14 @@ async function makePageEmbed(
       const rank = start + i + 1;
       const name = await getDisplayName(interaction, userId);
       return `#${rank} ${name} × **${count}**`;
-    })
+    }),
   );
 
   return new EmbedBuilder()
-    .setTitle('🏆 しばきランキング')
-    .setDescription(lines.join('\n') || 'まだ誰も しばかれていません。')
+    .setTitle("🏆 しばきランキング")
+    .setDescription(lines.join("\n") || "まだ誰も しばかれていません。")
     .setFooter({
-      text: `ページ ${page + 1}/${totalPages} • ${new Date().toLocaleString('ja-JP')}`,
+      text: `ページ ${page + 1}/${totalPages} • ${new Date().toLocaleString("ja-JP")}`,
     });
 }
 
@@ -56,22 +56,25 @@ async function makePageEmbed(
 function makeRow(page: number, totalPages: number) {
   const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
-      .setCustomId('top_prev')
-      .setLabel('◀')
+      .setCustomId("top_prev")
+      .setLabel("◀")
       .setStyle(ButtonStyle.Secondary)
       .setDisabled(page === 0),
     new ButtonBuilder()
-      .setCustomId('top_next')
-      .setLabel('▶')
+      .setCustomId("top_next")
+      .setLabel("▶")
       .setStyle(ButtonStyle.Secondary)
-      .setDisabled(page === totalPages - 1 || totalPages <= 1)
+      .setDisabled(page === totalPages - 1 || totalPages <= 1),
   );
   return row;
 }
 
 export async function handleTop(interaction: ChatInputCommandInteraction) {
   if (!interaction.inGuild()) {
-    await interaction.reply({ content: 'サーバー内で使ってね。', ephemeral: true });
+    await interaction.reply({
+      content: "サーバー内で使ってね。",
+      ephemeral: true,
+    });
     return;
   }
 
@@ -83,7 +86,11 @@ export async function handleTop(interaction: ChatInputCommandInteraction) {
 
   if (sorted.length === 0) {
     await interaction.editReply({
-      embeds: [new EmbedBuilder().setTitle('🏆 しばきランキング').setDescription('まだ誰も しばかれていません。')],
+      embeds: [
+        new EmbedBuilder()
+          .setTitle("🏆 しばきランキング")
+          .setDescription("まだ誰も しばかれていません。"),
+      ],
     });
     return;
   }
@@ -109,7 +116,7 @@ export async function handleTop(interaction: ChatInputCommandInteraction) {
     filter: (i) => i.user.id === interaction.user.id,
   });
 
-  collector.on('collect', async (btn) => {
+  collector.on("collect", async (btn) => {
     // ❶ まずACK（これが超重要）。Unknown interaction対策
     try {
       await btn.deferUpdate();
@@ -118,7 +125,7 @@ export async function handleTop(interaction: ChatInputCommandInteraction) {
     }
 
     // ❷ ページ更新
-    const dir = btn.customId === 'top_prev' ? -1 : 1;
+    const dir = btn.customId === "top_prev" ? -1 : 1;
     page = Math.max(0, Math.min(page + dir, totalPages - 1));
 
     // ❸ メッセージ編集（Interaction.update は使わない）
@@ -130,19 +137,19 @@ export async function handleTop(interaction: ChatInputCommandInteraction) {
     });
   });
 
-  collector.on('end', async () => {
+  collector.on("end", async () => {
     // タイムアウトでボタン無効化
     const disabledRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
-        .setCustomId('top_prev')
-        .setLabel('◀')
+        .setCustomId("top_prev")
+        .setLabel("◀")
         .setStyle(ButtonStyle.Secondary)
         .setDisabled(true),
       new ButtonBuilder()
-        .setCustomId('top_next')
-        .setLabel('▶')
+        .setCustomId("top_next")
+        .setLabel("▶")
         .setStyle(ButtonStyle.Secondary)
-        .setDisabled(true)
+        .setDisabled(true),
     );
     // メッセージの編集は、fetchReply が成功している前提で msg.edit を使う
     await msg.edit({ components: [disabledRow] }).catch(() => null);

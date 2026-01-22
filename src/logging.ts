@@ -5,12 +5,12 @@ import {
   ChatInputCommandInteraction,
   ButtonInteraction,
   ModalSubmitInteraction,
-} from 'discord.js';
-import { LOG_CHANNEL_ID } from './config';
-import { getSetting } from './data';
-import { displayNameFrom, AnyInteraction } from './utils/displayNameUtil';
+} from "discord.js";
+import { LOG_CHANNEL_ID } from "./config";
+import { getSetting } from "./data";
+import { displayNameFrom, AnyInteraction } from "./utils/displayNameUtil";
 
-const LOG_CHANNEL_KEY = 'logChannelId';
+const LOG_CHANNEL_KEY = "logChannelId";
 
 export async function sendLog(
   interaction: AnyInteraction,
@@ -28,17 +28,18 @@ export async function sendLog(
   let channelId = customChannelId || LOG_CHANNEL_ID;
   if (!channelId) return;
 
-  let ch = await interaction.client.channels
-    .fetch(channelId)
-    .catch(() => null);
+  let ch = await interaction.client.channels.fetch(channelId).catch(() => null);
 
-  if (!ch && customChannelId && LOG_CHANNEL_ID && LOG_CHANNEL_ID !== customChannelId) {
+  if (
+    !ch &&
+    customChannelId &&
+    LOG_CHANNEL_ID &&
+    LOG_CHANNEL_ID !== customChannelId
+  ) {
     channelId = LOG_CHANNEL_ID;
-    ch = await interaction.client.channels
-      .fetch(channelId)
-      .catch(() => null);
+    ch = await interaction.client.channels.fetch(channelId).catch(() => null);
   }
-  
+
   if (!ch || ch.type !== ChannelType.GuildText) return;
 
   const actorName = await displayNameFrom(interaction, actorId);

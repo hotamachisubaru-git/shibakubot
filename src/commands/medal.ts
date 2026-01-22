@@ -10,20 +10,15 @@ import {
   TextInputBuilder,
   TextInputStyle,
   UserSelectMenuBuilder,
-} from 'discord.js';
+} from "discord.js";
 
-import {
-  getMedalBalance,
-  addMedals,
-  setMedals,
-  getTopMedals,
-} from '../data';
-import { parseBigIntInput } from '../utils/bigint';
+import { getMedalBalance, addMedals, setMedals, getTopMedals } from "../data";
+import { parseBigIntInput } from "../utils/bigint";
 
 /* ユーザーID → ニックネーム(あれば) / tag の簡易ユーティリティ */
 async function displayNameFromInteraction(
   i: ButtonInteraction | ModalSubmitInteraction,
-  userId: string
+  userId: string,
 ): Promise<string> {
   const g = i.guild;
   if (g) {
@@ -43,7 +38,7 @@ export async function handleMedalRankingButton(btn: ButtonInteraction) {
   const rows = await getTopMedals(20);
   if (!rows.length) {
     await btn.followUp({
-      content: 'まだメダルデータがありません。',
+      content: "まだメダルデータがありません。",
       ephemeral: true,
     });
     return;
@@ -59,8 +54,8 @@ export async function handleMedalRankingButton(btn: ButtonInteraction) {
   await btn.followUp({
     embeds: [
       new EmbedBuilder()
-        .setTitle('💰 メダルランキング TOP20')
-        .setDescription(lines.join('\n')),
+        .setTitle("💰 メダルランキング TOP20")
+        .setDescription(lines.join("\n")),
     ],
     ephemeral: true,
   });
@@ -75,24 +70,24 @@ export async function handleMedalSendButton(btn: ButtonInteraction) {
   // 1: 送金相手を選択させる
   const rowUser = new ActionRowBuilder<UserSelectMenuBuilder>().addComponents(
     new UserSelectMenuBuilder()
-      .setCustomId('medal_send_user')
-      .setPlaceholder('送金相手を選択')
+      .setCustomId("medal_send_user")
+      .setPlaceholder("送金相手を選択")
       .setMaxValues(1),
   );
 
   const rowButtons = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
-      .setCustomId('medal_send_exec')
-      .setLabel('送金する')
+      .setCustomId("medal_send_exec")
+      .setLabel("送金する")
       .setStyle(ButtonStyle.Success),
     new ButtonBuilder()
-      .setCustomId('medal_send_cancel')
-      .setLabel('キャンセル')
+      .setCustomId("medal_send_cancel")
+      .setLabel("キャンセル")
       .setStyle(ButtonStyle.Secondary),
   );
 
   await btn.followUp({
-    content: '💱 送金相手を選んでください。',
+    content: "💱 送金相手を選んでください。",
     components: [rowUser, rowButtons],
     ephemeral: true,
   });
@@ -106,44 +101,43 @@ export async function handleMedalSendButton(btn: ButtonInteraction) {
       i.user.id === btn.user.id && i.message.id === (panel as any).id,
   });
 
-  sub.on('collect', async (i) => {
+  sub.on("collect", async (i) => {
     // 送金相手選択
-    if (i.isUserSelectMenu() && i.customId === 'medal_send_user') {
+    if (i.isUserSelectMenu() && i.customId === "medal_send_user") {
       targetId = i.values[0] ?? null;
       await i.deferUpdate();
       return;
     }
 
     // キャンセル
-    if (i.isButton() && i.customId === 'medal_send_cancel') {
-      await i.update({ content: 'キャンセルしました。', components: [] });
-      sub.stop('cancel');
+    if (i.isButton() && i.customId === "medal_send_cancel") {
+      await i.update({ content: "キャンセルしました。", components: [] });
+      sub.stop("cancel");
       return;
     }
 
     // 実行
-    if (i.isButton() && i.customId === 'medal_send_exec') {
+    if (i.isButton() && i.customId === "medal_send_exec") {
       if (!targetId) {
         await i.reply({
-          content: '送金相手を選択してください。',
+          content: "送金相手を選択してください。",
           ephemeral: true,
         });
         return;
       }
 
-    
       // 金額入力モーダル
       const modal = new ModalBuilder()
-        .setCustomId('medal_send_modal')
-        .setTitle('送金するメダル数を入力');
+        .setCustomId("medal_send_modal")
+        .setTitle("送金するメダル数を入力");
 
       modal.addComponents(
         new ActionRowBuilder<TextInputBuilder>().addComponents(
           new TextInputBuilder()
-            .setCustomId('value')
+            .setCustomId("value")
             .setStyle(TextInputStyle.Short)
             .setRequired(true)
-            .setLabel('送金する枚数（1以上の整数）'),
+            .setLabel("送金する枚数（1以上の整数）"),
         ),
       );
 
@@ -151,18 +145,17 @@ export async function handleMedalSendButton(btn: ButtonInteraction) {
 
       const submitted = await i
         .awaitModalSubmit({
-          time:60_000,
+          time: 60_000,
           filter: (m) => m.user.id === i.user.id,
         })
         .catch(() => null);
       if (!submitted) return;
-        
-       
-      const raw = submitted.fields.getTextInputValue('value');
+
+      const raw = submitted.fields.getTextInputValue("value");
       const amount = parseBigIntInput(raw);
       if (amount === null || amount <= 0n) {
         await submitted.reply({
-          content: '1以上の整数を入力してください。',
+          content: "1以上の整数を入力してください。",
           ephemeral: true,
         });
         return;
@@ -202,11 +195,11 @@ export async function handleMedalSendButton(btn: ButtonInteraction) {
         ephemeral: true,
       });
 
-      sub.stop('done');
+      sub.stop("done");
     }
   });
 
-  sub.on('end', async () => {
+  sub.on("end", async () => {
     try {
       await (panel as any).edit({ components: [] });
     } catch {}

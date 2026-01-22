@@ -3,7 +3,7 @@ import {
   ChatInputCommandInteraction,
   ButtonInteraction,
   ModalSubmitInteraction,
-} from 'discord.js';
+} from "discord.js";
 
 export type AnyInteraction =
   | ChatInputCommandInteraction

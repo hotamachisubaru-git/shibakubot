@@ -28,28 +28,31 @@ async function makePageEmbed(interaction, sortedEntries, page) {
         return `#${rank} ${name} × **${count}**`;
     }));
     return new discord_js_1.EmbedBuilder()
-        .setTitle('🏆 しばきランキング')
-        .setDescription(lines.join('\n') || 'まだ誰も しばかれていません。')
+        .setTitle("🏆 しばきランキング")
+        .setDescription(lines.join("\n") || "まだ誰も しばかれていません。")
         .setFooter({
-        text: `ページ ${page + 1}/${totalPages} • ${new Date().toLocaleString('ja-JP')}`,
+        text: `ページ ${page + 1}/${totalPages} • ${new Date().toLocaleString("ja-JP")}`,
     });
 }
 /** ページボタンの行を作る */
 function makeRow(page, totalPages) {
     const row = new discord_js_1.ActionRowBuilder().addComponents(new discord_js_1.ButtonBuilder()
-        .setCustomId('top_prev')
-        .setLabel('◀')
+        .setCustomId("top_prev")
+        .setLabel("◀")
         .setStyle(discord_js_1.ButtonStyle.Secondary)
         .setDisabled(page === 0), new discord_js_1.ButtonBuilder()
-        .setCustomId('top_next')
-        .setLabel('▶')
+        .setCustomId("top_next")
+        .setLabel("▶")
         .setStyle(discord_js_1.ButtonStyle.Secondary)
         .setDisabled(page === totalPages - 1 || totalPages <= 1));
     return row;
 }
 async function handleTop(interaction) {
     if (!interaction.inGuild()) {
-        await interaction.reply({ content: 'サーバー内で使ってね。', ephemeral: true });
+        await interaction.reply({
+            content: "サーバー内で使ってね。",
+            ephemeral: true,
+        });
         return;
     }
     await interaction.deferReply({ ephemeral: false });
@@ -58,7 +61,11 @@ async function handleTop(interaction) {
     const sorted = entries.sort((a, b) => (0, bigint_1.compareBigIntDesc)(a[1], b[1]));
     if (sorted.length === 0) {
         await interaction.editReply({
-            embeds: [new discord_js_1.EmbedBuilder().setTitle('🏆 しばきランキング').setDescription('まだ誰も しばかれていません。')],
+            embeds: [
+                new discord_js_1.EmbedBuilder()
+                    .setTitle("🏆 しばきランキング")
+                    .setDescription("まだ誰も しばかれていません。"),
+            ],
         });
         return;
     }
@@ -79,7 +86,7 @@ async function handleTop(interaction) {
         time: 60000,
         filter: (i) => i.user.id === interaction.user.id,
     });
-    collector.on('collect', async (btn) => {
+    collector.on("collect", async (btn) => {
         // ❶ まずACK（これが超重要）。Unknown interaction対策
         try {
             await btn.deferUpdate();
@@ -88,7 +95,7 @@ async function handleTop(interaction) {
             // 既に ACK 済みなら無視
         }
         // ❷ ページ更新
-        const dir = btn.customId === 'top_prev' ? -1 : 1;
+        const dir = btn.customId === "top_prev" ? -1 : 1;
         page = Math.max(0, Math.min(page + dir, totalPages - 1));
         // ❸ メッセージ編集（Interaction.update は使わない）
         const newEmbed = await makePageEmbed(interaction, sorted, page);
@@ -98,15 +105,15 @@ async function handleTop(interaction) {
             allowedMentions: { parse: [] },
         });
     });
-    collector.on('end', async () => {
+    collector.on("end", async () => {
         // タイムアウトでボタン無効化
         const disabledRow = new discord_js_1.ActionRowBuilder().addComponents(new discord_js_1.ButtonBuilder()
-            .setCustomId('top_prev')
-            .setLabel('◀')
+            .setCustomId("top_prev")
+            .setLabel("◀")
             .setStyle(discord_js_1.ButtonStyle.Secondary)
             .setDisabled(true), new discord_js_1.ButtonBuilder()
-            .setCustomId('top_next')
-            .setLabel('▶')
+            .setCustomId("top_next")
+            .setLabel("▶")
             .setStyle(discord_js_1.ButtonStyle.Secondary)
             .setDisabled(true));
         // メッセージの編集は、fetchReply が成功している前提で msg.edit を使う

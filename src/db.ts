@@ -1,16 +1,21 @@
 // src/db.ts
-import Database from 'better-sqlite3';
-import fs from 'fs';
-import path from 'path';
+import Database from "better-sqlite3";
+import fs from "fs";
+import path from "path";
 
-const ROOT = path.join(process.cwd(), 'data', 'guilds');
+const ROOT = path.join(process.cwd(), "data", "guilds");
 
-function ensureDir(p: string) { if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true }); }
-function dbPath(gid: string) { ensureDir(ROOT); return path.join(ROOT, `${gid}.db`); }
+function ensureDir(p: string) {
+  if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true });
+}
+function dbPath(gid: string) {
+  ensureDir(ROOT);
+  return path.join(ROOT, `${gid}.db`);
+}
 
 export function openGuildDB(gid: string) {
   const db = new Database(dbPath(gid));
-  db.pragma('journal_mode = WAL');
+  db.pragma("journal_mode = WAL");
 
   // スキーマ（必要なら作成）
   db.exec(`
@@ -34,10 +39,14 @@ export function openGuildDB(gid: string) {
 
 // settings helper
 export function getSetting(db: Database.Database, key: string): string | null {
-  const row = db.prepare(`SELECT value FROM settings WHERE key=?`).get(key) as { value: string } | undefined;
+  const row = db.prepare(`SELECT value FROM settings WHERE key=?`).get(key) as
+    | { value: string }
+    | undefined;
   return row?.value ?? null;
 }
 export function setSetting(db: Database.Database, key: string, value: string) {
-  db.prepare(`INSERT INTO settings(key,value) VALUES(?,?)
-              ON CONFLICT(key) DO UPDATE SET value=excluded.value`).run(key, value);
+  db.prepare(
+    `INSERT INTO settings(key,value) VALUES(?,?)
+              ON CONFLICT(key) DO UPDATE SET value=excluded.value`,
+  ).run(key, value);
 }

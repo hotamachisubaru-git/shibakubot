@@ -23,7 +23,7 @@ if (!fs.existsSync(GUILDS_DIR)) {
   process.exit(1);
 }
 
-const files = fs.readdirSync(GUILDS_DIR).filter(f => f.endsWith(".json"));
+const files = fs.readdirSync(GUILDS_DIR).filter((f) => f.endsWith(".json"));
 if (files.length === 0) {
   console.log("✅ 旧 JSON ファイルが見つかりません。");
   process.exit(0);
@@ -72,7 +72,9 @@ for (const file of files) {
   const tx = db.transaction(() => {
     // counts
     if (data.counts) {
-      const stmt = db.prepare(`INSERT OR REPLACE INTO counts(userId, count) VALUES(?, ?)`);
+      const stmt = db.prepare(
+        `INSERT OR REPLACE INTO counts(userId, count) VALUES(?, ?)`,
+      );
       for (const [uid, cnt] of Object.entries(data.counts)) {
         stmt.run(uid, toCountText(cnt));
       }
@@ -89,7 +91,7 @@ for (const file of files) {
     // settings
     if (data.settings) {
       const stmt = db.prepare(
-        `INSERT OR REPLACE INTO settings(key, value) VALUES(?, ?)`
+        `INSERT OR REPLACE INTO settings(key, value) VALUES(?, ?)`,
       );
       if ("sbkMin" in data.settings)
         stmt.run("sbkMin", String(data.settings.sbkMin));

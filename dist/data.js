@@ -22,6 +22,8 @@ exports.getMusicNgWords = getMusicNgWords;
 exports.addMusicNgWord = addMusicNgWord;
 exports.removeMusicNgWord = removeMusicNgWord;
 exports.clearMusicNgWords = clearMusicNgWords;
+exports.getMusicEnabled = getMusicEnabled;
+exports.setMusicEnabled = setMusicEnabled;
 exports.setSbkRange = setSbkRange;
 exports.loadGuildStore = loadGuildStore;
 exports.getMedalBalance = getMedalBalance;
@@ -37,18 +39,18 @@ const sqlite3_1 = __importDefault(require("sqlite3"));
 const sqlite_1 = require("sqlite");
 const BIGINT_RE = /^-?\d+$/;
 function hasTextAffinity(type) {
-    const t = (type ?? '').toUpperCase();
-    return t.includes('TEXT') || t.includes('CHAR') || t.includes('CLOB');
+    const t = (type ?? "").toUpperCase();
+    return t.includes("TEXT") || t.includes("CHAR") || t.includes("CLOB");
 }
 function coerceBigInt(value, fallback = 0n) {
-    if (typeof value === 'bigint')
+    if (typeof value === "bigint")
         return value;
-    if (typeof value === 'number') {
+    if (typeof value === "number") {
         if (!Number.isFinite(value))
             return fallback;
         return BigInt(Math.trunc(value));
     }
-    if (typeof value === 'string') {
+    if (typeof value === "string") {
         const trimmed = value.trim();
         if (!BIGINT_RE.test(trimmed))
             return fallback;
@@ -62,7 +64,7 @@ function coerceBigInt(value, fallback = 0n) {
     return fallback;
 }
 function toBigIntInput(value) {
-    if (typeof value === 'bigint')
+    if (typeof value === "bigint")
         return value;
     if (!Number.isFinite(value))
         return 0n;
@@ -72,7 +74,7 @@ function toDbText(value) {
     return value.toString();
 }
 // ---------- パス系 ----------
-const DATA_DIR = path_1.default.join(process.cwd(), 'data', 'guilds');
+const DATA_DIR = path_1.default.join(process.cwd(), "data", "guilds");
 function ensureDir(p) {
     if (!fs_1.default.existsSync(p))
         fs_1.default.mkdirSync(p, { recursive: true });
@@ -82,7 +84,7 @@ function dbPath(gid) {
     return path_1.default.join(DATA_DIR, `${gid}.db`);
 }
 // メダルバンク DB パス
-const MEDAL_DB_PATH = path_1.default.join(process.cwd(), 'data', 'medalbank.db');
+const MEDAL_DB_PATH = path_1.default.join(process.cwd(), "data", "medalbank.db");
 // ---------- スキーマ & マイグレ ----------
 function ensureSchema(db) {
     // 期待する各テーブルを作成
@@ -120,11 +122,11 @@ function ensureSchema(db) {
   `);
     // counts の列チェック（legacy: user / username → userId）
     let cols = db.prepare(`PRAGMA table_info(counts)`).all();
-    const hasUserId = cols.some(c => c.name === 'userId');
-    const hasUser = cols.some(c => c.name === 'user');
-    const hasUsername = cols.some(c => c.name === 'username');
+    const hasUserId = cols.some((c) => c.name === "userId");
+    const hasUser = cols.some((c) => c.name === "user");
+    const hasUsername = cols.some((c) => c.name === "username");
     if (!hasUserId && (hasUser || hasUsername)) {
-        const sourceCol = hasUser ? 'user' : 'username';
+        const sourceCol = hasUser ? "user" : "username";
         db.transaction(() => {
             db.exec(`ALTER TABLE counts RENAME TO counts_legacy;`);
             db.exec(`
@@ -141,7 +143,7 @@ function ensureSchema(db) {
         })();
     }
     cols = db.prepare(`PRAGMA table_info(counts)`).all();
-    const countCol = cols.find(c => c.name === 'count');
+    const countCol = cols.find((c) => c.name === "count");
     if (countCol && !hasTextAffinity(countCol.type)) {
         db.transaction(() => {
             db.exec(`ALTER TABLE counts RENAME TO counts_text_legacy;`);
@@ -159,7 +161,7 @@ function ensureSchema(db) {
         })();
     }
     const logCols = db.prepare(`PRAGMA table_info(logs)`).all();
-    const deltaCol = logCols.find(c => c.name === 'delta');
+    const deltaCol = logCols.find((c) => c.name === "delta");
     if (deltaCol && !hasTextAffinity(deltaCol.type)) {
         db.transaction(() => {
             db.exec(`ALTER TABLE logs RENAME TO logs_text_legacy;`);
@@ -184,16 +186,14 @@ function ensureSchema(db) {
 // ---------- DB open (これだけを使う) ----------
 function openDb(gid) {
     const db = new better_sqlite3_1.default(dbPath(gid));
-    db.pragma('journal_mode = WAL');
+    db.pragma("journal_mode = WAL");
     ensureSchema(db);
     return db;
 }
 // ---------- 読み取り ----------
 function getAllCounts(gid) {
     const db = openDb(gid);
-    const rows = db
-        .prepare(`SELECT userId, count FROM counts`)
-        .all();
+    const rows = db.prepare(`SELECT userId, count FROM counts`).all();
     const map = {};
     for (const r of rows)
         map[r.userId] = coerceBigInt(r.count);
@@ -201,20 +201,20 @@ function getAllCounts(gid) {
 }
 function getImmuneList(gid) {
     const db = openDb(gid);
-    const rows = db
-        .prepare(`SELECT userId FROM immune`)
-        .all();
-    return rows.map(r => r.userId);
+    const rows = db.prepare(`SELECT userId FROM immune`).all();
+    return rows.map((r) => r.userId);
 }
 // ---------- ログ ----------
 function getRecentLogs(gid, limit = 20) {
     const db = openDb(gid);
-    const rows = db.prepare(`
+    const rows = db
+        .prepare(`
     SELECT id, at, actor, target, reason, delta
     FROM logs
     ORDER BY id DESC
     LIMIT ?
-  `).all(limit);
+  `)
+        .all(limit);
     return rows.map((row) => ({
         ...row,
         delta: coerceBigInt(row.delta),
@@ -263,32 +263,25 @@ function setCountGuild(gid, userId, value) {
 // ---------- 免除 ----------
 function addImmuneId(gid, userId) {
     const db = openDb(gid);
-    return db
-        .prepare(`INSERT OR IGNORE INTO immune(userId) VALUES(?)`)
-        .run(userId).changes > 0;
+    return (db.prepare(`INSERT OR IGNORE INTO immune(userId) VALUES(?)`).run(userId)
+        .changes > 0);
 }
 function removeImmuneId(gid, userId) {
     const db = openDb(gid);
-    return db
-        .prepare(`DELETE FROM immune WHERE userId=?`)
-        .run(userId).changes > 0;
+    return (db.prepare(`DELETE FROM immune WHERE userId=?`).run(userId).changes > 0);
 }
 function isImmune(gid, userId) {
     const db = openDb(gid);
-    return !!db
-        .prepare(`SELECT 1 FROM immune WHERE userId=?`)
-        .get(userId);
+    return !!db.prepare(`SELECT 1 FROM immune WHERE userId=?`).get(userId);
 }
 // ---------- しばく回数の範囲 ----------
-const SBK_MIN_KEY = 'sbkMin';
-const SBK_MAX_KEY = 'sbkMax';
+const SBK_MIN_KEY = "sbkMin";
+const SBK_MAX_KEY = "sbkMax";
 const SBK_MIN_DEFAULT = 1;
 const SBK_MAX_DEFAULT = 25; // 初期値としてだけ使う
 function getSetting(gid, key) {
     const db = openDb(gid);
-    const row = db
-        .prepare(`SELECT value FROM settings WHERE key=?`)
-        .get(key);
+    const row = db.prepare(`SELECT value FROM settings WHERE key=?`).get(key);
     return row?.value ?? null;
 }
 function setSetting(gid, key, value) {
@@ -322,13 +315,15 @@ function getSbkRange(gid) {
     return { min, max };
 }
 // ---------- 音量設定 ----------
-const MUSIC_VOL_KEY = 'musicVolume';
-const MUSIC_VOL_DEFAULT = 100;
+const MUSIC_VOL_KEY = "musicVolume";
+const MUSIC_VOL_DEFAULT = 20;
 const MUSIC_VOL_MIN = 0;
-const MUSIC_VOL_MAX = 200;
+const MUSIC_VOL_MAX = 20;
 function getUserMusicVolume(gid, userId) {
     const db = openDb(gid);
-    const row = db.prepare(`SELECT value FROM user_music_settings WHERE userId=? AND key=?`).get(userId, MUSIC_VOL_KEY);
+    const row = db
+        .prepare(`SELECT value FROM user_music_settings WHERE userId=? AND key=?`)
+        .get(userId, MUSIC_VOL_KEY);
     const v = Number(row?.value ?? MUSIC_VOL_DEFAULT);
     if (!Number.isFinite(v))
         return MUSIC_VOL_DEFAULT;
@@ -344,7 +339,7 @@ function setUserMusicVolume(gid, userId, vol) {
     return clamped;
 }
 // ---------- 音楽 NG ワード ----------
-const MUSIC_NG_KEY = 'musicNgWords';
+const MUSIC_NG_KEY = "musicNgWords";
 function normalizeNgWord(word) {
     return word.trim().toLowerCase();
 }
@@ -362,7 +357,7 @@ function getMusicNgWords(gid) {
         if (!Array.isArray(parsed))
             return [];
         return Array.from(new Set(parsed
-            .filter((w) => typeof w === 'string')
+            .filter((w) => typeof w === "string")
             .map((w) => normalizeNgWord(w))
             .filter((w) => w.length > 0))).sort();
     }
@@ -393,6 +388,17 @@ function removeMusicNgWord(gid, word) {
 }
 function clearMusicNgWords(gid) {
     setSetting(gid, MUSIC_NG_KEY, JSON.stringify([]));
+}
+// ---------- 音楽機能有効化設定 ----------
+const MUSIC_ENABLED_KEY = "musicEnabled";
+function getMusicEnabled(gid) {
+    const raw = getSetting(gid, MUSIC_ENABLED_KEY);
+    if (!raw)
+        return true; // デフォルト有効
+    return raw.toLowerCase() === "true";
+}
+function setMusicEnabled(gid, enabled) {
+    setSetting(gid, MUSIC_ENABLED_KEY, enabled ? "true" : "false");
 }
 function setSbkRange(gid, min, max) {
     const db = openDb(gid);
@@ -441,9 +447,9 @@ async function getMedalDB() {
       );
     `);
         const cols = await medalDB.all(`PRAGMA table_info(medals)`);
-        const balanceCol = cols.find(c => c.name === 'balance');
+        const balanceCol = cols.find((c) => c.name === "balance");
         if (balanceCol && !hasTextAffinity(balanceCol.type)) {
-            await medalDB.exec('BEGIN');
+            await medalDB.exec("BEGIN");
             try {
                 await medalDB.exec(`ALTER TABLE medals RENAME TO medals_text_legacy;`);
                 await medalDB.exec(`
@@ -457,10 +463,10 @@ async function getMedalDB() {
           SELECT user_id, CAST(balance AS TEXT) FROM medals_text_legacy;
         `);
                 await medalDB.exec(`DROP TABLE medals_text_legacy;`);
-                await medalDB.exec('COMMIT');
+                await medalDB.exec("COMMIT");
             }
             catch (e) {
-                await medalDB.exec('ROLLBACK');
+                await medalDB.exec("ROLLBACK");
                 throw e;
             }
         }
@@ -470,13 +476,13 @@ async function getMedalDB() {
 // 残高取得（なければ自動で 1000 を付与）
 async function getMedalBalance(userId) {
     const db = await getMedalDB();
-    const row = await db.get('SELECT balance FROM medals WHERE user_id = ?', userId);
+    const row = await db.get("SELECT balance FROM medals WHERE user_id = ?", userId);
     if (row) {
         return coerceBigInt(row.balance);
     }
     // ★ ここ：未登録ユーザー → 自動で 1000 を保存
     const defaultBalance = 1000n;
-    await db.run('INSERT INTO medals (user_id, balance) VALUES (?, ?)', userId, toDbText(defaultBalance));
+    await db.run("INSERT INTO medals (user_id, balance) VALUES (?, ?)", userId, toDbText(defaultBalance));
     return defaultBalance;
 }
 async function getTopMedals(limit = 20) {

@@ -8,14 +8,14 @@ const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
 require("dotenv/config");
 const PROJECT = process.cwd();
-const DATA_DIR = path_1.default.join(PROJECT, 'data');
-const GUILDS_DIR = path_1.default.join(DATA_DIR, 'guilds');
-const ROOT_JSON = path_1.default.join(PROJECT, 'data.json'); // 旧: ルートの data.json
-const SRC_JSON = path_1.default.join(PROJECT, 'src', 'data.json'); // 旧: src/data.json（あれば）
-const IMMUNE_OLD = path_1.default.join(PROJECT, 'immune.json'); // 旧: 免除リスト（任意）
+const DATA_DIR = path_1.default.join(PROJECT, "data");
+const GUILDS_DIR = path_1.default.join(DATA_DIR, "guilds");
+const ROOT_JSON = path_1.default.join(PROJECT, "data.json"); // 旧: ルートの data.json
+const SRC_JSON = path_1.default.join(PROJECT, "src", "data.json"); // 旧: src/data.json（あれば）
+const IMMUNE_OLD = path_1.default.join(PROJECT, "immune.json"); // 旧: 免除リスト（任意）
 const GUILD_ID = process.env.GUILD_ID;
 if (!GUILD_ID) {
-    console.error('❌ .env の GUILD_ID が未設定です。移行先のギルドIDを指定してください。');
+    console.error("❌ .env の GUILD_ID が未設定です。移行先のギルドIDを指定してください。");
     process.exit(1);
 }
 function ensureDirs() {
@@ -28,7 +28,7 @@ function readJsonSafe(p) {
     try {
         if (!fs_1.default.existsSync(p))
             return null;
-        const t = fs_1.default.readFileSync(p, 'utf8').trim();
+        const t = fs_1.default.readFileSync(p, "utf8").trim();
         if (!t)
             return null;
         return JSON.parse(t);
@@ -73,7 +73,7 @@ const result = {
 writeJson(targetPath, result);
 // レポート
 const users = Object.keys(mergedCounts).length;
-console.log('✅ 移行完了');
+console.log("✅ 移行完了");
 console.log(`  → 書き込み先: ${targetPath}`);
 console.log(`  → ユーザー数: ${users}`);
 console.log(`  → 免除数   : ${result.immune.length}`);

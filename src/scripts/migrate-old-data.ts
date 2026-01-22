@@ -1,22 +1,24 @@
 // scripts/migrate-old-data.ts
-import fs from 'fs';
-import path from 'path';
-import 'dotenv/config';
+import fs from "fs";
+import path from "path";
+import "dotenv/config";
 
 type CounterMap = Record<string, number>;
 type GuildData = { counts: CounterMap; immune: string[] };
 
 const PROJECT = process.cwd();
-const DATA_DIR = path.join(PROJECT, 'data');
-const GUILDS_DIR = path.join(DATA_DIR, 'guilds');
+const DATA_DIR = path.join(PROJECT, "data");
+const GUILDS_DIR = path.join(DATA_DIR, "guilds");
 
-const ROOT_JSON = path.join(PROJECT, 'data.json');          // 旧: ルートの data.json
-const SRC_JSON  = path.join(PROJECT, 'src', 'data.json');   // 旧: src/data.json（あれば）
-const IMMUNE_OLD = path.join(PROJECT, 'immune.json');       // 旧: 免除リスト（任意）
+const ROOT_JSON = path.join(PROJECT, "data.json"); // 旧: ルートの data.json
+const SRC_JSON = path.join(PROJECT, "src", "data.json"); // 旧: src/data.json（あれば）
+const IMMUNE_OLD = path.join(PROJECT, "immune.json"); // 旧: 免除リスト（任意）
 
 const GUILD_ID = process.env.GUILD_ID;
 if (!GUILD_ID) {
-  console.error('❌ .env の GUILD_ID が未設定です。移行先のギルドIDを指定してください。');
+  console.error(
+    "❌ .env の GUILD_ID が未設定です。移行先のギルドIDを指定してください。",
+  );
   process.exit(1);
 }
 
@@ -27,7 +29,7 @@ function ensureDirs() {
 function readJsonSafe<T = any>(p: string): T | null {
   try {
     if (!fs.existsSync(p)) return null;
-    const t = fs.readFileSync(p, 'utf8').trim();
+    const t = fs.readFileSync(p, "utf8").trim();
     if (!t) return null;
     return JSON.parse(t) as T;
   } catch {
@@ -48,7 +50,8 @@ const oldGlobalCounts: CounterMap =
   {};
 
 type OldImmuneStore = Record<string, string[]>;
-const oldImmuneStore: OldImmuneStore = readJsonSafe<OldImmuneStore>(IMMUNE_OLD) ?? {};
+const oldImmuneStore: OldImmuneStore =
+  readJsonSafe<OldImmuneStore>(IMMUNE_OLD) ?? {};
 
 // 新ファイルの既存データ（あれば）を読み込み
 ensureDirs();
@@ -78,7 +81,7 @@ writeJson(targetPath, result);
 
 // レポート
 const users = Object.keys(mergedCounts).length;
-console.log('✅ 移行完了');
+console.log("✅ 移行完了");
 console.log(`  → 書き込み先: ${targetPath}`);
 console.log(`  → ユーザー数: ${users}`);
 console.log(`  → 免除数   : ${result.immune.length}`);

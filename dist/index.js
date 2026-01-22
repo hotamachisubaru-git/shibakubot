@@ -22,12 +22,13 @@ const help_1 = require("./commands/help");
 const reset_1 = require("./commands/reset");
 const stats_1 = require("./commands/stats");
 const music_1 = require("./music");
-const UPLOAD_DIR = path_1.default.resolve(process.env.FILE_DIR || './files');
+const formatCount_1 = require("./utils/formatCount");
+const UPLOAD_DIR = path_1.default.resolve(process.env.FILE_DIR || "./files");
 fs_1.default.mkdirSync(UPLOAD_DIR, { recursive: true });
-const FILE_HOST = 'play.hotamachi.jp';
-const FILE_PORT = Number(process.env.FILE_PORT ?? '3001');
+const FILE_HOST = "play.hotamachi.jp";
+const FILE_PORT = Number(process.env.FILE_PORT ?? "3001");
 const app = (0, express_1.default)();
-app.use('/uploads', express_1.default.static(UPLOAD_DIR));
+app.use("/uploads", express_1.default.static(UPLOAD_DIR));
 app.listen(FILE_PORT, FILE_HOST, () => {
     console.log(`📦 Upload file server: http://${FILE_HOST}:${FILE_PORT}/uploads/`);
 });
@@ -44,10 +45,10 @@ const client = new discord_js_1.Client({
 const lavalink = new lavalink_client_1.LavalinkManager({
     nodes: [
         {
-            id: 'local',
-            host: '127.0.0.1',
+            id: "local",
+            host: "127.0.0.1",
             port: 2333,
-            authorization: 'youshallnotpass', // application.yml の password
+            authorization: "youshallnotpass", // application.yml の password
             secure: false,
         },
     ],
@@ -59,13 +60,13 @@ const lavalink = new lavalink_client_1.LavalinkManager({
         guild.shard.send(payload);
     },
     client: {
-        id: '0', // ここはダミーでOK（後で init で上書き）
-        username: 'shibaku-bot',
+        id: "0", // ここはダミーでOK（後で init で上書き）
+        username: "shibaku-bot",
     },
     // （オプション）お好みで
     autoSkip: true,
     playerOptions: {
-        defaultSearchPlatform: 'ytmsearch',
+        defaultSearchPlatform: "ytmsearch",
         clientBasedPositionUpdateInterval: 150,
         volumeDecrementer: 0.75,
         onDisconnect: {
@@ -73,7 +74,7 @@ const lavalink = new lavalink_client_1.LavalinkManager({
             destroyPlayer: false,
         },
         onEmptyQueue: {
-            destroyAfterMs: 30000,
+            destroyAfterMs: 60000,
         },
     },
     queueOptions: {
@@ -83,19 +84,25 @@ const lavalink = new lavalink_client_1.LavalinkManager({
 // client にぶら下げる
 client.lavalink = lavalink;
 // Discord の Raw イベントを Lavalink に渡す
-client.on('raw', (data) => {
+client.on("raw", (data) => {
     client.lavalink.sendRawData(data);
 });
 // ---- 定数 ----
-const OWNER_IDS = (process.env.OWNER_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
-const IMMUNE_IDS = (process.env.IMMUNE_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
+const OWNER_IDS = (process.env.OWNER_IDS || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+const IMMUNE_IDS = (process.env.IMMUNE_IDS || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
 // Ready
 client.once(discord_js_1.Events.ClientReady, async (b) => {
     console.log(`✅ ログイン完了: ${b.user.tag}`);
     // Lavalink と Bot 情報を紐付け（ヘッダーは ASCII のみ）
     await client.lavalink.init({
         id: b.user.id,
-        username: 'shibakubot', // 日本語を入れない
+        username: "shibakubot", // 日本語を入れない
     });
 });
 // ---- コマンドハンドラ ----
@@ -104,41 +111,50 @@ client.on(discord_js_1.Events.InteractionCreate, async (interaction) => {
         return;
     const name = interaction.commandName;
     // /ping
-    if (name === 'ping') {
+    if (name === "ping") {
         const t0 = performance.now();
         await interaction.deferReply({ ephemeral: true });
         const apiPing = Math.round(performance.now() - t0);
         let wsPing = interaction.client.ws?.ping ?? -1;
         for (let waited = 0; wsPing < 0 && waited < 5000; waited += 200) {
-            await new Promise(r => setTimeout(r, 200));
+            await new Promise((r) => setTimeout(r, 200));
             wsPing = interaction.client.ws?.ping ?? -1;
         }
-        const wsText = wsPing >= 0 ? `${Math.round(wsPing)}ms` : '取得できませんでした';
+        const wsText = wsPing >= 0 ? `${Math.round(wsPing)}ms` : "取得できませんでした";
         await interaction.editReply(`API: **${apiPing}ms** | WS: **${wsText}**`);
         return;
     }
     // /sbk
-    if (name === 'sbk') {
+    if (name === "sbk") {
         if (!interaction.inGuild()) {
-            await interaction.reply({ content: 'サーバー内で使ってね。', ephemeral: true });
+            await interaction.reply({
+                content: "サーバー内で使ってね。",
+                ephemeral: true,
+            });
             return;
         }
         const gid = interaction.guildId;
-        const user = interaction.options.getUser('user', true);
+        const user = interaction.options.getUser("user", true);
         if (user.bot || user.id === interaction.client.user?.id) {
-            await interaction.reply({ content: 'BOTは対象外です。', ephemeral: true });
+            await interaction.reply({
+                content: "BOTは対象外です。",
+                ephemeral: true,
+            });
             return;
         }
         const localImmune = (0, data_1.isImmune)(gid, user.id);
         const globalImmune = IMMUNE_IDS.includes(user.id);
         if (localImmune || globalImmune) {
-            await interaction.reply({ content: 'このユーザーはしばき免除のため実行できません。', ephemeral: true });
+            await interaction.reply({
+                content: "このユーザーはしばき免除のため実行できません。",
+                ephemeral: true,
+            });
             return;
         }
         const { min: SBK_MIN, max: SBK_MAX } = (0, data_1.getSbkRange)(gid);
         // ★ optional 取得（count は string で受ける）
-        const countStr = interaction.options.getString('count');
-        let reason = interaction.options.getString('reason');
+        const countStr = interaction.options.getString("count");
+        let reason = interaction.options.getString("reason");
         // ★ count の決定（BigInt）
         let countBig;
         if (!countStr) {
@@ -149,7 +165,10 @@ client.on(discord_js_1.Events.InteractionCreate, async (interaction) => {
         else {
             // 指定 → BigIntとしてそのまま通す（上限で丸めない）
             if (!/^\d+$/.test(countStr)) {
-                await interaction.reply({ content: 'count は数字で入力してね。', ephemeral: true });
+                await interaction.reply({
+                    content: "count は数字で入力してね。",
+                    ephemeral: true,
+                });
                 return;
             }
             countBig = BigInt(countStr);
@@ -168,23 +187,33 @@ client.on(discord_js_1.Events.InteractionCreate, async (interaction) => {
         if (!reason)
             reason = (0, sbkRandom_1.randomReason)();
         const nextCount = (0, data_1.addCountGuild)(gid, user.id, countBig);
-        const member = await interaction.guild.members.fetch(user.id).catch(() => null);
+        const member = await interaction
+            .guild.members.fetch(user.id)
+            .catch(() => null);
         const display = member?.displayName ?? user.tag;
-        await interaction.reply(`**${display}** が **${countBig.toString()} 回** しばかれました！（累計 ${nextCount.toString()} 回）\n` +
-            `理由: ${reason}`);
+        const MAX_REASON = 2000;
+        const safeReason = reason.length > MAX_REASON ? reason.slice(0, MAX_REASON) + "…" : reason;
+        await interaction.reply(`**${display}** が **${(0, formatCount_1.formatBigIntJP)(countBig)}回** しばかれました！` +
+            `（累計 ${(0, formatCount_1.formatBigIntJP)(nextCount)}回）\n` +
+            `理由: ${safeReason}`);
         await (0, logging_1.sendLog)(interaction, interaction.user.id, user.id, reason, countBig, nextCount);
     }
     // /check
-    if (name === 'check') {
+    if (name === "check") {
         if (!interaction.inGuild()) {
-            await interaction.reply({ content: 'サーバー内で使用してください。', ephemeral: true });
+            await interaction.reply({
+                content: "サーバー内で使用してください。",
+                ephemeral: true,
+            });
             return;
         }
         const gid = interaction.guildId;
-        const target = interaction.options.getUser('user', true);
+        const target = interaction.options.getUser("user", true);
         const store = (0, data_1.loadGuildStore)(gid);
         const count = store.counts[target.id] ?? 0n;
-        const member = await interaction.guild.members.fetch(target.id).catch(() => null);
+        const member = await interaction
+            .guild.members.fetch(target.id)
+            .catch(() => null);
         const displayName = member?.displayName ?? target.tag;
         await interaction.reply({
             content: `**${displayName}** は今までに ${count} 回 しばかれました。`,
@@ -193,49 +222,56 @@ client.on(discord_js_1.Events.InteractionCreate, async (interaction) => {
         return;
     }
     // 外部ハンドラ
-    if (name === 'menu') {
+    if (name === "menu") {
         await (0, menu_1.handleMenu)(interaction);
         return;
     }
-    if (name === 'members') {
+    if (name === "members") {
         await (0, members_1.handleMembers)(interaction);
         return;
     }
-    if (name === 'room') {
+    if (name === "room") {
         await (0, daimongamecenter_1.handleRoom)(interaction);
         return;
     }
-    if (name === 'help') {
+    if (name === "help") {
         await (0, help_1.handleHelp)(interaction);
         return;
     }
-    if (name === 'stats') {
+    if (name === "stats") {
         await (0, stats_1.handleStats)(interaction);
         return;
     }
-    if (name === 'reset') {
+    if (name === "reset") {
         await (0, reset_1.handleReset)(interaction);
         return;
     }
-    if (name === 'top') {
+    if (name === "top") {
         await (0, top_1.handleTop)(interaction);
         return;
     }
     // /control（管理者 / 開発者のみ）
-    if (name === 'control') {
+    if (name === "control") {
         if (!interaction.inGuild()) {
-            await interaction.reply({ content: 'このコマンドはサーバー内でのみ使用できます。', ephemeral: true });
+            await interaction.reply({
+                content: "このコマンドはサーバー内でのみ使用できます。",
+                ephemeral: true,
+            });
             return;
         }
-        const isAdmin = interaction.memberPermissions?.has(discord_js_1.PermissionFlagsBits.Administrator) ?? false;
+        const isAdmin = interaction.memberPermissions?.has(discord_js_1.PermissionFlagsBits.Administrator) ??
+            false;
         const isOwner = OWNER_IDS.includes(interaction.user.id);
         if (!isAdmin && !isOwner) {
-            await interaction.reply({ content: '権限がありません。（管理者または開発者のみ）', ephemeral: true });
+            await interaction.reply({
+                content: "権限がありません。（管理者または開発者のみ）",
+                ephemeral: true,
+            });
             return;
         }
         const gid = interaction.guildId;
-        const target = interaction.options.getUser('user', true);
-        const newCountRaw = interaction.options.getString('count', true);
+        const target = interaction.options.getUser("user", true);
+        const newCountRaw = interaction.options.getString("count", true);
         let newCount;
         try {
             newCount = BigInt(newCountRaw);
@@ -248,7 +284,9 @@ client.on(discord_js_1.Events.InteractionCreate, async (interaction) => {
         const after = (0, data_1.setCountGuild)(gid, target.id, newCount);
         const store = (0, data_1.loadGuildStore)(gid);
         store.counts[target.id] = after;
-        const member = await interaction.guild.members.fetch(target.id).catch(() => null);
+        const member = await interaction
+            .guild.members.fetch(target.id)
+            .catch(() => null);
         const displayName = member?.displayName ?? target.tag;
         await interaction.reply({
             content: `**${displayName}** のしばかれ回数を **${after} 回** に設定しました。`,
@@ -258,55 +296,78 @@ client.on(discord_js_1.Events.InteractionCreate, async (interaction) => {
         return;
     }
     // /immune（管理者 / 開発者のみ） …（既存のまま）
-    if (name === 'immune') {
+    if (name === "immune") {
         if (!interaction.inGuild()) {
-            await interaction.reply({ content: 'このコマンドはサーバー内でのみ使用できます。', ephemeral: true });
+            await interaction.reply({
+                content: "このコマンドはサーバー内でのみ使用できます。",
+                ephemeral: true,
+            });
             return;
         }
-        const isAdmin = interaction.memberPermissions?.has(discord_js_1.PermissionFlagsBits.Administrator) ?? false;
+        const isAdmin = interaction.memberPermissions?.has(discord_js_1.PermissionFlagsBits.Administrator) ??
+            false;
         const isOwner = OWNER_IDS.includes(interaction.user.id);
         if (!isAdmin && !isOwner) {
-            await interaction.reply({ content: '権限がありません。（管理者または開発者のみ）', ephemeral: true });
+            await interaction.reply({
+                content: "権限がありません。（管理者または開発者のみ）",
+                ephemeral: true,
+            });
             return;
         }
         const sub = interaction.options.getSubcommand();
         const gid = interaction.guildId;
-        if (sub === 'add') {
-            const u = interaction.options.getUser('user', true);
+        if (sub === "add") {
+            const u = interaction.options.getUser("user", true);
             if (u.bot) {
-                await interaction.reply({ content: 'BOTはそもそもしばけません。', ephemeral: true });
+                await interaction.reply({
+                    content: "BOTはそもそもしばけません。",
+                    ephemeral: true,
+                });
                 return;
             }
             const added = (0, data_1.addImmuneId)(gid, u.id);
             await interaction.reply({
-                content: added ? `\`${u.tag}\` を免除リストに追加しました。` : `\`${u.tag}\` はすでに免除リストに存在します。`,
-                allowedMentions: { parse: [] }, ephemeral: true
+                content: added
+                    ? `\`${u.tag}\` を免除リストに追加しました。`
+                    : `\`${u.tag}\` はすでに免除リストに存在します。`,
+                allowedMentions: { parse: [] },
+                ephemeral: true,
             });
             return;
         }
-        if (sub === 'remove') {
-            const u = interaction.options.getUser('user', true);
+        if (sub === "remove") {
+            const u = interaction.options.getUser("user", true);
             const removed = (0, data_1.removeImmuneId)(gid, u.id);
             await interaction.reply({
-                content: removed ? `\`${u.tag}\` を免除リストから削除しました。` : `\`${u.tag}\` は免除リストにありません。`,
-                allowedMentions: { parse: [] }, ephemeral: true
+                content: removed
+                    ? `\`${u.tag}\` を免除リストから削除しました。`
+                    : `\`${u.tag}\` は免除リストにありません。`,
+                allowedMentions: { parse: [] },
+                ephemeral: true,
             });
             return;
         }
-        if (sub === 'list') {
+        if (sub === "list") {
             const ids = (0, data_1.getImmuneList)(gid);
             const global = IMMUNE_IDS;
-            const textLocal = ids.length ? ids.map((x, i) => `${i + 1}. <@${x}> (\`${x}\`)`).join('\n') : '（なし）';
-            const textGlobal = global.length ? global.map((x, i) => `${i + 1}. <@${x}> (\`${x}\`)`).join('\n') : '（なし）';
+            const textLocal = ids.length
+                ? ids.map((x, i) => `${i + 1}. <@${x}> (\`${x}\`)`).join("\n")
+                : "（なし）";
+            const textGlobal = global.length
+                ? global.map((x, i) => `${i + 1}. <@${x}> (\`${x}\`)`).join("\n")
+                : "（なし）";
             await interaction.reply({
-                embeds: [{
-                        title: '🛡️ しばき免除リスト',
+                embeds: [
+                    {
+                        title: "🛡️ しばき免除リスト",
                         fields: [
-                            { name: 'ギルド免除', value: textLocal },
-                            { name: 'グローバル免除（.env IMMUNE_IDS）', value: textGlobal }
-                        ]
-                    }],
-                allowedMentions: { parse: [] }, ephemeral: true
+                            { name: "ギルド免除", value: textLocal },
+                            { name: "グローバル免除（.env IMMUNE_IDS）", value: textGlobal },
+                        ],
+                    },
+                ],
+                allowedMentions: { parse: [] },
+                ephemeral: true,
             });
             return;
         }
@@ -320,12 +381,16 @@ function parseDuration(input) {
     if (!m)
         return null;
     const value = Number(m[1]);
-    const unit = m[2] || 's'; // 省略 → 秒扱い
+    const unit = m[2] || "s"; // 省略 → 秒扱い
     switch (unit) {
-        case 's': return value * 1000;
-        case 'm': return value * 60 * 1000;
-        case 'h': return value * 60 * 60 * 1000;
-        default: return null;
+        case "s":
+            return value * 1000;
+        case "m":
+            return value * 60 * 1000;
+        case "h":
+            return value * 60 * 60 * 1000;
+        default:
+            return null;
     }
 }
 const rl = node_readline_1.default.createInterface({
@@ -335,20 +400,22 @@ const rl = node_readline_1.default.createInterface({
 // 単体ユーザー: VC移動
 async function moveUser(guildId, userId, channelId) {
     if (!client.isReady())
-        throw new Error('Client is not ready');
+        throw new Error("Client is not ready");
     const guild = await client.guilds.fetch(guildId).catch(() => null);
     if (!guild) {
-        console.log('ギルドが見つかりません。');
+        console.log("ギルドが見つかりません。");
         return;
     }
-    const member = await guild.members.fetch(userId).catch(() => null);
+    const member = (await guild.members
+        .fetch(userId)
+        .catch(() => null));
     if (!member) {
-        console.log('ユーザーが見つかりません。');
+        console.log("ユーザーが見つかりません。");
         return;
     }
     const channel = await guild.channels.fetch(channelId).catch(() => null);
     if (!channel || channel.type !== discord_js_1.ChannelType.GuildVoice) {
-        console.log('指定されたチャンネルIDはVCではありません。');
+        console.log("指定されたチャンネルIDはVCではありません。");
         return;
     }
     await member.voice.setChannel(channel);
@@ -357,19 +424,21 @@ async function moveUser(guildId, userId, channelId) {
 // 単体ユーザー: VC切断
 async function disconnectUser(guildId, userId) {
     if (!client.isReady())
-        throw new Error('Client is not ready');
+        throw new Error("Client is not ready");
     const guild = await client.guilds.fetch(guildId).catch(() => null);
     if (!guild) {
-        console.log('ギルドが見つかりません。');
+        console.log("ギルドが見つかりません。");
         return;
     }
-    const member = await guild.members.fetch(userId).catch(() => null);
+    const member = (await guild.members
+        .fetch(userId)
+        .catch(() => null));
     if (!member) {
-        console.log('ユーザーが見つかりません。');
+        console.log("ユーザーが見つかりません。");
         return;
     }
     if (!member.voice?.channel) {
-        console.log('ユーザーはどのVCにも接続していません。');
+        console.log("ユーザーはどのVCにも接続していません。");
         return;
     }
     await member.voice.disconnect();
@@ -378,23 +447,25 @@ async function disconnectUser(guildId, userId) {
 // 単体ユーザー: タイムアウト（durationMs=0 以下なら解除）
 async function timeoutUser(guildId, userId, durationMs, label) {
     if (!client.isReady())
-        throw new Error('Client is not ready');
+        throw new Error("Client is not ready");
     const guild = await client.guilds.fetch(guildId).catch(() => null);
     if (!guild) {
-        console.log('ギルドが見つかりません。');
+        console.log("ギルドが見つかりません。");
         return;
     }
-    const member = await guild.members.fetch(userId).catch(() => null);
+    const member = (await guild.members
+        .fetch(userId)
+        .catch(() => null));
     if (!member) {
-        console.log('ユーザーが見つかりません。');
+        console.log("ユーザーが見つかりません。");
         return;
     }
     if (!durationMs || durationMs <= 0) {
-        await member.timeout(null, 'コンソールコマンドによるタイムアウト解除');
+        await member.timeout(null, "コンソールコマンドによるタイムアウト解除");
         console.log(`✅ ${member.user.tag} のタイムアウトを解除しました。`);
         return;
     }
-    await member.timeout(durationMs, 'コンソールコマンドによるタイムアウト');
+    await member.timeout(durationMs, "コンソールコマンドによるタイムアウト");
     // ★ ここを修正
     const human = label ?? `${durationMs / 1000}秒`;
     console.log(`✅ ${member.user.tag} を ${human} タイムアウトしました。`);
@@ -402,59 +473,63 @@ async function timeoutUser(guildId, userId, durationMs, label) {
 // 単体ユーザー: サーバーミュート（任意時間後に自動解除）
 async function serverUserMute(guildId, userId, durationMs, label) {
     if (!client.isReady())
-        throw new Error('Client is not ready');
+        throw new Error("Client is not ready");
     const guild = await client.guilds.fetch(guildId).catch(() => null);
     if (!guild) {
-        console.log('ギルドが見つかりません。');
+        console.log("ギルドが見つかりません。");
         return;
     }
-    const member = await guild.members.fetch(userId).catch(() => null);
+    const member = (await guild.members
+        .fetch(userId)
+        .catch(() => null));
     if (!member) {
-        console.log('ユーザーが見つかりません。');
+        console.log("ユーザーが見つかりません。");
         return;
     }
     if (!member.voice?.channel) {
-        console.log('ユーザーはどのVCにも接続していません。');
+        console.log("ユーザーはどのVCにも接続していません。");
         return;
     }
     try {
-        await member.voice.setMute(true, 'コンソールコマンドによるサーバーミュート');
+        await member.voice.setMute(true, "コンソールコマンドによるサーバーミュート");
         const human = label ?? `${durationMs / 1000}秒`; // ★
         console.log(`✅ ${member.user.tag} を ${human} サーバーミュートしました。`);
         if (durationMs && durationMs > 0) {
             setTimeout(async () => {
                 try {
-                    const refreshed = await guild.members.fetch(userId).catch(() => null);
+                    const refreshed = (await guild.members
+                        .fetch(userId)
+                        .catch(() => null));
                     if (!refreshed)
                         return;
                     if (refreshed.voice?.channel) {
-                        await refreshed.voice.setMute(false, 'サーバーミュートの自動解除');
+                        await refreshed.voice.setMute(false, "サーバーミュートの自動解除");
                         console.log(`✅ ${refreshed.user.tag} のサーバーミュートを解除しました。`);
                     }
                 }
                 catch (err) {
-                    console.error('自動解除でエラー:', err);
+                    console.error("自動解除でエラー:", err);
                 }
             }, durationMs);
         }
     }
     catch (err) {
-        console.error('サーバーミュートに失敗しました:', err);
+        console.error("サーバーミュートに失敗しました:", err);
     }
 }
 // ===== 一括操作系 =====
 // ギルド内の全VC参加者を指定VCに移動
 async function moveAll(guildId, targetChannelId) {
     if (!client.isReady())
-        throw new Error('Client is not ready');
+        throw new Error("Client is not ready");
     const guild = await client.guilds.fetch(guildId).catch(() => null);
     if (!guild) {
-        console.log('ギルドが見つかりません。');
+        console.log("ギルドが見つかりません。");
         return;
     }
     const target = await guild.channels.fetch(targetChannelId).catch(() => null);
     if (!target || target.type !== discord_js_1.ChannelType.GuildVoice) {
-        console.log('指定されたチャンネルIDはVCではありません。');
+        console.log("指定されたチャンネルIDはVCではありません。");
         return;
     }
     let count = 0;
@@ -475,10 +550,10 @@ async function moveAll(guildId, targetChannelId) {
 // ギルド内の全VC参加者を切断
 async function disconnectAll(guildId) {
     if (!client.isReady())
-        throw new Error('Client is not ready');
+        throw new Error("Client is not ready");
     const guild = await client.guilds.fetch(guildId).catch(() => null);
     if (!guild) {
-        console.log('ギルドが見つかりません。');
+        console.log("ギルドが見つかりません。");
         return;
     }
     let count = 0;
@@ -499,10 +574,10 @@ async function disconnectAll(guildId) {
 // ギルド内の全VC参加者をサーバーミュート（任意時間後解除）
 async function muteAll(guildId, durationMs, label) {
     if (!client.isReady())
-        throw new Error('Client is not ready');
+        throw new Error("Client is not ready");
     const guild = await client.guilds.fetch(guildId).catch(() => null);
     if (!guild) {
-        console.log('ギルドが見つかりません。');
+        console.log("ギルドが見つかりません。");
         return;
     }
     let count = 0;
@@ -511,7 +586,7 @@ async function muteAll(guildId, durationMs, label) {
         if (!member || member.user.bot)
             continue;
         try {
-            await member.voice.setMute(true, 'コンソールコマンドによる一括サーバーミュート');
+            await member.voice.setMute(true, "コンソールコマンドによる一括サーバーミュート");
             count++;
         }
         catch (err) {
@@ -530,7 +605,7 @@ async function muteAll(guildId, durationMs, label) {
                         continue;
                     try {
                         if (member.voice.serverMute) {
-                            await member.voice.setMute(false, '一括サーバーミュートの自動解除');
+                            await member.voice.setMute(false, "一括サーバーミュートの自動解除");
                             unmuted++;
                         }
                     }
@@ -541,173 +616,177 @@ async function muteAll(guildId, durationMs, label) {
                 console.log(`✅ 一括サーバーミュートを解除しました。（${unmuted}人）`);
             }
             catch (err) {
-                console.error('一括自動解除でエラー:', err);
+                console.error("一括自動解除でエラー:", err);
             }
         }, durationMs);
     }
 }
 async function deleteMessage(channelId, messageId) {
     if (!client.isReady())
-        throw new Error('Client is not ready');
+        throw new Error("Client is not ready");
     const channel = await client.channels.fetch(channelId).catch(() => null);
     if (!channel || !channel.isTextBased()) {
-        console.log('指定されたチャンネルIDはテキストチャンネルではありません。');
+        console.log("指定されたチャンネルIDはテキストチャンネルではありません。");
         return;
     }
     const message = await channel.messages.fetch(messageId).catch(() => null);
     if (!message) {
-        console.log('メッセージが見つかりません。');
+        console.log("メッセージが見つかりません。");
         return;
     }
     if (!message.deletable) {
-        console.log('メッセージを削除できません。（権限不足の可能性）');
+        console.log("メッセージを削除できません。（権限不足の可能性）");
         return;
     }
     await message.delete();
     console.log(`✅ メッセージを削除しました。 id=${message.id}`);
 }
 // ===== コンソール入力受付 =====
-console.log('コンソールコマンド:');
-console.log('  move <guildId> <userId> <voiceChannelId>');
-console.log('  disconnect <guildId> <userId>');
-console.log('  timeout <guildId> <userId> <second(s)/minute(s)/hour(s)>');
-console.log('  serverMute <guildId> <userId> <second(s)/minute(s)/hour(s)>');
-console.log('  moveAll <guildId> <voiceChannelId>');
-console.log('  disconnectAll <guildId>');
-console.log('  muteAll <guildId> <second(s)/minute(s)/hour(s)>');
-console.log('  unmute <guildId> <userId>');
-console.log('  addrole <guildId> <userId> <roleId>');
-console.log('  delmsg <channelId> <messageId>');
-console.log('例: move 123... 234... 345...');
-console.log('例: timeout 123... 234... 10m');
-console.log('例: serverMute 123... 234... 1h');
-console.log('例: moveAll 123... 345...');
-console.log('例: muteAll 123... 15m');
-console.log('例：unmute 123... 234...');
-console.log('例: delmsg 123... 456...');
-console.log('help と入力するとコマンド一覧を表示します。');
-console.log('------------------------------');
-rl.on('line', async (input) => {
+console.log("コンソールコマンド:");
+console.log("  move <guildId> <userId> <voiceChannelId>");
+console.log("  disconnect <guildId> <userId>");
+console.log("  timeout <guildId> <userId> <second(s)/minute(s)/hour(s)>");
+console.log("  serverMute <guildId> <userId> <second(s)/minute(s)/hour(s)>");
+console.log("  moveAll <guildId> <voiceChannelId>");
+console.log("  disconnectAll <guildId>");
+console.log("  muteAll <guildId> <second(s)/minute(s)/hour(s)>");
+console.log("  unmute <guildId> <userId>");
+console.log("  addrole <guildId> <userId> <roleId>");
+console.log("  delmsg <channelId> <messageId>");
+console.log("例: move 123... 234... 345...");
+console.log("例: timeout 123... 234... 10m");
+console.log("例: serverMute 123... 234... 1h");
+console.log("例: moveAll 123... 345...");
+console.log("例: muteAll 123... 15m");
+console.log("例：unmute 123... 234...");
+console.log("例: delmsg 123... 456...");
+console.log("help と入力するとコマンド一覧を表示します。");
+console.log("------------------------------");
+rl.on("line", async (input) => {
     const args = input.trim().split(/\s+/);
     const command = args[0];
     try {
-        if (command === 'move' && args.length === 4) {
+        if (command === "move" && args.length === 4) {
             await moveUser(args[1], args[2], args[3]);
         }
-        else if (command === 'disconnect' && args.length === 3) {
+        else if (command === "disconnect" && args.length === 3) {
             await disconnectUser(args[1], args[2]);
         }
-        else if (command === 'timeout' && args.length === 4) {
+        else if (command === "timeout" && args.length === 4) {
             const raw = args[3]; // ★ 元の文字列
             const duration = parseDuration(raw);
             if (duration === null) {
-                console.log('duration は 例: 10s, 5m, 2h, 300 (秒) の形式で指定してください。');
+                console.log("duration は 例: 10s, 5m, 2h, 300 (秒) の形式で指定してください。");
                 return;
             }
             await timeoutUser(args[1], args[2], duration, raw); // ★ 4番目に raw を渡す
         }
-        else if (command === 'serverMute' && args.length === 4) {
+        else if (command === "serverMute" && args.length === 4) {
             const raw = args[3]; // ★
             const duration = parseDuration(raw);
             if (duration === null) {
-                console.log('duration は 例: 10s, 5m, 2h, 300 (秒) の形式で指定してください。');
+                console.log("duration は 例: 10s, 5m, 2h, 300 (秒) の形式で指定してください。");
                 return;
             }
             await serverUserMute(args[1], args[2], duration, raw); // ★
         }
-        else if (command === 'muteAll' && args.length === 3) {
+        else if (command === "muteAll" && args.length === 3) {
             const raw = args[2]; // ★
             const duration = parseDuration(raw);
             if (duration === null) {
-                console.log('duration は 例: 10s, 5m, 2h, 300 (秒) の形式で指定してください。');
+                console.log("duration は 例: 10s, 5m, 2h, 300 (秒) の形式で指定してください。");
                 return;
             }
             await muteAll(args[1], duration, raw); // ★
         }
-        else if (command === 'moveAll' && args.length === 3) {
+        else if (command === "moveAll" && args.length === 3) {
             await moveAll(args[1], args[2]);
         }
-        else if (command === 'disconnectAll' && args.length === 2) {
+        else if (command === "disconnectAll" && args.length === 2) {
             await disconnectAll(args[1]);
         }
-        else if (command === 'unmute' && args.length === 3) {
+        else if (command === "unmute" && args.length === 3) {
             // サーバーミュート解除
             if (!client.isReady())
-                throw new Error('Client is not ready');
+                throw new Error("Client is not ready");
             const guild = await client.guilds.fetch(args[1]).catch(() => null);
             if (!guild) {
-                console.log('ギルドが見つかりません。');
+                console.log("ギルドが見つかりません。");
                 return;
             }
-            const member = await guild.members.fetch(args[2]).catch(() => null);
+            const member = (await guild.members
+                .fetch(args[2])
+                .catch(() => null));
             if (!member) {
-                console.log('ユーザーが見つかりません。');
+                console.log("ユーザーが見つかりません。");
                 return;
             }
             if (!member.voice?.channel) {
-                console.log('ユーザーはどのVCにも接続していません。');
+                console.log("ユーザーはどのVCにも接続していません。");
                 return;
             }
             try {
-                await member.voice.setMute(false, 'コンソールコマンドによるサーバーミュート解除');
+                await member.voice.setMute(false, "コンソールコマンドによるサーバーミュート解除");
                 console.log(`✅ ${member.user.tag} のサーバーミュートを解除しました。`);
             }
             catch (err) {
-                console.error('サーバーミュート解除に失敗しました:', err);
+                console.error("サーバーミュート解除に失敗しました:", err);
             }
         }
-        else if (command === 'delmsg' && args.length === 3) {
+        else if (command === "delmsg" && args.length === 3) {
             await deleteMessage(args[1], args[2]);
         }
-        else if (command === 'addrole' && args.length === 4) {
+        else if (command === "addrole" && args.length === 4) {
             // ロール付与: addrole <guildId> <userId> <roleId>
             if (!client.isReady())
-                throw new Error('Client is not ready');
+                throw new Error("Client is not ready");
             const guild = await client.guilds.fetch(args[1]).catch(() => null);
             if (!guild) {
-                console.log('ギルドが見つかりません。');
+                console.log("ギルドが見つかりません。");
                 return;
             }
-            const member = await guild.members.fetch(args[2]).catch(() => null);
+            const member = (await guild.members
+                .fetch(args[2])
+                .catch(() => null));
             if (!member) {
-                console.log('ユーザーが見つかりません。');
+                console.log("ユーザーが見つかりません。");
                 return;
             }
             const role = await guild.roles.fetch(args[3]).catch(() => null);
             if (!role) {
-                console.log('ロールが見つかりません。');
+                console.log("ロールが見つかりません。");
                 return;
             }
             if (member.roles.cache.has(role.id)) {
                 console.log(`${member.user.tag} はすでにロール ${role.name} を持っています。`);
                 return;
             }
-            await member.roles.add(role, 'コンソールコマンドによるロール付与');
+            await member.roles.add(role, "コンソールコマンドによるロール付与");
             console.log(`✅ ${member.user.tag} にロール ${role.name} を付与しました。`);
         }
-        else if (command === 'help') {
-            console.log('利用可能なコマンド:');
-            console.log('  move <guildId> <userId> <voiceChannelId>   - ユーザーを指定のVCに移動');
-            console.log('  disconnect <guildId> <userId>              - ユーザーをVCから切断');
-            console.log('  timeout <guildId> <userId> <second(s)/minute(s)/hour(s)>    - ユーザーをタイムアウト（0以下で解除）');
-            console.log('  serverMute <guildId> <userId> <second(s)/minute(s)/hour(s)> - サーバーミュート（0以下なら解除なし）');
-            console.log('  moveAll <guildId> <voiceChannelId>         - ギルド内の全VC参加者を指定VCへ移動');
-            console.log('  disconnectAll <guildId>                    - ギルド内の全VC参加者を切断');
-            console.log('  muteAll <guildId> <second(s)/minute(s)/hour(s)>             - ギルド内の全VC参加者を一括サーバーミュート');
-            console.log('  unmute <guildId> <userId>      - ユーザーのサーバーミュートを解除');
-            console.log('  help                               - このヘルプを表示');
-            console.log('  addrole <guildId> <userId> <roleId>         - ユーザーにロールを付与');
-            console.log('  delmsg <channelId> <messageId>             - メッセージを削除');
+        else if (command === "help") {
+            console.log("利用可能なコマンド:");
+            console.log("  move <guildId> <userId> <voiceChannelId>   - ユーザーを指定のVCに移動");
+            console.log("  disconnect <guildId> <userId>              - ユーザーをVCから切断");
+            console.log("  timeout <guildId> <userId> <second(s)/minute(s)/hour(s)>    - ユーザーをタイムアウト（0以下で解除）");
+            console.log("  serverMute <guildId> <userId> <second(s)/minute(s)/hour(s)> - サーバーミュート（0以下なら解除なし）");
+            console.log("  moveAll <guildId> <voiceChannelId>         - ギルド内の全VC参加者を指定VCへ移動");
+            console.log("  disconnectAll <guildId>                    - ギルド内の全VC参加者を切断");
+            console.log("  muteAll <guildId> <second(s)/minute(s)/hour(s)>             - ギルド内の全VC参加者を一括サーバーミュート");
+            console.log("  unmute <guildId> <userId>      - ユーザーのサーバーミュートを解除");
+            console.log("  help                               - このヘルプを表示");
+            console.log("  addrole <guildId> <userId> <roleId>         - ユーザーにロールを付与");
+            console.log("  delmsg <channelId> <messageId>             - メッセージを削除");
         }
         else if (command) {
-            console.log('不明なコマンドです。help で一覧を確認できます。');
+            console.log("不明なコマンドです。help で一覧を確認できます。");
         }
     }
     catch (err) {
-        console.error('エラーが発生しました:', err);
+        console.error("エラーが発生しました:", err);
     }
 });
 // index.ts 最後あたり
-client.on('messageCreate', async (message) => {
+client.on("messageCreate", async (message) => {
     await (0, music_1.handleMusicMessage)(message);
 });
