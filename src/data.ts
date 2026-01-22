@@ -340,9 +340,9 @@ export function getSbkRange(gid: string): { min: number; max: number } {
 }
 // ---------- 音量設定 ----------
 const MUSIC_VOL_KEY = 'musicVolume';
-const MUSIC_VOL_DEFAULT = 100;
+const MUSIC_VOL_DEFAULT = 20;
 const MUSIC_VOL_MIN = 0;
-const MUSIC_VOL_MAX = 200;
+const MUSIC_VOL_MAX = 20;
 
 export function getUserMusicVolume(gid: string, userId: string): number {
   const db = openDb(gid);
@@ -428,6 +428,18 @@ export function removeMusicNgWord(gid: string, word: string): { removed: boolean
 
 export function clearMusicNgWords(gid: string): void {
   setSetting(gid, MUSIC_NG_KEY, JSON.stringify([]));
+}
+// ---------- 音楽機能有効化設定 ----------
+const MUSIC_ENABLED_KEY = 'musicEnabled';
+
+export function getMusicEnabled(gid: string): boolean {
+  const raw = getSetting(gid, MUSIC_ENABLED_KEY);
+  if (!raw) return true; // デフォルト有効
+  return raw.toLowerCase() === 'true';
+}
+
+export function setMusicEnabled(gid: string, enabled: boolean): void {
+  setSetting(gid, MUSIC_ENABLED_KEY, enabled ? 'true' : 'false');
 }
 
 export function setSbkRange(gid: string, min: number, max: number) {

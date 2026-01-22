@@ -10,11 +10,66 @@ import {
   clearMusicNgWords,
   getMusicNgWords,
   removeMusicNgWord,
+  getMusicEnabled,
+  setMusicEnabled,
 } from './data';
 
 const PREFIX = 's!';
+
 const MAX_TRACK_MINUTES = Number(process.env.MUSIC_MAX_MINUTES || 15); // デフォ15分
 const MAX_TRACK_MS = MAX_TRACK_MINUTES * 60 * 1000;
+
+// ギルドごとの自動停止タイマー（長さ不明対策・上限厳守）
+const autoStopTimers = new Map<string, NodeJS.Timeout>();
+const hookedPlayers = new Set<string>();
+
+function clearAutoStop(guildId: string) {
+  const t = autoStopTimers.get(guildId);
+  if (t) clearTimeout(t);
+  autoStopTimers.delete(guildId);
+}
+
+function armAutoStop(guildId: string, player: any, ms: number, trackId?: string) {
+  clearAutoStop(guildId);
+  const timeout = setTimeout(() => {
+    try {
+      const cur: any = player.current;
+      const curId = cur?.info?.identifier ?? cur?.encoded ?? cur?.track ?? '';
+      if (!trackId || curId === trackId) {
+        if (player.playing) player.stop();
+      }
+    } catch {}
+  }, ms);
+  autoStopTimers.set(guildId, timeout);
+}
+
+function hookPlayerOnce(guildId: string, player: any) {
+  if (hookedPlayers.has(guildId)) return;
+  hookedPlayers.add(guildId);
+
+  const on = (player as any)?.on?.bind(player);
+  if (!on) return;
+
+  on('trackStart', (_p: any, track: any) => {
+    try {
+      const lengthMs = Number(track?.info?.length ?? 0);
+      const rawIsStream = track?.info?.isStream ?? track?.isStream;
+      const isStream = rawIsStream === true || rawIsStream === 'true' || rawIsStream === 1;
+      const hasDuration = Number.isFinite(lengthMs) && lengthMs > 0;
+      const trackId = track?.info?.identifier ?? track?.encoded ?? track?.track ?? '';
+
+      if (isStream || !hasDuration) {
+        armAutoStop(guildId, player, MAX_TRACK_MS, trackId);
+        return;
+      }
+      armAutoStop(guildId, player, Math.min(lengthMs, MAX_TRACK_MS), trackId);
+    } catch {}
+  });
+
+  on('queueEnd', () => clearAutoStop(guildId));
+  on('playerDestroy', () => clearAutoStop(guildId));
+  on('trackEnd', () => clearAutoStop(guildId));
+}
 const OWNER_IDS = (process.env.OWNER_IDS || '').split(',').map((s) => s.trim()).filter(Boolean);
 const MAX_SELECTION_RESULTS = 10;
 const PENDING_SEARCH_TTL_MS = 5 * 60 * 1000;
@@ -244,6 +299,14 @@ export async function handleMusicMessage(message: Message) {
   const [cmd, ...rest] = message.content.slice(PREFIX.length).trim().split(/\s+/);
   const command = cmd?.toLowerCase();
 
+  // 音楽機能が無効の場合、disable/enable以外は拒否
+  if (command !== 'disable' && command !== 'enable' && command !== 'd' && command !== 'e') {
+    if (!getMusicEnabled(message.guildId!)) {
+      await message.reply('⚠️ 音楽機能が無効化されています。管理者権限で `s!enable` で有効化してください。');
+      return;
+    }
+  }
+
   try {
     if (command === 'play') {
       const query = rest.join(' ').trim();
@@ -293,10 +356,16 @@ export async function handleMusicMessage(message: Message) {
         '`s!queue` - 再生中・キュー中の曲一覧を表示\n' +
         '`s!upload` - 音楽ファイルをアップロードして再生（対応形式: mp3, wav, flac, m4a, aac, ogg）\n' +
         '`s!ng <サブコマンド>` - 音楽NGワード管理コマンド（管理者のみ）\n' +
-        '（例: `s!ng add <ワード>` / `s!ng remove <ワード>` / `s!ng list` / `s!ng clear`）'
+        '（例: `s!ng add <ワード>` / `s!ng remove <ワード>` / `s!ng list` / `s!ng clear`）\n' +
+        '`s!disable` (s!e) - 音楽機能を無効化（管理者のみ）\n' +
+        '`s!enable` (s!d) - 音楽機能を有効化（管理者のみ）'
       );
     } else if (command === 'remove' || command === 'delete') {
       await handleRemoveCommand(message, rest);
+    } else if (command === 'disable' || command === 'e') {
+      await handleDisable(message);
+    } else if (command === 'enable' || command === 'd') {
+      await handleEnable(message);
     }
 
 
@@ -331,6 +400,9 @@ async function getOrCreatePlayer(message: Message, voiceChannelId: string) {
     await player.updateVoiceChannel(voiceChannelId);
     if (!player.connected) await player.connect();
   }
+
+  // ★ 各プレイヤーにイベントフック（自動停止タイマー）
+  hookPlayerOnce(guildId, player);
 
   return player;
 }
@@ -438,6 +510,12 @@ async function handlePlay(
       `🚫 ライブ配信/長さ不明の曲は再生できません。（最大 ${MAX_TRACK_MINUTES} 分まで）`
     );
     return;
+    
+  }
+
+  // ★ 長さが取れない曲も許可（ただし最大15分で自動停止）
+  if (!hasDuration) {
+    // 停止タイマーは trackStart フックで張られます
   }
 
   if (hasDuration && lengthMs > MAX_TRACK_MS) {
@@ -460,7 +538,14 @@ async function handlePlay(
 
   if (!player.playing && !player.paused) {
     await player.play();
-    await message.reply(`▶ 再生開始: **${track.info.title}**（音量: ${FIXED_VOLUME}）`);
+    if (!hasDuration) {
+      await message.reply(
+        `▶ 再生開始: **${track.info.title}**（音量: ${FIXED_VOLUME}）\n` +
+        `⚠️ 曲の長さを取得できないため、最大 ${MAX_TRACK_MINUTES} 分で自動停止します。`
+      );
+    } else {
+      await message.reply(`▶ 再生開始: **${track.info.title}**（音量: ${FIXED_VOLUME}）`);
+    }
   } else {
     const pos = player.queue.tracks.length;
     await message.reply(`⏱ キューに追加しました: **${track.info.title}**（位置: ${pos}）`);
@@ -483,6 +568,7 @@ async function handleSkip(message: Message) {
     return;
   }
 
+  clearAutoStop(guildId);
   await player.skip();
   await message.reply('⏭ 曲をスキップしました。');
 }
@@ -499,6 +585,7 @@ async function handleStop(message: Message) {
     return;
   }
 
+  clearAutoStop(guildId);
   await player.destroy();
   await message.reply('⏹ 再生を停止し、VCから退出しました。');
 }
@@ -553,15 +640,8 @@ async function handleNgWordCommand(message: Message, args: string[]) {
     return;
   }
 
-  if (!canManage) {
-    await message.reply('⚠️ 権限がありません。（管理者のみ）');
-    return;
-  }
-
-  const gid = message.guildId;
-
   if (sub === 'list') {
-    const list = getMusicNgWords(gid);
+    const list = getMusicNgWords(message.guildId);
     if (!list.length) {
       await message.reply('📭 NGワードは登録されていません。');
       return;
@@ -571,13 +651,18 @@ async function handleNgWordCommand(message: Message, args: string[]) {
     return;
   }
 
+  if (!canManage) {
+    await message.reply('⚠️ 権限がありません。（管理者のみ）');
+    return;
+  }
+
   if (sub === 'add') {
     const word = args.slice(1).join(' ').trim();
     if (!word) {
       await message.reply('⚠️ 追加するワードを指定してください。');
       return;
     }
-    const result = addMusicNgWord(gid, word);
+    const result = addMusicNgWord(message.guildId!, word);
     await message.reply(
       result.added
         ? `✅ NGワードを追加しました: **${word}**`
@@ -592,7 +677,7 @@ async function handleNgWordCommand(message: Message, args: string[]) {
       await message.reply('⚠️ 削除するワードを指定してください。');
       return;
     }
-    const result = removeMusicNgWord(gid, word);
+    const result = removeMusicNgWord(message.guildId!, word);
     await message.reply(
       result.removed
         ? `✅ NGワードを削除しました: **${word}**`
@@ -602,7 +687,7 @@ async function handleNgWordCommand(message: Message, args: string[]) {
   }
 
   if (sub === 'clear') {
-    clearMusicNgWords(gid);
+    clearMusicNgWords(message.guildId!);
     await message.reply('✅ NGワードをすべて削除しました。');
     return;
   }
@@ -694,28 +779,25 @@ try {
     );
 
     // ★再生は internalUrl を渡す（ここ重要）
-    await handlePlay(message, internalUrl, {
-      titleFallback: playbackTitle,
-      forceTitle: true,
-    });
-    try {
-      await handlePlay(message, internalUrl, {
-        titleFallback: playbackTitle,
-        forceTitle: true,
-      });
-    } catch (e) {
-      await handlePlay(message, publicUrl, {
-        titleFallback: playbackTitle,
-        forceTitle: true,
-      });
-    }
-
-
-  } catch (e) {
+   try {
+  await handlePlay(message, internalUrl, {
+    titleFallback: playbackTitle,
+    forceTitle: true,
+  });
+} catch {
+  await handlePlay(message, publicUrl, {
+    titleFallback: playbackTitle,
+    forceTitle: true,
+  });
+}} catch (e) {
     console.error('[music] upload error', e);
     try { fs.existsSync(savePath) && fs.unlinkSync(savePath); } catch {}
     await message.reply('❌ アップロード処理に失敗しました。');
   }
+
+
+
+  
 }
 async function handleRemoveCommand(message: Message, rest: string[]) {
   const client: any = message.client as any;
@@ -742,6 +824,44 @@ async function handleRemoveCommand(message: Message, rest: string[]) {
 
   const removed = player.queue.tracks.splice(index, 1)[0];
   await message.reply(`🗑 キューから削除しました: **${removed.info.title}**`);
+}
+
+/* ---------- s!disable (s!e) ---------- */
+async function handleDisable(message: Message) {
+  if (!message.guildId) {
+    await message.reply('⚠️ サーバー内でのみ使用できます。');
+    return;
+  }
+
+  const isAdmin = message.member?.permissions.has(PermissionFlagsBits.Administrator) ?? false;
+  const isOwner = message.guild?.ownerId === message.author.id;
+  const isDev = OWNER_IDS.includes(message.author.id);
+  if (!isAdmin && !isOwner && !isDev) {
+    await message.reply('⚠️ 権限がありません。（管理者のみ）');
+    return;
+  }
+
+  setMusicEnabled(message.guildId, false);
+  await message.reply('🔇 音楽機能を無効化しました。');
+}
+
+/* ---------- s!enable (s!d) ---------- */
+async function handleEnable(message: Message) {
+  if (!message.guildId) {
+    await message.reply('⚠️ サーバー内でのみ使用できます。');
+    return;
+  }
+
+  const isAdmin = message.member?.permissions.has(PermissionFlagsBits.Administrator) ?? false;
+  const isOwner = message.guild?.ownerId === message.author.id;
+  const isDev = OWNER_IDS.includes(message.author.id);
+  if (!isAdmin && !isOwner && !isDev) {
+    await message.reply('⚠️ 権限がありません。（管理者のみ）');
+    return;
+  }
+
+  setMusicEnabled(message.guildId, true);
+  await message.reply('🔊 音楽機能を有効化しました。');
 }
 
 

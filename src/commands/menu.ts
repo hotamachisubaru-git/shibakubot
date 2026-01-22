@@ -21,7 +21,6 @@ import { sendLog } from '../logging';
 import { displayNameFrom } from '../utils/displayNameUtil';
 import { compareBigIntDesc, formatSignedBigInt, parseBigIntInput } from '../utils/bigint';
 import { fetchGuildMembersSafe } from '../utils/memberFetch';
-import { formatBigIntJP as formatBigIntJPFull } from '../utils/formatCount';
 
 /* ===== 設定 ===== */
 const OWNER_IDS = (process.env.OWNER_IDS || '')
@@ -190,7 +189,7 @@ function safeCount(n: bigint, maxLen = 20): string {
 
 function formatCountWithReading(n: bigint): string {
   const short = safeCount(n);
-  const full = formatBigIntJPFull(n);
+  const full = formatWithComma(n);
   if (full === short) return `${short}回`;
   return `${short}回（${full}回）`;
 }
