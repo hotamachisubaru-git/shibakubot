@@ -20,6 +20,7 @@ logs/
 *.js
 *.json
 *.log
+*.mp3
 *.tsbuildinfo
 .vscode/settings
 .DS_Store

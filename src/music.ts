@@ -58,14 +58,11 @@ function hookPlayerOnce(guildId: string, player: any) {
   on("trackStart", (_p: any, track: any) => {
     try {
       const lengthMs = Number(track?.info?.length ?? 0);
-      const rawIsStream = track?.info?.isStream ?? track?.isStream;
-      const isStream =
-        rawIsStream === true || rawIsStream === "true" || rawIsStream === 1;
       const hasDuration = Number.isFinite(lengthMs) && lengthMs > 0;
       const trackId =
         track?.info?.identifier ?? track?.encoded ?? track?.track ?? "";
 
-      if (isStream || !hasDuration) {
+      if (!hasDuration) {
         armAutoStop(guildId, player, MAX_TRACK_MS, trackId);
         return;
       }
@@ -188,6 +185,31 @@ function pickAttachmentName(att: { name?: string | null; url: string }) {
   // name が空のときだけ URL から拾う
   const fromUrl = getAttachmentNameFromUrl(att.url);
   return fromUrl || "upload";
+}
+
+function normalizeYouTubeShortsUrl(input: string) {
+  if (!/^https?:\/\//i.test(input)) return input;
+  try {
+    const url = new URL(input);
+    const host = url.hostname.replace(/^www\./, "").toLowerCase();
+    const isYouTube =
+      host === "youtube.com" ||
+      host === "m.youtube.com" ||
+      host === "music.youtube.com";
+    if (!isYouTube) return input;
+
+    const match = url.pathname.match(/^\/shorts\/([a-zA-Z0-9_-]+)/);
+    if (!match) return input;
+
+    const id = match[1];
+    const out = new URL("https://www.youtube.com/watch");
+    out.searchParams.set("v", id);
+    const t = url.searchParams.get("t") ?? url.searchParams.get("start");
+    if (t) out.searchParams.set("t", t);
+    return out.toString();
+  } catch {
+    return input;
+  }
 }
 
 function trimId3Text(value: string) {
@@ -323,6 +345,7 @@ export async function handleMusicMessage(message: Message) {
     .trim()
     .split(/\s+/);
   const command = cmd?.toLowerCase();
+  if (command === "english") return;
 
   // 音楽機能が無効の場合、disable/enable以外は拒否
   if (
@@ -476,10 +499,13 @@ async function handlePlay(
   let track: any = options?.selectedTrack;
 
   const isHttpUrl = /^https?:\/\//i.test(query);
+  const normalizedQuery = isHttpUrl ? normalizeYouTubeShortsUrl(query) : query;
   if (!track) {
     let result: any;
     // ★URLかキーワードかで searchQuery を確定させる
-    const searchQuery = isHttpUrl ? query : `ytsearch:${query}`;
+    const searchQuery = isHttpUrl
+      ? normalizedQuery
+      : `ytsearch:${normalizedQuery}`;
 
     try {
       result = await player.search({ query: searchQuery }, message.author);
@@ -522,7 +548,9 @@ async function handlePlay(
   const lengthMs = Number(track.info?.duration ?? track.info?.length ?? 0);
 
 
-  const searchQuery = isHttpUrl ? query : `ytsearch:${query}`;
+  const searchQuery = isHttpUrl
+    ? normalizedQuery
+    : `ytsearch:${normalizedQuery}`;
 
   const result = await player.search({ query: searchQuery }, message.author);
 
@@ -543,6 +571,7 @@ async function handlePlay(
   const isStream =
     rawIsStream === true || rawIsStream === "true" || rawIsStream === 1;
   const hasDuration = Number.isFinite(lengthMs) && lengthMs > 0;
+  const shouldBlockStream = isStream && !hasDuration;
 
   const titleFallback = options?.titleFallback?.trim();
   const trackTitle = track.info?.title?.trim();
@@ -553,7 +582,7 @@ async function handlePlay(
   }
 
   // ライブ/ストリームっぽいものは弾く（必要なら許可に変えられる）
-  if (isStream) {
+  if (shouldBlockStream) {
     await message.reply(
       `🚫 ライブ配信/長さ不明の曲は再生できません。（最大 ${MAX_TRACK_MINUTES} 分まで）`,
     );

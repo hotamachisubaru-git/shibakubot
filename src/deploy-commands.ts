@@ -1,6 +1,6 @@
 // src/deploy-commands.ts
 import "dotenv/config";
-import { REST, Routes, SlashCommandBuilder } from "discord.js";
+import { ChannelType, REST, Routes, SlashCommandBuilder } from "discord.js";
 
 const TOKEN = process.env.TOKEN!;
 const CLIENT_ID = process.env.CLIENT_ID!;
@@ -47,6 +47,38 @@ const commands = [
   new SlashCommandBuilder()
     .setName("menu")
     .setDescription("しばくbot メニューを表示する")
+    .toJSON(),
+
+  // /suimin VC移動
+  new SlashCommandBuilder()
+    .setName("suimin")
+    .setDescription("指定ユーザーをVCに移動")
+    .addUserOption((opt) =>
+      opt.setName("user").setDescription("移動するユーザー").setRequired(true),
+    )
+    .addChannelOption((opt) =>
+      opt
+        .setName("channel")
+        .setDescription("移動先のボイスチャンネル")
+        .addChannelTypes(ChannelType.GuildVoice, ChannelType.GuildStageVoice)
+        .setRequired(true),
+    )
+    .toJSON(),
+
+  // /english 英語禁止モード切り替え
+  new SlashCommandBuilder()
+    .setName("english")
+    .setDescription("英語禁止モードを切り替える（管理者のみ）")
+    .addStringOption((opt) =>
+      opt
+        .setName("mode")
+        .setDescription("on / off を指定")
+        .setRequired(true)
+        .addChoices(
+          { name: "on", value: "on" },
+          { name: "off", value: "off" },
+        ),
+    )
     .toJSON(),
 ];
 

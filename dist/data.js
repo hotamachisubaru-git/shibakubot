@@ -24,6 +24,8 @@ exports.removeMusicNgWord = removeMusicNgWord;
 exports.clearMusicNgWords = clearMusicNgWords;
 exports.getMusicEnabled = getMusicEnabled;
 exports.setMusicEnabled = setMusicEnabled;
+exports.getEnglishBanEnabled = getEnglishBanEnabled;
+exports.setEnglishBanEnabled = setEnglishBanEnabled;
 exports.setSbkRange = setSbkRange;
 exports.loadGuildStore = loadGuildStore;
 exports.getMedalBalance = getMedalBalance;
@@ -399,6 +401,17 @@ function getMusicEnabled(gid) {
 }
 function setMusicEnabled(gid, enabled) {
     setSetting(gid, MUSIC_ENABLED_KEY, enabled ? "true" : "false");
+}
+// ---------- 英語禁止モード ----------
+const ENGLISH_BAN_KEY = "englishBanEnabled";
+function getEnglishBanEnabled(gid) {
+    const raw = getSetting(gid, ENGLISH_BAN_KEY);
+    if (!raw)
+        return false; // デフォルト無効
+    return raw.toLowerCase() === "true";
+}
+function setEnglishBanEnabled(gid, enabled) {
+    setSetting(gid, ENGLISH_BAN_KEY, enabled ? "true" : "false");
 }
 function setSbkRange(gid, min, max) {
     const db = openDb(gid);

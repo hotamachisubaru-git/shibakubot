@@ -37,9 +37,12 @@ import { handleMembers } from "./commands/members";
 import { handleMenu } from "./commands/menu";
 import { handleRoom } from "./commands/daimongamecenter";
 import { handleHelp } from "./commands/help";
+import { handleEnglish } from "./commands/english";
 import { handleReset } from "./commands/reset";
 import { handleStats } from "./commands/stats";
+import { handleSuimin } from "./commands/suiminbunihaire";
 import { handleMusicMessage } from "./music";
+import { handleEnglishMessage } from "./english";
 import { formatBigIntJP } from "./utils/formatCount";
 const UPLOAD_DIR = path.resolve(process.env.FILE_DIR || "./files");
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
@@ -236,7 +239,14 @@ client.on(Events.InteractionCreate, async (interaction: Interaction) => {
     // ★ reason 未指定 → ランダム
     if (!reason) reason = randomReason();
 
-    const nextCount = addCountGuild(gid, user.id, countBig);
+   const nextCount = addCountGuild(
+     gid,
+     user.id,
+     countBig,
+     interaction.user.id, // actorId
+     reason               // reason（ランダム確定後のやつ）
+    );
+
 
     const member = await interaction
       .guild!.members.fetch(user.id)
@@ -247,7 +257,7 @@ client.on(Events.InteractionCreate, async (interaction: Interaction) => {
       reason.length > MAX_REASON ? reason.slice(0, MAX_REASON) + "…" : reason;
 
     await interaction.reply(
-      `**${display}** が **${formatBigIntJP(countBig)}回** しばかれました！` +
+      `**${display}** を **${formatBigIntJP(countBig)}回** しばきました！` +
         `（累計 ${formatBigIntJP(nextCount)}回）\n` +
         `理由: ${safeReason}`,
     );
@@ -291,6 +301,10 @@ client.on(Events.InteractionCreate, async (interaction: Interaction) => {
     await handleMenu(interaction);
     return;
   }
+  if (name === "suimin") {
+    await handleSuimin(interaction);
+    return;
+  }
   if (name === "members") {
     await handleMembers(interaction);
     return;
@@ -301,6 +315,10 @@ client.on(Events.InteractionCreate, async (interaction: Interaction) => {
   }
   if (name === "help") {
     await handleHelp(interaction);
+    return;
+  }
+  if (name === "english") {
+    await handleEnglish(interaction);
     return;
   }
   if (name === "stats") {
@@ -952,5 +970,6 @@ rl.on("line", async (input) => {
 
 // index.ts 最後あたり
 client.on("messageCreate", async (message: Message) => {
+  await handleEnglishMessage(message);
   await handleMusicMessage(message);
 });
