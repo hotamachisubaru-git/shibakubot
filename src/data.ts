@@ -483,18 +483,6 @@ export function setMusicEnabled(gid: string, enabled: boolean): void {
   setSetting(gid, MUSIC_ENABLED_KEY, enabled ? "true" : "false");
 }
 
-// ---------- 英語禁止モード ----------
-const ENGLISH_BAN_KEY = "englishBanEnabled";
-
-export function getEnglishBanEnabled(gid: string): boolean {
-  const raw = getSetting(gid, ENGLISH_BAN_KEY);
-  if (!raw) return false; // デフォルト無効
-  return raw.toLowerCase() === "true";
-}
-
-export function setEnglishBanEnabled(gid: string, enabled: boolean): void {
-  setSetting(gid, ENGLISH_BAN_KEY, enabled ? "true" : "false");
-}
 
 export function setSbkRange(gid: string, min: number, max: number) {
   const db = openDb(gid);

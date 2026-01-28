@@ -19,12 +19,10 @@ const members_1 = require("./commands/members");
 const menu_1 = require("./commands/menu");
 const daimongamecenter_1 = require("./commands/daimongamecenter");
 const help_1 = require("./commands/help");
-const english_1 = require("./commands/english");
 const reset_1 = require("./commands/reset");
 const stats_1 = require("./commands/stats");
 const suiminbunihaire_1 = require("./commands/suiminbunihaire");
 const music_1 = require("./music");
-const english_2 = require("./english");
 const formatCount_1 = require("./utils/formatCount");
 const UPLOAD_DIR = path_1.default.resolve(process.env.FILE_DIR || "./files");
 fs_1.default.mkdirSync(UPLOAD_DIR, { recursive: true });
@@ -245,10 +243,6 @@ client.on(discord_js_1.Events.InteractionCreate, async (interaction) => {
     }
     if (name === "help") {
         await (0, help_1.handleHelp)(interaction);
-        return;
-    }
-    if (name === "english") {
-        await (0, english_1.handleEnglish)(interaction);
         return;
     }
     if (name === "stats") {
@@ -785,7 +779,7 @@ rl.on("line", async (input) => {
             console.log("  serverMute <guildId> <userId> <second(s)/minute(s)/hour(s)> - サーバーミュート（0以下なら解除なし）");
             console.log("  moveAll <guildId> <voiceChannelId>         - ギルド内の全VC参加者を指定VCへ移動");
             console.log("  disconnectAll <guildId>                    - ギルド内の全VC参加者を切断");
-            console.log("  muteAll <guildId> <second(s)/minute(s)/hour(s)>             - ギルド内の全VC参加者を一括サーバーミュート");
+            console.log("  muteAll <guildId> <second(s)/minute(s)/hour(s)> - ギルド内の全VC参加者を一括サーバーミュート");
             console.log("  unmute <guildId> <userId>      - ユーザーのサーバーミュートを解除");
             console.log("  help                               - このヘルプを表示");
             console.log("  addrole <guildId> <userId> <roleId>         - ユーザーにロールを付与");
@@ -801,6 +795,5 @@ rl.on("line", async (input) => {
 });
 // index.ts 最後あたり
 client.on("messageCreate", async (message) => {
-    await (0, english_2.handleEnglishMessage)(message);
     await (0, music_1.handleMusicMessage)(message);
 });

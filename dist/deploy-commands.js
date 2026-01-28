@@ -46,16 +46,6 @@ const commands = [
         .addChannelTypes(discord_js_1.ChannelType.GuildVoice, discord_js_1.ChannelType.GuildStageVoice)
         .setRequired(true))
         .toJSON(),
-    // /english 英語禁止モード切り替え
-    new discord_js_1.SlashCommandBuilder()
-        .setName("english")
-        .setDescription("英語禁止モードを切り替える（管理者のみ）")
-        .addStringOption((opt) => opt
-        .setName("mode")
-        .setDescription("on / off を指定")
-        .setRequired(true)
-        .addChoices({ name: "on", value: "on" }, { name: "off", value: "off" }))
-        .toJSON(),
 ];
 const rest = new discord_js_1.REST({ version: "10" }).setToken(TOKEN);
 (async () => {

@@ -345,7 +345,6 @@ export async function handleMusicMessage(message: Message) {
     .trim()
     .split(/\s+/);
   const command = cmd?.toLowerCase();
-  if (command === "english") return;
 
   // 音楽機能が無効の場合、disable/enable以外は拒否
   if (
@@ -529,7 +528,7 @@ async function handlePlay(
         return `${i + 1}. ${title}${author}${durationText}`;
       });
       await message.reply(
-        `🔎 候補が見つかりました。番号で選んでください。\n` +
+        `🔎 いくつか候補が見つかったよ。この中から選んでね。ない場合はURLで再生してみて。\n` +
           `${lines.join("\n")}\n` +
           `\n\`s!play 1\`〜\`s!play ${lines.length}\``,
       );

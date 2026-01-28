@@ -1,190 +1,130 @@
-⚙️ ShibakuBot 導入ガイド（完全版）
-🧩 ① Discord Bot を作成する
+# しばくbot / ShibakuBot
 
-Discord Developer Portal
- にアクセス
+Discordサーバー向けの「しばくカウント」Bot。  
+`/menu` からランキング・免除管理・メダル・VC操作・監査ログなどを一通り操作でき、  
+音楽再生（Lavalink）と英語禁止モードも搭載しています。
 
-「New Application」をクリック
+## 主な機能
+- しばき回数の加算・ランキング・統計・監査ログ
+- 免除リスト・回数レンジの変更・回数の直接編集
+- メダルバンク（残高/ランキング/送金、管理者操作）
+- VC操作（移動/切断/ミュート/解除）
+- ルーム告知
+- 英語禁止モード（英字検出）
+- 音楽再生（`s!` プレフィックス、アップロード再生対応）
+- 管理者ツール（ログチャンネル設定、システム統計、バックアップ）
 
-名前を入力（例：しばくbot）→「Create」
+## 前提
+- Node.js >= 20
+- Discord Bot の Privileged Intents: **Server Members / Message Content**
+- Voice States Intent（音楽/VC操作用）
+- 音楽機能を使う場合: Lavalink を別プロセスで起動  
+  - 接続先は `src/index.ts` の `LavalinkManager` 設定に合わせてください  
+    （デフォルト: `127.0.0.1:2333`, password `youshallnotpass`）
 
-▶ Botを有効化
+## セットアップ
+1. Discord Developer Portal でアプリ作成 → Bot 作成
+2. トークン取得、Intents を有効化
+3. サーバーに招待（`bot` + `applications.commands`）
+4. 依存関係インストール
+   ```bash
+   npm install
+   ```
+5. `.env` を作成（下記参照）
+6. スラッシュコマンド登録
+   ```bash
+   npm run register
+   ```
+7. 起動
+   ```bash
+   npm run dev
+   ```
 
-左メニューから「Bot」を選択
-
-「Add Bot」をクリック
-
-確認ダイアログで「Yes, do it!」を選択
-
-名前とアイコンを設定（任意）
-
-下部の “Token” セクションで「Reset Token」を押して
-表示されたトークンをコピーしておく（※後で .env に記載）
-
-▶ インテント設定（超重要）
-
-「Privileged Gateway Intents」までスクロールし、
-以下の3つをすべてONにしてください：
-
-✅ PRESENCE INTENT
-
-✅ SERVER MEMBERS INTENT（/members で必要）
-
-✅ MESSAGE CONTENT INTENT
-
-保存を押します。
-
-▶ Botをサーバーに招待
-
-左メニューから「OAuth2 → URL Generator」を開く
-
-「bot」と「applications.commands」にチェック
-
-「Bot Permissions」から以下を選択：
-
-Send Messages
-
-Embed Links
-
-Attach Files
-
-Use Slash Commands
-
-Read Message History
-
-Manage Messages（必要なら）
-
-一番下の「Generated URL」をコピーしてブラウザで開き、
-招待したいサーバーを選択して「承認」。
-
-💻 ② Node.js と開発環境を準備
-Node.js のインストール
-
-推奨バージョン: 20 以上
-
-https://nodejs.org/
- からインストール
-
-インストール後、ターミナルで確認：
-
-node -v
-npm -v
-
-📦 ③ Botプロジェクトを作成
-mkdir shibakubot
-cd shibakubot
-npm init -y
-
-TypeScript 環境をセットアップ
-npm install discord.js dotenv ts-node typescript
-npm install --save-dev @types/node
-
-
-TypeScript 設定ファイルを生成：
-
-npx tsc --init
-
-🧾 ④ .env を設定
-
-ルートディレクトリに .env ファイルを作成：
-
-TOKEN=ここにDiscordBotトークンを貼り付け
-CLIENT_ID=Discord Developer PortalのApplication ID
-GUILD_ID=テストサーバーのID
-LOG_CHANNEL_ID=ログを送信したいチャンネルID（任意）
-OWNER_IDS=管理者のユーザーID
-IMMUNE_IDS=ここに免除したいユーザーのユーザーID
-
-各項目の説明
-項目	説明
-TOKEN	Discord Bot の認証トークン
-CLIENT_ID	アプリケーションのID（General Informationに表示）
-GUILD_ID	コマンド登録するサーバーのID
-LOG_CHANNEL_ID	しばきログを送信するチャンネルID（任意）
-OWNER_IDS	管理者・開発者のDiscord ID（複数可）
-IMMUNE_IDS	永久しばき免除ユーザーID（任意）
-📜 ⑤ コマンドを登録
-
-スラッシュコマンドをDiscordに登録します。
-
-npm run register
-
-
-成功すると：
-
-⏫ コマンド登録中...
-✅ 登録完了
-
-
-と表示されます。
-
-▶ ⑥ Botを起動
-
-開発モードで起動：
-
-npm run dev
-
-
-成功すると：
-
-✅ ログイン完了: しばくbot#数字
-
-
-と表示され、Botがオンラインになります。
-
-🧱 ⑦ ビルド（配布・本番用）
-
-TypeScriptをJavaScriptに変換：
-
+本番用:
+```bash
 npm run build
+npm run start
+```
 
+## .env 設定
+```env
+TOKEN=...
+CLIENT_ID=...
+GUILD_IDS=111111111111111111,222222222222222222
+# 1つだけなら GUILD_ID でも可
+OWNER_IDS=111111111111111111,222222222222222222
+IMMUNE_IDS=...            # 任意：グローバル免除
+LOG_CHANNEL_ID=...        # 任意：ログチャンネル（未設定なら /menu で設定可）
 
-生成されたファイルは dist/ フォルダに出力されます。
+# 音楽/アップロード
+FILE_DIR=./files          # 任意：アップロード保存先
+FILE_PORT=3001            # 任意：ファイルサーバーのポート
+UPLOAD_INTERNAL_URL=http://127.0.0.1:3001/uploads
+UPLOAD_BASE_URL=http://your.domain:3001/uploads
+MUSIC_MAX_MINUTES=15      # 任意：1曲の上限(分)
 
-本番起動コマンド：
+# コマンド登録時の挙動
+CLEAR_GLOBAL=true         # 任意：register 時にグローバルコマンドを削除
+```
 
-node dist/index.js
+### 変数メモ
+- `GUILD_IDS` はカンマ区切り。`npm run register` はギルド単位で登録します。
+- `OWNER_IDS` は管理者権限に加えて「開発者扱い」のユーザーIDです。
+- `LOG_CHANNEL_ID` はログ送信のデフォルト。/menu → サーバー設定で上書き可能です。
+- `UPLOAD_INTERNAL_URL` は Lavalink から到達できる URL を指定してください。
+- `UPLOAD_INTERNAL_URL` / `UPLOAD_BASE_URL` を未設定の場合、`src/music.ts` 内の既定値が使われます。
+- ファイルサーバーのホストは `src/index.ts` の `FILE_HOST` で固定です。必要なら編集してください。
 
-🧠 コマンド一覧
-コマンド	内容
-/ping	応答速度を測定
-/sbk <user> <reason> [count]	ユーザーをしばく（1〜10回）
-/check <user>	しばかれ回数を表示
-/top	ランキング表示
-/members	全メンバーのしばかれ回数一覧＋CSV
-/control <user> <count>	管理者専用：回数を手動設定
-/immune add/remove/list	管理者専用：免除リストを編集
-🚫 しばけない対象
+## コマンド
+### スラッシュコマンド（`npm run register` で登録）
+- `/sbk user count? reason?` しばく（未指定はランダム）
+- `/menu` メニューを開く
+- `/suimin user channel` VC移動
+- `/english on|off` 英語禁止モード切り替え（管理者）
 
-BOT（自分自身を含む）
+### 実装済み（必要なら `src/deploy-commands.ts` に追加して登録）
+- `/ping` 生存確認
+- `/check user` しばかれ回数
+- `/top` ランキング
+- `/members` メンバー一覧 + CSV
+- `/stats` 統計（管理者）
+- `/reset` リセット（管理者）
+- `/control user count` 回数直接設定（管理者）
+- `/immune add|remove|list` 免除管理（管理者）
+- `/room` ルーム告知
+- `/help` ヘルプ
 
-.env の IMMUNE_IDS
+### /menu から使える機能
+- 基本: ランキング / メンバー一覧 / 統計 / ルーム告知
+- しばき管理: 回数レンジ変更 / 免除管理 / 回数直接設定
+- メダル: 残高 / ランキング / 送金 / 管理者の増減
+- VC: 移動 / 切断 / ミュート / 解除
+- 管理者: 監査ログ / ログチャンネル設定 / システム統計 / バックアップ / 開発者ツール
 
-/immune add で登録されたユーザー
+### 音楽コマンド（メッセージ, `s!` プレフィックス）
+- `s!play <URL or キーワード>`
+- `s!skip`
+- `s!stop`
+- `s!queue`
+- `s!upload`（mp3/wav/flac/m4a/aac/ogg）
+- `s!remove <番号>`
+- `s!ng add|remove|list|clear <word>`（管理者）
+- `s!enable` / `s!disable`（管理者）
+- `s!help`
 
-🧾 データ保存
+## データ保存
+- ギルドごとの DB: `data/guilds/<guildId>.db`
+- メダル DB: `data/medalbank.db`
+- バックアップ: `backup/`
+- アップロード保存先: `files/`（`FILE_DIR` で変更可）
 
-データは data.json に自動保存されます。
-（サーバーごとではなくグローバル共通）
+## トラブルシューティング
+- `Used disallowed intents` → Developer Portal で Intents を ON
+- `Unknown interaction` → `npm run register` を再実行
+- 音楽が再生されない → Lavalink 起動・ホスト/ポート/パスワード一致を確認
 
-💡 トラブルシューティング
-現象	対応
-Used disallowed intents	Bot設定で「Server Members Intent」をONにする
-Unknown interaction	コマンド登録後にBotを再起動
-コマンドが出ない	/register を再実行して更新
-反応が遅い	サーバーリージョンを近い地域（Japan等）に変更
-✅ セットアップまとめ
-手順	コマンド	内容
-1	npm install	パッケージをインストール
-2	.env 設定	Botトークンなどを設定
-3	npm run register	コマンドを登録
-4	npm run dev	Botを起動
-5	npm run build	配布用ビルド
-🧾 作者
-
+## 作者
 hotamachisubaru (蛍の光)
-GitHub: @hotamachisubaru-git
 
-🪪 ライセンス
-
-このプロジェクトは MIT License で公開されています。
+## ライセンス
+MIT License
