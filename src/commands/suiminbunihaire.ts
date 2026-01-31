@@ -1,33 +1,9 @@
-import {
-  ChannelType,
-  ChatInputCommandInteraction,
-  PermissionFlagsBits,
-} from "discord.js";
-
-const OWNER_IDS = (process.env.OWNER_IDS || "")
-  .split(",")
-  .map((s) => s.trim())
-  .filter(Boolean);
+import { ChannelType, ChatInputCommandInteraction } from "discord.js";
 
 export async function handleSuimin(interaction: ChatInputCommandInteraction) {
   if (!interaction.inGuild()) {
     await interaction.reply({
       content: "サーバー内で使ってね。",
-      ephemeral: true,
-    });
-    return;
-  }
-
-  const isAdmin =
-    interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) ??
-    false;
-  const canMove =
-    interaction.memberPermissions?.has(PermissionFlagsBits.MoveMembers) ??
-    false;
-  const isDev = OWNER_IDS.includes(interaction.user.id);
-  if (!isAdmin && !canMove && !isDev) {
-    await interaction.reply({
-      content: "⚠️ VC移動は管理者/MoveMembers権限/開発者のみ使えます。",
       ephemeral: true,
     });
     return;

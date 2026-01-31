@@ -412,14 +412,14 @@ export async function handleMusicMessage(message: Message) {
           "`s!upload` - 音楽ファイルをアップロードして再生（対応形式: mp3, wav, flac, m4a, aac, ogg）\n" +
           "`s!ng <サブコマンド>` - 音楽NGワード管理コマンド（管理者のみ）\n" +
           "（例: `s!ng add <ワード>` / `s!ng remove <ワード>` / `s!ng list` / `s!ng clear`）\n" +
-          "`s!disable` (s!e) - 音楽機能を無効化（管理者のみ）\n" +
-          "`s!enable` (s!d) - 音楽機能を有効化（管理者のみ）",
+          "`s!disable` (s!d) - 音楽機能を無効化（管理者のみ）\n" +
+          "`s!enable` (s!e) - 音楽機能を有効化（管理者のみ）",
       );
     } else if (command === "remove" || command === "delete") {
       await handleRemoveCommand(message, rest);
-    } else if (command === "disable" || command === "e") {
+    } else if (command === "disable" || command === "d") {
       await handleDisable(message);
-    } else if (command === "enable" || command === "d") {
+    } else if (command === "enable" || command === "e") {
       await handleEnable(message);
     }
   } catch (e) {
@@ -918,7 +918,7 @@ async function handleRemoveCommand(message: Message, rest: string[]) {
   await message.reply(`🗑 キューから削除しました: **${removed.info.title}**`);
 }
 
-/* ---------- s!disable (s!e) ---------- */
+/* ---------- s!disable (s!d) ---------- */
 async function handleDisable(message: Message) {
   if (!message.guildId) {
     await message.reply("⚠️ サーバー内でのみ使用できます。");
@@ -938,7 +938,7 @@ async function handleDisable(message: Message) {
   await message.reply("🔇 音楽機能を無効化しました。");
 }
 
-/* ---------- s!enable (s!d) ---------- */
+/* ---------- s!enable (s!e) ---------- */
 async function handleEnable(message: Message) {
   if (!message.guildId) {
     await message.reply("⚠️ サーバー内でのみ使用できます。");

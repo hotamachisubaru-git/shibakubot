@@ -37,10 +37,13 @@ import { handleMembers } from "./commands/members";
 import { handleMenu } from "./commands/menu";
 import { handleRoom } from "./commands/daimongamecenter";
 import { handleHelp } from "./commands/help";
+import { handleEnglish } from "./commands/english";
+import { handleEnglishExempt } from "./commands/englishExempt";
 import { handleReset } from "./commands/reset";
 import { handleStats } from "./commands/stats";
 import { handleSuimin } from "./commands/suiminbunihaire";
 import { handleMusicMessage } from "./music";
+import { handleEnglishMessage } from "./english";
 import { formatBigIntJP } from "./utils/formatCount";
 const UPLOAD_DIR = path.resolve(process.env.FILE_DIR || "./files");
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
@@ -313,6 +316,14 @@ client.on(Events.InteractionCreate, async (interaction: Interaction) => {
   }
   if (name === "help") {
     await handleHelp(interaction);
+    return;
+  }
+  if (name === "english") {
+    await handleEnglish(interaction);
+    return;
+  }
+  if (name === "english-settings" || name === "es") {
+    await handleEnglishExempt(interaction);
     return;
   }
   if (name === "stats") {
@@ -964,5 +975,6 @@ rl.on("line", async (input) => {
 
 // index.ts 最後あたり
 client.on("messageCreate", async (message: Message) => {
+  await handleEnglishMessage(message);
   await handleMusicMessage(message);
 });
