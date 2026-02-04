@@ -258,10 +258,11 @@ client.on(Events.InteractionCreate, async (interaction: Interaction) => {
       reason.length > MAX_REASON ? reason.slice(0, MAX_REASON) + "…" : reason;
 
     await interaction.reply(
-      `**${display}** を **${formatBigIntJP(countBig)}回** しばきました！` +
-        `（累計 ${formatBigIntJP(nextCount)}回）\n` +
-        `理由: ${safeReason}`,
-    );
+  `**${display}** を **${formatBigIntJP(countBig)}回** しばきました！\n` +
+  `（累計 ${formatBigIntJP(nextCount)}回 / 今回 +${formatBigIntJP(countBig)}回）\n` +
+  `理由: ${safeReason}`
+  );
+
 
     await sendLog(
       interaction,

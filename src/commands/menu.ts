@@ -71,6 +71,7 @@ const MEDAL_DB_PATH = path.join(DATA_ROOT, "medalbank.db");
 const BACKUP_ROOT = path.join(process.cwd(), "backup");
 const EMBED_DESC_LIMIT = 4096; // ← ここは自由に変更OK
 
+
 function joinLinesWithLimitOrNull(
   lines: string[],
   limit: number,
@@ -87,13 +88,13 @@ function buildTooLongEmbed(title: string, actual: number, limit: number) {
   const dow = new Date().getDay(); // 0=日 ... 6=土
 
   const messageByDow = [
-    "日曜日：明日はげっつようび！げっつようび！やったねぇ！！",
     "月曜日：ムカムカしてもしょうがないよっ！！",
     "火曜日：大阪や！！おめえら他レギオンぶっ潰すぞ！！",
     "水曜日：botぶっ壊したらDMしやがれください。",
     "木曜日：大阪や！！レギオンぶっ潰さないと追放だぞわかったか！！",
     "金曜日：二次会行く？ 終電逃すなよ？？ 飲みすぎ注意！",
     "土曜日：とりあえず課金しろ。",
+    "日曜日：明日はげっつようび！げっつようび！やったねぇ！！",
   ];
 
   return new EmbedBuilder()
@@ -1851,56 +1852,61 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
           break;
         }
 
-        /* --- 管理者: 監査ログ --- */
-        case "menu_audit": {
-          if (
-            !(await requireAdminOrDev(
-              btn,
-              "監査ログは管理者/開発者のみ利用できます。",
-            ))
-          )
-            break;
+       /* --- 管理者: 監査ログ --- */
+case "menu_audit": {
+  if (
+    !(await requireAdminOrDev(
+      btn,
+      "監査ログは管理者/開発者のみ利用できます。",
+    ))
+  )
+    break;
 
-          await btn.deferUpdate();
+  await btn.deferUpdate();
 
-          const logs = getRecentLogs(gid, AUDIT_LIMIT);
-          if (!logs.length) {
-            await btn.followUp({
-              content: "監査ログはまだありません。",
-              ephemeral: true,
-            });
-            break;
-          }
+  const logs = getRecentLogs(gid, AUDIT_LIMIT);
+  if (!logs.length) {
+    await btn.followUp({
+      content: "監査ログはまだありません。",
+      ephemeral: true,
+    });
+    break;
+  }
 
-          const lines = await Promise.all(
-            logs.map(async (log) => {
-              const actorLabel = log.actor
-                ? looksLikeSnowflake(log.actor)
-                  ? await displayNameFrom(btn, log.actor)
-                  : log.actor
-                : "不明";
-              const targetLabel = await displayNameFrom(btn, log.target);
-              const delta = formatSignedBigInt(log.delta);
-              const when = new Date(log.at).toLocaleString("ja-JP");
-              const reasonRaw = (log.reason ?? "").replace(/\s+/g, " ").trim();
-              const reason = reasonRaw
-                ? reasonRaw.length > 40
-                  ? `${reasonRaw.slice(0, 40)}...`
-                  : reasonRaw
-                : "（理由なし）";
-              return `- ${when} ${actorLabel} -> ${targetLabel} (${delta}) ${reason}`;
-            }),
-          );
+  const lines = await Promise.all(
+    logs.map(async (log) => {
+      const actorLabel = log.actor
+        ? looksLikeSnowflake(log.actor)
+          ? await displayNameFrom(btn, log.actor)
+          : log.actor
+        : "不明";
+      const targetLabel = await displayNameFrom(btn, log.target);
+      const delta = formatSignedBigInt(log.delta);
+      const when = new Date(log.at).toLocaleString("ja-JP");
 
-          const total = getLogCount(gid);
-          const embed = new EmbedBuilder()
-            .setTitle("監査ログ（しばき）")
-            .setDescription(lines.join("\n"))
-            .setFooter({ text: `最新 ${logs.length} 件 / 全 ${total} 件` });
+      const reasonRaw = (log.reason ?? "").replace(/\s+/g, " ").trim();
+      const reason = reasonRaw
+        ? reasonRaw.length > 40
+          ? `${reasonRaw.slice(0, 40)}...`
+          : reasonRaw
+        : "（理由なし）";
 
-          await btn.followUp({ embeds: [embed], ephemeral: true });
-          break;
-        }
+      return `- ${when} ${actorLabel} -> ${targetLabel} (${delta}) ${reason}`;
+    }),
+  );
+
+  // ★ description の長さ制限（4096対策）
+  const desc = joinLinesWithLimitOrNull(lines, EMBED_DESC_LIMIT) ?? "（表示できるログがありません）";
+
+  const total = getLogCount(gid);
+  const embed = new EmbedBuilder()
+    .setTitle("監査ログ（しばき）")
+    .setDescription(desc)
+    .setFooter({ text: `最新 ${logs.length} 件 / 全 ${total} 件` });
+
+  await btn.followUp({ embeds: [embed], ephemeral: true });
+  break;
+}
 
         /* --- 管理者: サーバー設定 --- */
         case "menu_settings": {
@@ -1911,6 +1917,7 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
             ))
           )
             break;
+          
 
           const current = getSetting(gid, LOG_CHANNEL_KEY);
           const fallbackText = LOG_CHANNEL_ID

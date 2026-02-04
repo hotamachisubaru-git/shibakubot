@@ -19,10 +19,13 @@ const members_1 = require("./commands/members");
 const menu_1 = require("./commands/menu");
 const daimongamecenter_1 = require("./commands/daimongamecenter");
 const help_1 = require("./commands/help");
+const english_1 = require("./commands/english");
+const englishExempt_1 = require("./commands/englishExempt");
 const reset_1 = require("./commands/reset");
 const stats_1 = require("./commands/stats");
 const suiminbunihaire_1 = require("./commands/suiminbunihaire");
 const music_1 = require("./music");
+const english_2 = require("./english");
 const formatCount_1 = require("./utils/formatCount");
 const UPLOAD_DIR = path_1.default.resolve(process.env.FILE_DIR || "./files");
 fs_1.default.mkdirSync(UPLOAD_DIR, { recursive: true });
@@ -196,8 +199,8 @@ client.on(discord_js_1.Events.InteractionCreate, async (interaction) => {
         const display = member?.displayName ?? user.tag;
         const MAX_REASON = 2000;
         const safeReason = reason.length > MAX_REASON ? reason.slice(0, MAX_REASON) + "…" : reason;
-        await interaction.reply(`**${display}** を **${(0, formatCount_1.formatBigIntJP)(countBig)}回** しばきました！` +
-            `（累計 ${(0, formatCount_1.formatBigIntJP)(nextCount)}回）\n` +
+        await interaction.reply(`**${display}** を **${(0, formatCount_1.formatBigIntJP)(countBig)}回** しばきました！\n` +
+            `（累計 ${(0, formatCount_1.formatBigIntJP)(nextCount)}回 / 今回 +${(0, formatCount_1.formatBigIntJP)(countBig)}回）\n` +
             `理由: ${safeReason}`);
         await (0, logging_1.sendLog)(interaction, interaction.user.id, user.id, reason, countBig, nextCount);
     }
@@ -243,6 +246,14 @@ client.on(discord_js_1.Events.InteractionCreate, async (interaction) => {
     }
     if (name === "help") {
         await (0, help_1.handleHelp)(interaction);
+        return;
+    }
+    if (name === "english") {
+        await (0, english_1.handleEnglish)(interaction);
+        return;
+    }
+    if (name === "english-settings" || name === "es") {
+        await (0, englishExempt_1.handleEnglishExempt)(interaction);
         return;
     }
     if (name === "stats") {
@@ -795,5 +806,6 @@ rl.on("line", async (input) => {
 });
 // index.ts 最後あたり
 client.on("messageCreate", async (message) => {
+    await (0, english_2.handleEnglishMessage)(message);
     await (0, music_1.handleMusicMessage)(message);
 });
