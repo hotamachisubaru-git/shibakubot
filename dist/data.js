@@ -24,12 +24,8 @@ exports.removeMusicNgWord = removeMusicNgWord;
 exports.clearMusicNgWords = clearMusicNgWords;
 exports.getMusicEnabled = getMusicEnabled;
 exports.setMusicEnabled = setMusicEnabled;
-exports.getEnglishBanEnabled = getEnglishBanEnabled;
-exports.setEnglishBanEnabled = setEnglishBanEnabled;
-exports.getEnglishBanExemptGuilds = getEnglishBanExemptGuilds;
-exports.isEnglishBanExemptGuild = isEnglishBanExemptGuild;
-exports.addEnglishBanExemptGuild = addEnglishBanExemptGuild;
-exports.removeEnglishBanExemptGuild = removeEnglishBanExemptGuild;
+exports.getMaintenanceEnabled = getMaintenanceEnabled;
+exports.setMaintenanceEnabled = setMaintenanceEnabled;
 exports.setSbkRange = setSbkRange;
 exports.loadGuildStore = loadGuildStore;
 exports.getMedalBalance = getMedalBalance;
@@ -406,58 +402,16 @@ function getMusicEnabled(gid) {
 function setMusicEnabled(gid, enabled) {
     setSetting(gid, MUSIC_ENABLED_KEY, enabled ? "true" : "false");
 }
-// ---------- 英語禁止モード ----------
-const ENGLISH_BAN_KEY = "englishBanEnabled";
-const ENGLISH_BAN_EXEMPT_KEY = "englishBanExemptGuilds";
-const GLOBAL_SETTINGS_GID = "_global";
-function getEnglishBanEnabled(gid) {
-    const raw = getSetting(gid, ENGLISH_BAN_KEY);
+// ---------- メンテナンスモード ----------
+const MAINTENANCE_KEY = "maintenanceEnabled";
+function getMaintenanceEnabled(gid) {
+    const raw = getSetting(gid, MAINTENANCE_KEY);
     if (!raw)
         return false; // デフォルト無効
     return raw.toLowerCase() === "true";
 }
-function setEnglishBanEnabled(gid, enabled) {
-    setSetting(gid, ENGLISH_BAN_KEY, enabled ? "true" : "false");
-}
-function readEnglishBanExemptList() {
-    const raw = getSetting(GLOBAL_SETTINGS_GID, ENGLISH_BAN_EXEMPT_KEY);
-    if (!raw)
-        return [];
-    try {
-        const parsed = JSON.parse(raw);
-        if (!Array.isArray(parsed))
-            return [];
-        return Array.from(new Set(parsed.filter((x) => typeof x === "string").filter(Boolean))).sort();
-    }
-    catch {
-        return [];
-    }
-}
-function writeEnglishBanExemptList(list) {
-    const normalized = Array.from(new Set(list.filter(Boolean))).sort();
-    setSetting(GLOBAL_SETTINGS_GID, ENGLISH_BAN_EXEMPT_KEY, JSON.stringify(normalized));
-    return normalized;
-}
-function getEnglishBanExemptGuilds() {
-    return readEnglishBanExemptList();
-}
-function isEnglishBanExemptGuild(gid) {
-    return readEnglishBanExemptList().includes(gid);
-}
-function addEnglishBanExemptGuild(gid) {
-    const current = readEnglishBanExemptList();
-    if (current.includes(gid))
-        return { added: false, list: current };
-    const list = writeEnglishBanExemptList([...current, gid]);
-    return { added: true, list };
-}
-function removeEnglishBanExemptGuild(gid) {
-    const current = readEnglishBanExemptList();
-    const next = current.filter((x) => x !== gid);
-    if (next.length === current.length)
-        return { removed: false, list: current };
-    const list = writeEnglishBanExemptList(next);
-    return { removed: true, list };
+function setMaintenanceEnabled(gid, enabled) {
+    setSetting(gid, MAINTENANCE_KEY, enabled ? "true" : "false");
 }
 function setSbkRange(gid, min, max) {
     const db = openDb(gid);

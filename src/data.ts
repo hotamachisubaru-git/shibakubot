@@ -483,68 +483,18 @@ export function setMusicEnabled(gid: string, enabled: boolean): void {
   setSetting(gid, MUSIC_ENABLED_KEY, enabled ? "true" : "false");
 }
 
-// ---------- 英語禁止モード ----------
-const ENGLISH_BAN_KEY = "englishBanEnabled";
-const ENGLISH_BAN_EXEMPT_KEY = "englishBanExemptGuilds";
-const GLOBAL_SETTINGS_GID = "_global";
+// ---------- メンテナンスモード ----------
+const MAINTENANCE_KEY = "maintenanceEnabled";
 
-export function getEnglishBanEnabled(gid: string): boolean {
-  const raw = getSetting(gid, ENGLISH_BAN_KEY);
+export function getMaintenanceEnabled(gid: string): boolean {
+  const raw = getSetting(gid, MAINTENANCE_KEY);
   if (!raw) return false; // デフォルト無効
   return raw.toLowerCase() === "true";
 }
 
-export function setEnglishBanEnabled(gid: string, enabled: boolean): void {
-  setSetting(gid, ENGLISH_BAN_KEY, enabled ? "true" : "false");
+export function setMaintenanceEnabled(gid: string, enabled: boolean): void {
+  setSetting(gid, MAINTENANCE_KEY, enabled ? "true" : "false");
 }
-
-function readEnglishBanExemptList(): string[] {
-  const raw = getSetting(GLOBAL_SETTINGS_GID, ENGLISH_BAN_EXEMPT_KEY);
-  if (!raw) return [];
-  try {
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return Array.from(
-      new Set(parsed.filter((x) => typeof x === "string").filter(Boolean)),
-    ).sort();
-  } catch {
-    return [];
-  }
-}
-
-function writeEnglishBanExemptList(list: string[]) {
-  const normalized = Array.from(new Set(list.filter(Boolean))).sort();
-  setSetting(GLOBAL_SETTINGS_GID, ENGLISH_BAN_EXEMPT_KEY, JSON.stringify(normalized));
-  return normalized;
-}
-
-export function getEnglishBanExemptGuilds(): string[] {
-  return readEnglishBanExemptList();
-}
-
-export function isEnglishBanExemptGuild(gid: string): boolean {
-  return readEnglishBanExemptList().includes(gid);
-}
-
-export function addEnglishBanExemptGuild(
-  gid: string,
-): { added: boolean; list: string[] } {
-  const current = readEnglishBanExemptList();
-  if (current.includes(gid)) return { added: false, list: current };
-  const list = writeEnglishBanExemptList([...current, gid]);
-  return { added: true, list };
-}
-
-export function removeEnglishBanExemptGuild(
-  gid: string,
-): { removed: boolean; list: string[] } {
-  const current = readEnglishBanExemptList();
-  const next = current.filter((x) => x !== gid);
-  if (next.length === current.length) return { removed: false, list: current };
-  const list = writeEnglishBanExemptList(next);
-  return { removed: true, list };
-}
-
 
 export function setSbkRange(gid: string, min: number, max: number) {
   const db = openDb(gid);

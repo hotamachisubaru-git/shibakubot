@@ -17,9 +17,10 @@ export async function handleHelp(interaction: ChatInputCommandInteraction) {
     { name: "/stats", desc: "全体統計を確認します（管理者専用）" },
     { name: "/menu", desc: "クイック操作メニューを開きます" }, // ★ menu を追加
     { name: "/suimin", desc: "指定ユーザーをVCへ移動（権限必須）" },
-    { name: "/english", desc: "英語禁止モードを切り替えます（管理者専用）" },
-    { name: "/english-settings", desc: "英語禁止 免除ギルドを管理（開発者専用）" },
-    { name: "/es", desc: "英語禁止 免除ギルドを管理（開発者専用）" },
+    {
+      name: "/maintenance (/mt)",
+      desc: "メンテナンスモードを切り替えます（管理者専用）",
+    },
   ];
 
   const lines = commands.map((c) => `• **${c.name}** — ${c.desc}`).join("\n");

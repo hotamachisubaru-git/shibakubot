@@ -1881,7 +1881,14 @@ case "menu_audit": {
           : log.actor
         : "不明";
       const targetLabel = await displayNameFrom(btn, log.target);
-      const delta = formatSignedBigInt(log.delta);
+     const delta = safeSignedBigInt(log.delta);
+
+function safeSignedBigInt(x: bigint): string {
+  const sign = x < 0n ? "-" : "+";
+  const abs = x < 0n ? -x : x;
+  return sign + safeCount(abs, 16); // 監査ログは短め
+}
+
       const when = new Date(log.at).toLocaleString("ja-JP");
 
       const reasonRaw = (log.reason ?? "").replace(/\s+/g, " ").trim();

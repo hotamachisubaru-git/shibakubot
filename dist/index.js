@@ -19,13 +19,11 @@ const members_1 = require("./commands/members");
 const menu_1 = require("./commands/menu");
 const daimongamecenter_1 = require("./commands/daimongamecenter");
 const help_1 = require("./commands/help");
-const english_1 = require("./commands/english");
-const englishExempt_1 = require("./commands/englishExempt");
+const maintenance_1 = require("./commands/maintenance");
 const reset_1 = require("./commands/reset");
 const stats_1 = require("./commands/stats");
 const suiminbunihaire_1 = require("./commands/suiminbunihaire");
 const music_1 = require("./music");
-const english_2 = require("./english");
 const formatCount_1 = require("./utils/formatCount");
 const UPLOAD_DIR = path_1.default.resolve(process.env.FILE_DIR || "./files");
 fs_1.default.mkdirSync(UPLOAD_DIR, { recursive: true });
@@ -114,6 +112,16 @@ client.on(discord_js_1.Events.InteractionCreate, async (interaction) => {
     if (!interaction.isChatInputCommand())
         return;
     const name = interaction.commandName;
+    if (interaction.inGuild()) {
+        const gid = interaction.guildId;
+        if ((0, data_1.getMaintenanceEnabled)(gid) && name !== "maintenance" && name !== "mt") {
+            await interaction.reply({
+                content: "⚠️ 現在メンテナンス中です。しばらくお待ちください。",
+                ephemeral: true,
+            });
+            return;
+        }
+    }
     // /ping
     if (name === "ping") {
         const t0 = performance.now();
@@ -248,12 +256,8 @@ client.on(discord_js_1.Events.InteractionCreate, async (interaction) => {
         await (0, help_1.handleHelp)(interaction);
         return;
     }
-    if (name === "english") {
-        await (0, english_1.handleEnglish)(interaction);
-        return;
-    }
-    if (name === "english-settings" || name === "es") {
-        await (0, englishExempt_1.handleEnglishExempt)(interaction);
+    if (name === "maintenance" || name === "mt") {
+        await (0, maintenance_1.handleMaintenance)(interaction);
         return;
     }
     if (name === "stats") {
@@ -488,6 +492,28 @@ async function timeoutUser(guildId, userId, durationMs, label) {
     const human = label ?? `${durationMs / 1000}秒`;
     console.log(`✅ ${member.user.tag} を ${human} タイムアウトしました。`);
 }
+// 単体ユーザー: BAN解除
+async function unbanUser(guildId, userId) {
+    if (!client.isReady())
+        throw new Error("Client is not ready");
+    const guild = await client.guilds.fetch(guildId).catch(() => null);
+    if (!guild) {
+        console.log("ギルドが見つかりません。");
+        return;
+    }
+    const ban = await guild.bans.fetch(userId).catch(() => null);
+    if (!ban) {
+        console.log("ユーザーはBANされていません。");
+        return;
+    }
+    try {
+        await guild.bans.remove(userId, "コンソールコマンドによるBAN解除");
+        console.log(`✅ ${ban.user.tag} のBANを解除しました。`);
+    }
+    catch (err) {
+        console.error("BAN解除に失敗しました:", err);
+    }
+}
 // 単体ユーザー: サーバーミュート（任意時間後に自動解除）
 async function serverUserMute(guildId, userId, durationMs, label) {
     if (!client.isReady())
@@ -669,6 +695,7 @@ console.log("  moveAll <guildId> <voiceChannelId>");
 console.log("  disconnectAll <guildId>");
 console.log("  muteAll <guildId> <second(s)/minute(s)/hour(s)>");
 console.log("  unmute <guildId> <userId>");
+console.log("  unban <guildId> <userId>");
 console.log("  addrole <guildId> <userId> <roleId>");
 console.log("  delmsg <channelId> <messageId>");
 console.log("例: move 123... 234... 345...");
@@ -677,6 +704,7 @@ console.log("例: serverMute 123... 234... 1h");
 console.log("例: moveAll 123... 345...");
 console.log("例: muteAll 123... 15m");
 console.log("例：unmute 123... 234...");
+console.log("例：unban 123... 234...");
 console.log("例: delmsg 123... 456...");
 console.log("help と入力するとコマンド一覧を表示します。");
 console.log("------------------------------");
@@ -751,6 +779,9 @@ rl.on("line", async (input) => {
                 console.error("サーバーミュート解除に失敗しました:", err);
             }
         }
+        else if (command === "unban" && args.length === 3) {
+            await unbanUser(args[1], args[2]);
+        }
         else if (command === "delmsg" && args.length === 3) {
             await deleteMessage(args[1], args[2]);
         }
@@ -792,6 +823,7 @@ rl.on("line", async (input) => {
             console.log("  disconnectAll <guildId>                    - ギルド内の全VC参加者を切断");
             console.log("  muteAll <guildId> <second(s)/minute(s)/hour(s)> - ギルド内の全VC参加者を一括サーバーミュート");
             console.log("  unmute <guildId> <userId>      - ユーザーのサーバーミュートを解除");
+            console.log("  unban <guildId> <userId>       - ユーザーのBANを解除");
             console.log("  help                               - このヘルプを表示");
             console.log("  addrole <guildId> <userId> <roleId>         - ユーザーにロールを付与");
             console.log("  delmsg <channelId> <messageId>             - メッセージを削除");
@@ -806,6 +838,7 @@ rl.on("line", async (input) => {
 });
 // index.ts 最後あたり
 client.on("messageCreate", async (message) => {
-    await (0, english_2.handleEnglishMessage)(message);
+    if (message.guildId && (0, data_1.getMaintenanceEnabled)(message.guildId))
+        return;
     await (0, music_1.handleMusicMessage)(message);
 });

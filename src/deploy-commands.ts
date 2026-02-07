@@ -49,6 +49,12 @@ const commands = [
     .setDescription("しばくbot メニューを表示する")
     .toJSON(),
 
+  // /help コマンド一覧
+  new SlashCommandBuilder()
+    .setName("help")
+    .setDescription("コマンド一覧を表示する")
+    .toJSON(),
+
   // /suimin VC移動
   new SlashCommandBuilder()
     .setName("suimin")
@@ -65,10 +71,10 @@ const commands = [
     )
     .toJSON(),
 
-  // /english 英語禁止モード切り替え
+  // /maintenance メンテナンスモード切り替え
   new SlashCommandBuilder()
-    .setName("english")
-    .setDescription("英語禁止モードを切り替える（管理者のみ）")
+    .setName("maintenance")
+    .setDescription("メンテナンスモードを切り替える（管理者のみ）")
     .addStringOption((opt) =>
       opt
         .setName("mode")
@@ -81,65 +87,19 @@ const commands = [
     )
     .toJSON(),
 
-  // /english-settings 免除ギルド管理（開発者のみ）
+  // /mt メンテナンスモード切り替え（短縮）
   new SlashCommandBuilder()
-    .setName("english-settings")
-    .setDescription("英語禁止の免除ギルドを管理（開発者のみ）")
-    .addSubcommand((sub) =>
-      sub
-        .setName("add")
-        .setDescription("免除ギルドを追加")
-        .addStringOption((opt) =>
-          opt
-            .setName("guild")
-            .setDescription("免除するギルドID")
-            .setRequired(true),
+    .setName("mt")
+    .setDescription("メンテナンスモードを切り替える（短縮コマンド）")
+    .addStringOption((opt) =>
+      opt
+        .setName("mode")
+        .setDescription("on / off を指定")
+        .setRequired(true)
+        .addChoices(
+          { name: "on", value: "on" },
+          { name: "off", value: "off" },
         ),
-    )
-    .addSubcommand((sub) =>
-      sub
-        .setName("remove")
-        .setDescription("免除ギルドを削除")
-        .addStringOption((opt) =>
-          opt
-            .setName("guild")
-            .setDescription("削除するギルドID")
-            .setRequired(true),
-        ),
-    )
-    .addSubcommand((sub) =>
-      sub.setName("list").setDescription("免除ギルド一覧"),
-    )
-    .toJSON(),
-
-  // /es 免除ギルド管理（開発者のみ）
-  new SlashCommandBuilder()
-    .setName("es")
-    .setDescription("英語禁止の免除ギルドを管理（開発者のみ）")
-    .addSubcommand((sub) =>
-      sub
-        .setName("add")
-        .setDescription("免除ギルドを追加")
-        .addStringOption((opt) =>
-          opt
-            .setName("guild")
-            .setDescription("免除するギルドID")
-            .setRequired(true),
-        ),
-    )
-    .addSubcommand((sub) =>
-      sub
-        .setName("remove")
-        .setDescription("免除ギルドを削除")
-        .addStringOption((opt) =>
-          opt
-            .setName("guild")
-            .setDescription("削除するギルドID")
-            .setRequired(true),
-        ),
-    )
-    .addSubcommand((sub) =>
-      sub.setName("list").setDescription("免除ギルド一覧"),
     )
     .toJSON(),
 
