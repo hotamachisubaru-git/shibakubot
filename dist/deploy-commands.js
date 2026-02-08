@@ -25,8 +25,13 @@ if (!TOKEN || !CLIENT_ID || GUILD_IDS.length === 0) {
     console.error("❌ 環境変数が不足しています。TOKEN, CLIENT_ID, GUILD_IDS を確認してください。");
     process.exit(1);
 }
-// ---- ここで「/menu」だけを登録（他はUIから呼び出す前提） ----
+// ---- ギルド向けのスラッシュコマンドを登録 ----
 const commands = [
+    // /ping 生存確認
+    new discord_js_1.SlashCommandBuilder()
+        .setName("ping")
+        .setDescription("BOTが生きているか確認する")
+        .toJSON(),
     // /sbk 本体
     new discord_js_1.SlashCommandBuilder()
         .setName("sbk")

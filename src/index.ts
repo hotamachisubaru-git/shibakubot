@@ -33,6 +33,7 @@ import { handleMenu } from "./commands/menu";
 import { handleRoom } from "./commands/daimongamecenter";
 import { handleHelp } from "./commands/help";
 import { handleMaintenance } from "./commands/maintenance";
+import { handlePing } from "./commands/ping";
 import { handleReset } from "./commands/reset";
 import { handleStats } from "./commands/stats";
 import { handleSuimin } from "./commands/suiminbunihaire";
@@ -178,20 +179,8 @@ client.on(Events.InteractionCreate, async (interaction: Interaction) => {
     }
   }
 
-  // /ping
   if (name === "ping") {
-    const t0 = performance.now();
-    await interaction.deferReply({ ephemeral: true });
-    const apiPing = Math.round(performance.now() - t0);
-
-    let wsPing = interaction.client.ws?.ping ?? -1;
-    for (let waited = 0; wsPing < 0 && waited < 5000; waited += 200) {
-      await new Promise((r) => setTimeout(r, 200));
-      wsPing = interaction.client.ws?.ping ?? -1;
-    }
-    const wsText =
-      wsPing >= 0 ? `${Math.round(wsPing)}ms` : "取得できませんでした";
-    await interaction.editReply(`API: **${apiPing}ms** | WS: **${wsText}**`);
+    await handlePing(interaction);
     return;
   }
 

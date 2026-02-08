@@ -6,33 +6,18 @@ type HelpCommand = Readonly<{
 }>;
 
 const HELP_COMMANDS = [
-  { name: "/ping", description: "BOTが生きているか確認します" },
+  { name: "/ping", description: "BOTが生きているか確認する" },
+  { name: "/sbk", description: "ユーザーをしばく" },
+  { name: "/menu", description: "しばくbot メニューを表示する" },
+  { name: "/help", description: "コマンド一覧を表示する" },
+  { name: "/suimin", description: "指定ユーザーをVCに移動" },
   {
-    name: "/sbk",
-    description: "指定したユーザーをしばきます（理由と回数指定可）",
-  },
-  { name: "/check", description: "指定ユーザーのしばかれ回数を確認します" },
-  {
-    name: "/top",
-    description: "しばかれランキングを表示します（ページ切替可能）",
-  },
-  {
-    name: "/members",
-    description: "全メンバーのしばかれ回数一覧を表示（CSV出力付き）",
+    name: "/maintenance",
+    description: "メンテナンスモードを切り替える（管理者のみ）",
   },
   {
-    name: "/control",
-    description: "特定ユーザーの回数を直接設定（管理者専用）",
-  },
-  { name: "/immune", description: "しばき免除ユーザーを管理（管理者専用）" },
-  { name: "/room", description: "本日のルーム情報を投稿します" },
-  { name: "/help", description: "コマンド一覧を表示します" },
-  { name: "/stats", description: "全体統計を確認します（管理者専用）" },
-  { name: "/menu", description: "クイック操作メニューを開きます" },
-  { name: "/suimin", description: "指定ユーザーをVCへ移動（権限必須）" },
-  {
-    name: "/maintenance (/mt)",
-    description: "メンテナンスモードを切り替えます（管理者専用）",
+    name: "/mt",
+    description: "メンテナンスモードを切り替える（短縮コマンド）",
   },
 ] satisfies readonly HelpCommand[];
 

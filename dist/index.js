@@ -19,6 +19,7 @@ const menu_1 = require("./commands/menu");
 const daimongamecenter_1 = require("./commands/daimongamecenter");
 const help_1 = require("./commands/help");
 const maintenance_1 = require("./commands/maintenance");
+const ping_1 = require("./commands/ping");
 const reset_1 = require("./commands/reset");
 const stats_1 = require("./commands/stats");
 const suiminbunihaire_1 = require("./commands/suiminbunihaire");
@@ -141,18 +142,8 @@ client.on(discord_js_1.Events.InteractionCreate, async (interaction) => {
             return;
         }
     }
-    // /ping
     if (name === "ping") {
-        const t0 = performance.now();
-        await interaction.deferReply({ ephemeral: true });
-        const apiPing = Math.round(performance.now() - t0);
-        let wsPing = interaction.client.ws?.ping ?? -1;
-        for (let waited = 0; wsPing < 0 && waited < 5000; waited += 200) {
-            await new Promise((r) => setTimeout(r, 200));
-            wsPing = interaction.client.ws?.ping ?? -1;
-        }
-        const wsText = wsPing >= 0 ? `${Math.round(wsPing)}ms` : "取得できませんでした";
-        await interaction.editReply(`API: **${apiPing}ms** | WS: **${wsText}**`);
+        await (0, ping_1.handlePing)(interaction);
         return;
     }
     // /sbk

@@ -30,8 +30,14 @@ if (!TOKEN || !CLIENT_ID || GUILD_IDS.length === 0) {
   process.exit(1);
 }
 
-// ---- ここで「/menu」だけを登録（他はUIから呼び出す前提） ----
+// ---- ギルド向けのスラッシュコマンドを登録 ----
 const commands: Array<ReturnType<SlashCommandBuilder["toJSON"]>> = [
+  // /ping 生存確認
+  new SlashCommandBuilder()
+    .setName("ping")
+    .setDescription("BOTが生きているか確認する")
+    .toJSON(),
+
   // /sbk 本体
   new SlashCommandBuilder()
     .setName("sbk")
