@@ -1,8 +1,28 @@
-export function randomInt(min: number, max: number): number {
-  return Math.floor(Math.random() * (max - min + 1)) + min;
+import { randomInt as cryptoRandomInt } from "node:crypto";
+
+function assertSafeInteger(value: number, name: string): void {
+  if (!Number.isSafeInteger(value)) {
+    throw new RangeError(`${name} must be a safe integer`);
+  }
 }
 
-export const RANDOM_REASONS: string[] = [
+export function randomInt(min: number, max: number): number {
+  const normalizedMin = Math.ceil(min);
+  const normalizedMax = Math.floor(max);
+  assertSafeInteger(normalizedMin, "min");
+  assertSafeInteger(normalizedMax, "max");
+
+  if (normalizedMax < normalizedMin) {
+    throw new RangeError("max must be greater than or equal to min");
+  }
+  if (normalizedMax >= Number.MAX_SAFE_INTEGER) {
+    throw new RangeError("max is too large");
+  }
+
+  return cryptoRandomInt(normalizedMin, normalizedMax + 1);
+}
+
+export const RANDOM_REASONS = [
   "気分",
   "ノリ",
   "なんとなく",
@@ -42,8 +62,8 @@ export const RANDOM_REASONS: string[] = [
   "戒め",
   "しつけ",
   "教育的指導",
-];
+] as const;
 
 export function randomReason(): string {
-  return RANDOM_REASONS[Math.floor(Math.random() * RANDOM_REASONS.length)];
+  return RANDOM_REASONS[randomInt(0, RANDOM_REASONS.length - 1)];
 }

@@ -1,20 +1,23 @@
-const BIGINT_RE = /^[+-]?\d+$/;
+const INTEGER_TEXT_PATTERN = /^[+-]?\d+$/u;
 
 export function parseBigIntInput(raw: string): bigint | null {
-  const trimmed = raw.trim();
-  if (!BIGINT_RE.test(trimmed)) return null;
+  const normalized = raw.trim();
+  if (normalized.length === 0 || !INTEGER_TEXT_PATTERN.test(normalized)) {
+    return null;
+  }
+
   try {
-    return BigInt(trimmed);
+    return BigInt(normalized);
   } catch {
     return null;
   }
 }
 
-export function compareBigIntDesc(a: bigint, b: bigint): number {
-  if (a === b) return 0;
-  return a > b ? -1 : 1;
+export function compareBigIntDesc(left: bigint, right: bigint): number {
+  if (left === right) return 0;
+  return left > right ? -1 : 1;
 }
 
 export function formatSignedBigInt(value: bigint): string {
-  return value >= 0n ? `+${value}` : value.toString();
+  return `${value >= 0n ? "+" : ""}${value.toString()}`;
 }

@@ -2,9 +2,17 @@
 import { GuildMember, Message, PermissionFlagsBits } from "discord.js";
 import * as mm from "music-metadata";
 import express from "express";
-import path from "path";
-import fs from "fs";
+import fs from "node:fs";
 import crypto from "node:crypto";
+import path from "node:path";
+import {
+  LavalinkManager,
+  Player,
+  Track,
+  UnresolvedTrack,
+  type SearchResult,
+  type UnresolvedSearchResult,
+} from "lavalink-client";
 import {
   addMusicNgWord,
   clearMusicNgWords,
@@ -15,79 +23,131 @@ import {
 } from "./data";
 
 const PREFIX = "s!";
+const FIXED_VOLUME = 20;
+const MAX_SELECTION_RESULTS = 10;
+const PENDING_SEARCH_TTL_MS = 5 * 60 * 1000;
 
-const MAX_TRACK_MINUTES = Number(process.env.MUSIC_MAX_MINUTES || 15); // デフォ15分
+function parsePositiveInt(raw: string | undefined, fallback: number): number {
+  if (!raw) return fallback;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed < 1) return fallback;
+  return parsed;
+}
+
+function parseCsvIds(raw: string | undefined): string[] {
+  if (!raw) return [];
+  return raw
+    .split(",")
+    .map((token) => token.trim())
+    .filter((token): token is string => token.length > 0);
+}
+
+function getLavalink(message: Message): LavalinkManager<Player> | null {
+  const client = message.client as Message["client"] & {
+    lavalink?: LavalinkManager<Player>;
+  };
+  return client.lavalink ?? null;
+}
+
+function getTrackId(track: Track | UnresolvedTrack | null | undefined): string {
+  return track?.info.identifier ?? track?.encoded ?? "";
+}
+
+function getTrackDurationMs(track: Track | UnresolvedTrack): number {
+  const info = track.info as UnresolvedTrack["info"] & { length?: number };
+  const rawDuration = info.duration ?? info.length ?? 0;
+  return Number(rawDuration);
+}
+
+function isStreamTrack(track: Track | UnresolvedTrack): boolean {
+  return track.info.isStream === true;
+}
+
+function getTrackTitle(track: Track | UnresolvedTrack): string {
+  const title = track.info.title?.trim();
+  return title && title.length > 0 ? title : "Unknown title";
+}
+
+type PendingTrack = Track | UnresolvedTrack;
+type LegacyStoppablePlayer = Player & {
+  stop?: () => Promise<unknown> | unknown;
+};
+type PendingSearch = {
+  tracks: PendingTrack[];
+  query: string;
+  expiresAt: number;
+};
+
+const MAX_TRACK_MINUTES = parsePositiveInt(process.env.MUSIC_MAX_MINUTES, 15); // デフォ15分
 const MAX_TRACK_MS = MAX_TRACK_MINUTES * 60 * 1000;
+const OWNER_IDS = parseCsvIds(process.env.OWNER_IDS);
 
 // ギルドごとの自動停止タイマー（長さ不明対策・上限厳守）
 const autoStopTimers = new Map<string, NodeJS.Timeout>();
-const hookedPlayers = new Set<string>();
+const hookedManagers = new WeakSet<LavalinkManager<Player>>();
 
-function clearAutoStop(guildId: string) {
+function clearAutoStop(guildId: string): void {
   const t = autoStopTimers.get(guildId);
   if (t) clearTimeout(t);
   autoStopTimers.delete(guildId);
 }
 
+function stopPlayerNow(player: Player): void {
+  const legacyPlayer = player as LegacyStoppablePlayer;
+  if (typeof legacyPlayer.stop === "function") {
+    void Promise.resolve(legacyPlayer.stop()).catch(() => undefined);
+    return;
+  }
+  void player.stopPlaying(true, false).catch(() => undefined);
+}
+
 function armAutoStop(
   guildId: string,
-  player: any,
+  player: Player,
   ms: number,
   trackId?: string,
-) {
+): void {
   clearAutoStop(guildId);
   const timeout = setTimeout(() => {
     try {
-      const cur: any = player.current;
-      const curId = cur?.info?.identifier ?? cur?.encoded ?? cur?.track ?? "";
+      const curId = getTrackId(player.queue.current);
       if (!trackId || curId === trackId) {
-        if (player.playing) player.stop();
+        if (player.playing) {
+          stopPlayerNow(player);
+        }
       }
     } catch {}
   }, ms);
   autoStopTimers.set(guildId, timeout);
 }
 
-function hookPlayerOnce(guildId: string, player: any) {
-  if (hookedPlayers.has(guildId)) return;
-  hookedPlayers.add(guildId);
+function hookManagerAutoStopOnce(lavalink: LavalinkManager<Player>): void {
+  if (hookedManagers.has(lavalink)) return;
+  hookedManagers.add(lavalink);
 
-  const on = (player as any)?.on?.bind(player);
-  if (!on) return;
+  lavalink.on("trackStart", (player, track) => {
+    if (!track) {
+      clearAutoStop(player.guildId);
+      return;
+    }
 
-  on("trackStart", (_p: any, track: any) => {
-    try {
-      const lengthMs = Number(track?.info?.length ?? 0);
-      const hasDuration = Number.isFinite(lengthMs) && lengthMs > 0;
-      const trackId =
-        track?.info?.identifier ?? track?.encoded ?? track?.track ?? "";
+    const lengthMs = getTrackDurationMs(track);
+    const hasDuration = Number.isFinite(lengthMs) && lengthMs > 0;
+    const trackId = getTrackId(track);
 
-      if (!hasDuration) {
-        armAutoStop(guildId, player, MAX_TRACK_MS, trackId);
-        return;
-      }
-      armAutoStop(guildId, player, Math.min(lengthMs, MAX_TRACK_MS), trackId);
-    } catch {}
+    if (!hasDuration) {
+      armAutoStop(player.guildId, player, MAX_TRACK_MS, trackId);
+      return;
+    }
+    armAutoStop(player.guildId, player, Math.min(lengthMs, MAX_TRACK_MS), trackId);
   });
 
-  on("queueEnd", () => clearAutoStop(guildId));
-  on("playerDestroy", () => clearAutoStop(guildId));
-  on("trackEnd", () => clearAutoStop(guildId));
+  lavalink.on("queueEnd", (player) => clearAutoStop(player.guildId));
+  lavalink.on("playerDestroy", (player) => clearAutoStop(player.guildId));
+  lavalink.on("trackEnd", (player) => clearAutoStop(player.guildId));
 }
-const OWNER_IDS = (process.env.OWNER_IDS || "")
-  .split(",")
-  .map((s) => s.trim())
-  .filter(Boolean);
-const MAX_SELECTION_RESULTS = 10;
-const PENDING_SEARCH_TTL_MS = 5 * 60 * 1000;
-const pendingSearches = new Map<
-  string,
-  {
-    tracks: any[];
-    query: string;
-    expiresAt: number;
-  }
->();
+
+const pendingSearches = new Map<string, PendingSearch>();
 // ===== ファイルアップロード用の簡易サーバー設定 =====
 const UPLOAD_DIR = path.resolve(process.env.FILE_DIR || "./files");
 //サーバー起動
@@ -126,7 +186,7 @@ function makePendingKey(message: Message) {
   return `${message.guildId}:${message.author.id}`;
 }
 
-function getPendingSearch(message: Message) {
+function getPendingSearch(message: Message): PendingSearch | null {
   const key = makePendingKey(message);
   const pending = pendingSearches.get(key);
   if (!pending) return null;
@@ -137,7 +197,11 @@ function getPendingSearch(message: Message) {
   return pending;
 }
 
-function setPendingSearch(message: Message, tracks: any[], query: string) {
+function setPendingSearch(
+  message: Message,
+  tracks: PendingTrack[],
+  query: string,
+): void {
   const key = makePendingKey(message);
   pendingSearches.set(key, {
     tracks,
@@ -146,7 +210,7 @@ function setPendingSearch(message: Message, tracks: any[], query: string) {
   });
 }
 
-function clearPendingSearch(message: Message) {
+function clearPendingSearch(message: Message): void {
   pendingSearches.delete(makePendingKey(message));
 }
 
@@ -177,14 +241,92 @@ function getAttachmentNameFromUrl(url: string) {
   }
 }
 
-function pickAttachmentName(att: { name?: string | null; url: string }) {
-  // まずは discord.js の name を信じる（これが一番正しいことが多い）
+function pickAttachmentName(att: {
+  title?: string | null;
+  name?: string | null;
+  url: string;
+}) {
+  // title は特殊文字ファイル名のときに Discord が保持する表示名
+  const fromTitle = decodeAttachmentName(att.title ?? "");
+  if (fromTitle) return fromTitle;
+
+  // 次点で discord.js の name
   const fromName = decodeAttachmentName(att.name ?? "");
   if (fromName) return fromName;
 
   // name が空のときだけ URL から拾う
   const fromUrl = getAttachmentNameFromUrl(att.url);
   return fromUrl || "upload";
+}
+
+function stripOptionalQuotes(value: string): string {
+  const trimmed = value.trim();
+  if (
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  ) {
+    return trimmed.slice(1, -1);
+  }
+  return trimmed;
+}
+
+function getAttachmentNameFromContentDisposition(
+  contentDisposition: string | null,
+): string | null {
+  if (!contentDisposition) return null;
+
+  const extendedMatch = contentDisposition.match(/filename\*\s*=\s*([^;]+)/iu);
+  if (extendedMatch?.[1]) {
+    const token = stripOptionalQuotes(extendedMatch[1]);
+    const parts = token.split("''", 2);
+    const encoded = parts.length === 2 ? parts[1] : token;
+    try {
+      return decodeAttachmentName(decodeURIComponent(encoded));
+    } catch {
+      return decodeAttachmentName(encoded);
+    }
+  }
+
+  const plainMatch = contentDisposition.match(/filename\s*=\s*([^;]+)/iu);
+  if (plainMatch?.[1]) {
+    return decodeAttachmentName(stripOptionalQuotes(plainMatch[1]));
+  }
+
+  return null;
+}
+
+function ensureFileExtension(filename: string, ext: string): string {
+  if (!ext) return filename;
+  return filename.toLowerCase().endsWith(ext) ? filename : `${filename}${ext}`;
+}
+
+function toDisplayTrackTitleFromFilename(filename: string): string {
+  const parsed = path.parse(filename);
+  const fromStem = parsed.name.trim();
+  if (fromStem) return fromStem;
+
+  const fromRaw = filename.trim();
+  return fromRaw || "upload";
+}
+
+function isLikelyOpaqueTitle(title: string): boolean {
+  const normalized = title.trim().toLowerCase();
+  if (!normalized) return true;
+  if (normalized === "unknown" || normalized === "unknown title") return true;
+
+  const withoutExt = normalized.replace(/\.[a-z0-9]{2,5}$/iu, "");
+  if (/^[0-9a-f]{16,}$/iu.test(withoutExt)) return true;
+  if (/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/iu.test(withoutExt)) {
+    return true;
+  }
+
+  return false;
+}
+
+function shouldPreferMetadataTitle(filenameTitle: string): boolean {
+  const normalized = filenameTitle.trim().toLowerCase();
+  if (normalized === "upload" || normalized === "file") return true;
+  return isLikelyOpaqueTitle(filenameTitle);
 }
 
 function normalizeYouTubeShortsUrl(input: string) {
@@ -336,9 +478,12 @@ export async function handleMusicMessage(message: Message) {
   if (message.author.bot) return;
   if (!message.content.startsWith(PREFIX)) return;
 
-  const client: any = message.client as any;
-  const lavalink = client.lavalink;
+  const lavalink = getLavalink(message);
   if (!lavalink) return;
+  hookManagerAutoStopOnce(lavalink);
+
+  const guildId = message.guildId;
+  if (!guildId) return;
 
   const [cmd, ...rest] = message.content
     .slice(PREFIX.length)
@@ -353,7 +498,7 @@ export async function handleMusicMessage(message: Message) {
     command !== "d" &&
     command !== "e"
   ) {
-    if (!getMusicEnabled(message.guildId!)) {
+    if (!getMusicEnabled(guildId)) {
       await message.reply(
         "⚠️ 音楽機能が無効化されています。管理者権限で `s!enable` で有効化してください。",
       );
@@ -399,7 +544,7 @@ export async function handleMusicMessage(message: Message) {
     } else if (command === "queue") {
       await handleQueue(message);
     } else if (command === "upload") {
-      await handleUpload(message);
+      await handleUpload(message, rest.join(" ").trim());
     } else if (command === "ng" || command === "ngword") {
       await handleNgWordCommand(message, rest);
     } else if (command === "help") {
@@ -409,7 +554,7 @@ export async function handleMusicMessage(message: Message) {
           "`s!skip` - 曲をスキップ\n" +
           "`s!stop` - 再生を停止し、VCから退出\n" +
           "`s!queue` - 再生中・キュー中の曲一覧を表示\n" +
-          "`s!upload` - 音楽ファイルをアップロードして再生（対応形式: mp3, wav, flac, m4a, aac, ogg）\n" +
+          "`s!upload [表示名]` - 音楽ファイルをアップロードして再生（対応形式: mp3, wav, flac, m4a, aac, ogg）\n" +
           "`s!ng <サブコマンド>` - 音楽NGワード管理コマンド（管理者のみ）\n" +
           "（例: `s!ng add <ワード>` / `s!ng remove <ワード>` / `s!ng list` / `s!ng clear`）\n" +
           "`s!disable` (s!d) - 音楽機能を無効化（管理者のみ）\n" +
@@ -434,14 +579,16 @@ export async function handleMusicMessage(message: Message) {
  * このギルド用の Lavalink Player を取得 or 作成
  */
 async function getOrCreatePlayer(message: Message, voiceChannelId: string) {
-  const client: any = message.client as any;
-  const lavalink = client.lavalink;
-  const guildId = message.guildId!;
-  const FIXED_VOLUME = 20; // デフォルト固定音量（ユーザー個別設定は play 時に反映）
+  const lavalink = getLavalink(message);
+  const guildId = message.guildId;
+  if (!lavalink || !guildId) {
+    throw new Error("Lavalink is not ready for this message");
+  }
+
   let player = lavalink.players.get(guildId);
 
   if (!player) {
-    player = await lavalink.createPlayer({
+    player = lavalink.createPlayer({
       guildId,
       voiceChannelId,
       textChannelId: message.channelId,
@@ -452,12 +599,9 @@ async function getOrCreatePlayer(message: Message, voiceChannelId: string) {
 
     await player.connect();
   } else if (player.voiceChannelId !== voiceChannelId) {
-    await player.updateVoiceChannel(voiceChannelId);
+    await player.changeVoiceState({ voiceChannelId });
     if (!player.connected) await player.connect();
   }
-
-  // ★ 各プレイヤーにイベントフック（自動停止タイマー）
-  hookPlayerOnce(guildId, player);
 
   return player;
 }
@@ -469,18 +613,17 @@ async function handlePlay(
   options?: {
     titleFallback?: string;
     forceTitle?: boolean;
-    selectedTrack?: any;
+    selectedTrack?: PendingTrack;
   },
-) {
+): Promise<void> {
   const member = message.member as GuildMember | null;
   const voice = member?.voice?.channel;
+  const guildId = message.guildId;
   if (!voice) {
     await message.reply("⚠️ 先にボイスチャンネルに参加してください。");
     return;
   }
-
-  const client: any = message.client as any;
-  const lavalink = client.lavalink;
+  if (!guildId) return;
 
   const player = await getOrCreatePlayer(message, voice.id);
 
@@ -488,19 +631,18 @@ async function handlePlay(
   // ✅ 音量は常に 20 に固定する
   // （ユーザー別/DBの音量は使わない）
   // ============================
-  const FIXED_VOLUME = 20;
   try {
     await player.setVolume(FIXED_VOLUME);
   } catch (e) {
     console.warn("[music] setVolume error (play)", e);
   }
 
-  let track: any = options?.selectedTrack;
+  let track: PendingTrack | undefined = options?.selectedTrack;
 
   const isHttpUrl = /^https?:\/\//i.test(query);
   const normalizedQuery = isHttpUrl ? normalizeYouTubeShortsUrl(query) : query;
   if (!track) {
-    let result: any;
+    let result: SearchResult | UnresolvedSearchResult | null = null;
     // ★URLかキーワードかで searchQuery を確定させる
     const searchQuery = isHttpUrl
       ? normalizedQuery
@@ -520,12 +662,12 @@ async function handlePlay(
     if (!isHttpUrl) {
       const selectionTracks = result.tracks.slice(0, MAX_SELECTION_RESULTS);
       setPendingSearch(message, selectionTracks, query);
-      const lines = selectionTracks.map((t: any, i: number) => {
-        const title = t.info?.title ?? "Unknown title";
-        const author = t.info?.author ? ` - ${t.info.author}` : "";
-        const duration = formatTrackDuration(Number(t.info?.length ?? 0));
+      const lines = selectionTracks.map((candidate, index) => {
+        const title = getTrackTitle(candidate);
+        const author = candidate.info.author ? ` - ${candidate.info.author}` : "";
+        const duration = formatTrackDuration(getTrackDurationMs(candidate));
         const durationText = duration ? ` (${duration})` : "";
-        return `${i + 1}. ${title}${author}${durationText}`;
+        return `${index + 1}. ${title}${author}${durationText}`;
       });
       await message.reply(
         `🔎 いくつか候補が見つかったよ。この中から選んでね。ない場合はURLで再生してみて。\n` +
@@ -544,31 +686,8 @@ async function handlePlay(
     return;
   }
 
-  const lengthMs = Number(track.info?.duration ?? track.info?.length ?? 0);
-
-
-  const searchQuery = isHttpUrl
-    ? normalizedQuery
-    : `ytsearch:${normalizedQuery}`;
-
-  const result = await player.search({ query: searchQuery }, message.author);
-
-  //console.log(
-   // "[music] title=",
-    //track.info?.title,
-    //"length=",
-    //track.info?.length,
-    //"duration=",
-    //(track.info as any)?.duration,
-    //"track.length=",
-    //(track as any)?.length,
-    //"isStream=",
-    //(track.info as any)?.isStream,
-  //);
-
-  const rawIsStream = (track.info as any)?.isStream ?? (track as any)?.isStream;
-  const isStream =
-    rawIsStream === true || rawIsStream === "true" || rawIsStream === 1;
+  const lengthMs = getTrackDurationMs(track);
+  const isStream = isStreamTrack(track);
   const hasDuration = Number.isFinite(lengthMs) && lengthMs > 0;
   const shouldBlockStream = isStream && !hasDuration;
 
@@ -602,7 +721,7 @@ async function handlePlay(
     return;
   }
 
-  const ngWords = getMusicNgWords(message.guildId!);
+  const ngWords = getMusicNgWords(guildId);
   const ngMatch = findNgWordMatch(
     [track.info?.title, track.info?.author],
     ngWords,
@@ -613,52 +732,56 @@ async function handlePlay(
   }
 
   await player.queue.add(track);
+  const displayTitle = getTrackTitle(track);
 
   if (!player.playing && !player.paused) {
     await player.play();
     if (!hasDuration) {
       await message.reply(
-        `▶ 再生開始: **${track.info.title}**（音量: ${FIXED_VOLUME}）\n` +
+        `▶ 再生開始: **${displayTitle}**（音量: ${FIXED_VOLUME}）\n` +
           `⚠️ 曲の長さを取得できないため、最大 ${MAX_TRACK_MINUTES} 分で自動停止します。`,
       );
     } else {
       await message.reply(
-        `▶ 再生開始: **${track.info.title}**（音量: ${FIXED_VOLUME}）`,
+        `▶ 再生開始: **${displayTitle}**（音量: ${FIXED_VOLUME}）`,
       );
     }
   } else {
     const pos = player.queue.tracks.length;
     await message.reply(
-      `⏱ キューに追加しました: **${track.info.title}**（位置: ${pos}）`,
+      `⏱ キューに追加しました: **${displayTitle}**（位置: ${pos}）`,
     );
   }
 }
 
 /* ---------- s!skip ---------- */
-async function handleSkip(message: Message) {
-  const client: any = message.client as any;
-  const lavalink = client.lavalink;
-  const guildId = message.guildId!;
+async function handleSkip(message: Message): Promise<void> {
+  const lavalink = getLavalink(message);
+  const guildId = message.guildId;
+  if (!lavalink || !guildId) return;
 
   const player = lavalink.players.get(guildId);
-  const hasNext =
-    player && (player.current || (player.queue?.tracks?.length ?? 0) > 0);
+  const hasPlayableTrack =
+    player &&
+    (Boolean(player.queue.current) || (player.queue?.tracks?.length ?? 0) > 0);
 
-  if (!hasNext) {
+  if (!hasPlayableTrack) {
     await message.reply("⏹ スキップできる曲がありません。");
     return;
   }
 
   clearAutoStop(guildId);
-  await player.skip();
+  // lavalink-client は「次キュー0件 + throwError=true」で RangeError を投げるため、
+  // 最後の1曲だけ再生中でも安全にスキップできるよう throwError=false で呼ぶ。
+  await player.skip(0, false);
   await message.reply("⏭ 曲をスキップしました。");
 }
 
 /* ---------- s!stop ---------- */
-async function handleStop(message: Message) {
-  const client: any = message.client as any;
-  const lavalink = client.lavalink;
-  const guildId = message.guildId!;
+async function handleStop(message: Message): Promise<void> {
+  const lavalink = getLavalink(message);
+  const guildId = message.guildId;
+  if (!lavalink || !guildId) return;
 
   const player = lavalink.players.get(guildId);
   if (!player) {
@@ -672,10 +795,10 @@ async function handleStop(message: Message) {
 }
 
 /* ---------- s!queue ---------- */
-async function handleQueue(message: Message) {
-  const client: any = message.client as any;
-  const lavalink = client.lavalink;
-  const guildId = message.guildId!;
+async function handleQueue(message: Message): Promise<void> {
+  const lavalink = getLavalink(message);
+  const guildId = message.guildId;
+  if (!lavalink || !guildId) return;
 
   const player = lavalink.players.get(guildId);
   if (!player) {
@@ -683,7 +806,7 @@ async function handleQueue(message: Message) {
     return;
   }
 
-  const current = player.current;
+  const current = player.queue.current;
   const tracks = player.queue?.tracks ?? [];
 
   if (!current && !tracks.length) {
@@ -696,7 +819,9 @@ async function handleQueue(message: Message) {
   if (tracks.length) {
     lines.push("", "📃 キュー:");
     lines.push(
-      ...tracks.map((t: any, i: number) => `${i + 1}. **${t.info.title}**`),
+      ...tracks.map(
+        (track, index) => `${index + 1}. **${getTrackTitle(track)}**`,
+      ),
     );
   }
 
@@ -705,7 +830,8 @@ async function handleQueue(message: Message) {
 
 /* ---------- s!ng ---------- */
 async function handleNgWordCommand(message: Message, args: string[]) {
-  if (!message.guildId) {
+  const guildId = message.guildId;
+  if (!guildId) {
     await message.reply("⚠️ サーバー内でのみ使用できます。");
     return;
   }
@@ -725,7 +851,7 @@ async function handleNgWordCommand(message: Message, args: string[]) {
   }
 
   if (sub === "list") {
-    const list = getMusicNgWords(message.guildId);
+    const list = getMusicNgWords(guildId);
     if (!list.length) {
       await message.reply("📭 NGワードは登録されていません。");
       return;
@@ -746,7 +872,7 @@ async function handleNgWordCommand(message: Message, args: string[]) {
       await message.reply("⚠️ 追加するワードを指定してください。");
       return;
     }
-    const result = addMusicNgWord(message.guildId!, word);
+    const result = addMusicNgWord(guildId, word);
     await message.reply(
       result.added
         ? `✅ NGワードを追加しました: **${word}**`
@@ -761,7 +887,7 @@ async function handleNgWordCommand(message: Message, args: string[]) {
       await message.reply("⚠️ 削除するワードを指定してください。");
       return;
     }
-    const result = removeMusicNgWord(message.guildId!, word);
+    const result = removeMusicNgWord(guildId, word);
     await message.reply(
       result.removed
         ? `✅ NGワードを削除しました: **${word}**`
@@ -771,7 +897,7 @@ async function handleNgWordCommand(message: Message, args: string[]) {
   }
 
   if (sub === "clear") {
-    clearMusicNgWords(message.guildId!);
+    clearMusicNgWords(guildId);
     await message.reply("✅ NGワードをすべて削除しました。");
     return;
   }
@@ -782,7 +908,7 @@ async function handleNgWordCommand(message: Message, args: string[]) {
 }
 
 /* ---------- s!upload ---------- */
-async function handleUpload(message: Message) {
+async function handleUpload(message: Message, customTitleRaw?: string) {
   if (!message.guildId) {
     await message.reply("⚠️ サーバー内でのみ使用できます。");
     return;
@@ -809,8 +935,8 @@ async function handleUpload(message: Message) {
     return;
   }
 
-  const originalName = pickAttachmentName(att);
-  let ext = path.extname(originalName).toLowerCase();
+  const attachmentName = pickAttachmentName(att);
+  let ext = path.extname(attachmentName).toLowerCase();
   if (!ext && att.contentType) {
     ext = contentTypeToExt[att.contentType] ?? "";
   }
@@ -818,14 +944,21 @@ async function handleUpload(message: Message) {
     await message.reply(`⚠️ 対応形式は **${allowedExtsLabel}** です。`);
     return;
   }
-  const displayName = ext
-    ? originalName.toLowerCase().endsWith(ext)
-      ? originalName
-      : `${originalName}${ext}`
-    : originalName;
+  const initialDisplayName = ensureFileExtension(attachmentName, ext);
 
   const ngWords = getMusicNgWords(message.guildId);
-  const ngMatch = findNgWordMatch([displayName], ngWords);
+  const customTitle = customTitleRaw?.trim() ?? "";
+  if (customTitle) {
+    const customTitleNg = findNgWordMatch([customTitle], ngWords);
+    if (customTitleNg) {
+      await message.reply(
+        "🚫 指定した表示名はNGワードが含まれているため使用できません。",
+      );
+      return;
+    }
+  }
+
+  const ngMatch = findNgWordMatch([initialDisplayName], ngWords);
   if (ngMatch) {
     await message.reply(
       "🚫 このファイル名はNGワードが含まれているためアップロードできません。",
@@ -845,15 +978,54 @@ async function handleUpload(message: Message) {
     if (!res.ok)
       throw new Error(`download failed: ${res.status} ${res.statusText}`);
 
+    let displayName = initialDisplayName;
+    const headerName = getAttachmentNameFromContentDisposition(
+      res.headers.get("content-disposition"),
+    );
+    if (headerName) {
+      const headerDisplayName = ensureFileExtension(headerName, ext);
+      const currentTitle = toDisplayTrackTitleFromFilename(displayName);
+      const headerTitle = toDisplayTrackTitleFromFilename(headerDisplayName);
+      if (!isLikelyOpaqueTitle(headerTitle) || isLikelyOpaqueTitle(currentTitle)) {
+        displayName = headerDisplayName;
+      }
+    }
+
+    if (displayName !== initialDisplayName) {
+      const ngMatchFromHeader = findNgWordMatch([displayName], ngWords);
+      if (ngMatchFromHeader) {
+        await message.reply(
+          "🚫 このファイル名はNGワードが含まれているためアップロードできません。",
+        );
+        return;
+      }
+    }
+
     const buf = Buffer.from(await res.arrayBuffer());
-    let playbackTitle = displayName;
+    const filenameTitle = toDisplayTrackTitleFromFilename(displayName);
+    let playbackTitle = customTitle || filenameTitle;
+    let metadataTitle: string | null = null;
 
     try {
       const meta = await mm.parseBuffer(buf, att.contentType ?? undefined);
       const title = meta.common.title?.trim();
-      if (title) playbackTitle = title;
-    } catch (e) {
-      // メタ取得失敗しても無視でOK
+      if (title) metadataTitle = title;
+      if (!metadataTitle) {
+        const id3Title = getId3TitleFromBuffer(buf)?.trim();
+        if (id3Title) metadataTitle = id3Title;
+      }
+    } catch {
+      const id3Title = getId3TitleFromBuffer(buf)?.trim();
+      if (id3Title) metadataTitle = id3Title;
+    }
+
+    if (
+      metadataTitle &&
+      !customTitle &&
+      shouldPreferMetadataTitle(filenameTitle) &&
+      !isLikelyOpaqueTitle(metadataTitle)
+    ) {
+      playbackTitle = metadataTitle;
     }
 
     fs.writeFileSync(savePath, buf);
@@ -888,9 +1060,9 @@ async function handleUpload(message: Message) {
   }
 }
 async function handleRemoveCommand(message: Message, rest: string[]) {
-  const client: any = message.client as any;
-  const lavalink = client.lavalink;
-  const guildId = message.guildId!;
+  const lavalink = getLavalink(message);
+  const guildId = message.guildId;
+  if (!lavalink || !guildId) return;
 
   const player = lavalink.players.get(guildId);
   if (!player || !player.queue?.tracks?.length) {
@@ -915,7 +1087,11 @@ async function handleRemoveCommand(message: Message, rest: string[]) {
   }
 
   const removed = player.queue.tracks.splice(index, 1)[0];
-  await message.reply(`🗑 キューから削除しました: **${removed.info.title}**`);
+  if (!removed) {
+    await message.reply("⚠️ 指定した曲を削除できませんでした。");
+    return;
+  }
+  await message.reply(`🗑 キューから削除しました: **${getTrackTitle(removed)}**`);
 }
 
 /* ---------- s!disable (s!d) ---------- */

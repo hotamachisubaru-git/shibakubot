@@ -1,6 +1,6 @@
 // src/data.ts
-import fs from "fs";
-import path from "path";
+import fs from "node:fs";
+import path from "node:path";
 import Database from "better-sqlite3";
 
 // メダル用（非同期 sqlite）
@@ -8,6 +8,7 @@ import sqlite3 from "sqlite3";
 import { open, Database as SqliteDatabase } from "sqlite";
 
 export type CounterMap = Record<string, bigint>;
+export type SbkRange = { min: number; max: number };
 export type SbkLogRow = {
   id: number;
   at: number;
@@ -50,6 +51,11 @@ function toBigIntInput(value: bigint | number): bigint {
 
 function toDbText(value: bigint): string {
   return value.toString();
+}
+
+function parseSettingBoolean(raw: string | null, fallback: boolean): boolean {
+  if (raw === null) return fallback;
+  return raw.toLowerCase() === "true";
 }
 
 // ---------- パス系 ----------
@@ -179,7 +185,7 @@ function ensureSchema(db: Database.Database) {
 }
 
 // ---------- DB open (これだけを使う) ----------
-export function openDb(gid: string) {
+export function openDb(gid: string): Database.Database {
   const db = new Database(dbPath(gid));
   db.pragma("journal_mode = WAL");
   ensureSchema(db);
@@ -343,7 +349,7 @@ export function setSetting(gid: string, key: string, value: string | null) {
   ).run(key, value);
 }
 
-export function getSbkRange(gid: string): { min: number; max: number } {
+export function getSbkRange(gid: string): SbkRange {
   const db = openDb(gid);
   const minRow = db
     .prepare(`SELECT value FROM settings WHERE key=?`)
@@ -474,9 +480,7 @@ export function clearMusicNgWords(gid: string): void {
 const MUSIC_ENABLED_KEY = "musicEnabled";
 
 export function getMusicEnabled(gid: string): boolean {
-  const raw = getSetting(gid, MUSIC_ENABLED_KEY);
-  if (!raw) return true; // デフォルト有効
-  return raw.toLowerCase() === "true";
+  return parseSettingBoolean(getSetting(gid, MUSIC_ENABLED_KEY), true);
 }
 
 export function setMusicEnabled(gid: string, enabled: boolean): void {
@@ -487,23 +491,21 @@ export function setMusicEnabled(gid: string, enabled: boolean): void {
 const MAINTENANCE_KEY = "maintenanceEnabled";
 
 export function getMaintenanceEnabled(gid: string): boolean {
-  const raw = getSetting(gid, MAINTENANCE_KEY);
-  if (!raw) return false; // デフォルト無効
-  return raw.toLowerCase() === "true";
+  return parseSettingBoolean(getSetting(gid, MAINTENANCE_KEY), false);
 }
 
 export function setMaintenanceEnabled(gid: string, enabled: boolean): void {
   setSetting(gid, MAINTENANCE_KEY, enabled ? "true" : "false");
 }
 
-export function setSbkRange(gid: string, min: number, max: number) {
+export function setSbkRange(gid: string, min: number, max: number): SbkRange {
   const db = openDb(gid);
 
-  if (!Number.isFinite(min) || min < 1) min = SBK_MIN_DEFAULT;
-  if (!Number.isFinite(max) || max < min) max = min;
-
-  min = Math.floor(min);
-  max = Math.floor(max);
+  const normalizedMin =
+    Number.isFinite(min) && min >= 1 ? Math.floor(min) : SBK_MIN_DEFAULT;
+  const normalizedMaxCandidate =
+    Number.isFinite(max) ? Math.floor(max) : normalizedMin;
+  const normalizedMax = Math.max(normalizedMin, normalizedMaxCandidate);
 
   db.transaction(() => {
     db.prepare(
@@ -511,20 +513,24 @@ export function setSbkRange(gid: string, min: number, max: number) {
       INSERT INTO settings(key, value) VALUES(?, ?)
       ON CONFLICT(key) DO UPDATE SET value=excluded.value
     `,
-    ).run(SBK_MIN_KEY, String(min));
+    ).run(SBK_MIN_KEY, String(normalizedMin));
     db.prepare(
       `
       INSERT INTO settings(key, value) VALUES(?, ?)
       ON CONFLICT(key) DO UPDATE SET value=excluded.value
     `,
-    ).run(SBK_MAX_KEY, String(max));
+    ).run(SBK_MAX_KEY, String(normalizedMax));
   })();
 
-  return { min, max };
+  return { min: normalizedMin, max: normalizedMax };
 }
 
 // ---------- 互換ラッパ ----------
-export function loadGuildStore(gid: string) {
+export function loadGuildStore(gid: string): {
+  counts: CounterMap;
+  immune: string[];
+  settings: { sbkMin: number; sbkMax: number };
+} {
   const { min, max } = getSbkRange(gid);
   return {
     counts: getAllCounts(gid),

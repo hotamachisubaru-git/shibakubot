@@ -1,6 +1,15 @@
-import { ChannelType, ChatInputCommandInteraction } from "discord.js";
+import { ChannelType, type ChatInputCommandInteraction } from "discord.js";
 
-export async function handleSuimin(interaction: ChatInputCommandInteraction) {
+function isVoiceDestination(channelType: ChannelType): boolean {
+  return (
+    channelType === ChannelType.GuildVoice ||
+    channelType === ChannelType.GuildStageVoice
+  );
+}
+
+export async function handleSuimin(
+  interaction: ChatInputCommandInteraction,
+): Promise<void> {
   if (!interaction.inGuild()) {
     await interaction.reply({
       content: "サーバー内で使ってね。",
@@ -9,13 +18,19 @@ export async function handleSuimin(interaction: ChatInputCommandInteraction) {
     return;
   }
 
-  const targetUser = interaction.options.getUser("user", true);
-  const dest = interaction.options.getChannel("channel", true);
+  const guild = interaction.guild;
+  if (!guild) {
+    await interaction.reply({
+      content: "サーバー情報を取得できませんでした。",
+      ephemeral: true,
+    });
+    return;
+  }
 
-  if (
-    dest.type !== ChannelType.GuildVoice &&
-    dest.type !== ChannelType.GuildStageVoice
-  ) {
+  const targetUser = interaction.options.getUser("user", true);
+  const destination = interaction.options.getChannel("channel", true);
+
+  if (!isVoiceDestination(destination.type)) {
     await interaction.reply({
       content: "移動先はボイスチャンネルを指定してください。",
       ephemeral: true,
@@ -25,9 +40,7 @@ export async function handleSuimin(interaction: ChatInputCommandInteraction) {
 
   await interaction.deferReply({ ephemeral: true });
 
-  const member = await interaction.guild!.members
-    .fetch(targetUser.id)
-    .catch(() => null);
+  const member = await guild.members.fetch(targetUser.id).catch(() => null);
   if (!member) {
     await interaction.editReply({
       content: "指定ユーザーが見つかりませんでした。",
@@ -35,14 +48,14 @@ export async function handleSuimin(interaction: ChatInputCommandInteraction) {
     return;
   }
 
-  if (!member.voice?.channelId) {
+  if (!member.voice.channelId) {
     await interaction.editReply({
       content: "対象ユーザーはVCに参加していません。",
     });
     return;
   }
 
-  if (member.voice.channelId === dest.id) {
+  if (member.voice.channelId === destination.id) {
     await interaction.editReply({
       content: "すでにそのVCに参加しています。",
     });
@@ -50,13 +63,13 @@ export async function handleSuimin(interaction: ChatInputCommandInteraction) {
   }
 
   try {
-    await member.voice.setChannel(dest.id);
+    await member.voice.setChannel(destination.id);
     await interaction.editReply({
-      content: `✅ ${member.displayName} を <#${dest.id}> に移動しました。`,
+      content: `✅ ${member.displayName} を <#${destination.id}> に移動しました。`,
       allowedMentions: { parse: [] },
     });
-  } catch (err) {
-    console.error("[/suimin] move failed", err);
+  } catch (error) {
+    console.error("[/suimin] move failed", error);
     await interaction.editReply({
       content: "❌ 移動に失敗しました。権限や接続状況を確認してください。",
     });

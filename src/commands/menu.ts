@@ -52,15 +52,21 @@ import {
 } from "../utils/bigint";
 import { fetchGuildMembersSafe } from "../utils/memberFetch";
 
+type GuildScopedInteraction = ChatInputCommandInteraction | ButtonInteraction;
+type PanelMessage = Awaited<ReturnType<ButtonInteraction["fetchReply"]>>;
+
 /* ===== 設定 ===== */
-const OWNER_IDS = (process.env.OWNER_IDS || "")
-  .split(",")
-  .map((s) => s.trim())
-  .filter(Boolean);
-const IMMUNE_IDS = (process.env.IMMUNE_IDS || "")
-  .split(",")
-  .map((s) => s.trim())
-  .filter(Boolean);
+function parseCsvIds(raw: string | undefined): ReadonlySet<string> {
+  return new Set(
+    (raw ?? "")
+      .split(",")
+      .map((value) => value.trim())
+      .filter((value): value is string => value.length > 0),
+  );
+}
+
+const OWNER_IDS = parseCsvIds(process.env.OWNER_IDS);
+const IMMUNE_IDS = parseCsvIds(process.env.IMMUNE_IDS);
 const PAGE_SIZE = 10;
 const AUDIT_LIMIT = 10;
 const BACKUP_LIST_LIMIT = 5;
@@ -70,6 +76,7 @@ const GUILD_DB_ROOT = path.join(DATA_ROOT, "guilds");
 const MEDAL_DB_PATH = path.join(DATA_ROOT, "medalbank.db");
 const BACKUP_ROOT = path.join(process.cwd(), "backup");
 const EMBED_DESC_LIMIT = 4096; // ← ここは自由に変更OK
+const UNKNOWN_GUILD_MESSAGE = "⚠️ サーバー情報を取得できませんでした。";
 
 
 function joinLinesWithLimitOrNull(
@@ -111,10 +118,52 @@ function buildTooLongEmbed(title: string, actual: number, limit: number) {
     );
 }
 
-async function guildTopEmbed(
-  i: ChatInputCommandInteraction | ButtonInteraction,
-) {
-  const gid = i.guildId!;
+function safeSignedBigInt(value: bigint): string {
+  const sign = value < 0n ? "-" : "+";
+  const abs = value < 0n ? -value : value;
+  return sign + safeCount(abs, 16);
+}
+
+function getGuildId(interaction: GuildScopedInteraction): string | null {
+  return interaction.guildId;
+}
+
+function getGuildOrNull(interaction: GuildScopedInteraction) {
+  return interaction.guild;
+}
+
+function resolveCollectorChannel(interaction: ButtonInteraction) {
+  const channel = interaction.channel;
+  if (!channel) {
+    throw new Error("message component channel is unavailable");
+  }
+  return channel;
+}
+
+async function clearPanelComponents(panel: PanelMessage): Promise<void> {
+  try {
+    await panel.edit({ components: [] });
+  } catch {
+    // noop
+  }
+}
+
+function pickUnionValue<T extends string>(
+  value: string | undefined,
+  allowed: readonly T[],
+): T | null {
+  if (!value) return null;
+  return (allowed as readonly string[]).includes(value) ? (value as T) : null;
+}
+
+async function guildTopEmbed(i: GuildScopedInteraction): Promise<EmbedBuilder> {
+  const gid = getGuildId(i);
+  if (!gid) {
+    return new EmbedBuilder()
+      .setTitle("しばきランキング")
+      .setDescription(UNKNOWN_GUILD_MESSAGE);
+  }
+
   const store = loadGuildStore(gid);
   const entries = Object.entries(store.counts);
 
@@ -154,11 +203,18 @@ async function guildTopEmbed(
 }
 
 async function guildMembersEmbed(
-  i: ChatInputCommandInteraction | ButtonInteraction,
-) {
-  const gid = i.guildId!;
+  i: GuildScopedInteraction,
+): Promise<EmbedBuilder> {
+  const gid = getGuildId(i);
+  const guild = getGuildOrNull(i);
+  if (!gid || !guild) {
+    return new EmbedBuilder()
+      .setTitle("メンバー一覧")
+      .setDescription(UNKNOWN_GUILD_MESSAGE);
+  }
+
   const store = loadGuildStore(gid);
-  const { members } = await fetchGuildMembersSafe(i.guild!);
+  const { members } = await fetchGuildMembersSafe(guild);
   const humans = members.filter((m) => !m.user.bot);
 
   const rows = await Promise.all(
@@ -338,10 +394,10 @@ function looksLikeSnowflake(value: string): boolean {
 async function requireAdminOrDev(
   i: MessageComponentInteraction,
   message = "この操作は管理者/開発者のみ利用できます。",
-) {
+): Promise<boolean> {
   const isAdmin =
     i.memberPermissions?.has(PermissionFlagsBits.Administrator) ?? false;
-  const isDev = OWNER_IDS.includes(i.user.id);
+  const isDev = OWNER_IDS.has(i.user.id);
   if (!isAdmin && !isDev) {
     await i.reply({ content: `⚠️ ${message}`, ephemeral: true });
     return false;
@@ -353,7 +409,7 @@ async function showModalAndAwait(
   interactor: MessageComponentInteraction,
   modal: ModalBuilder,
   time = 60_000,
-) {
+): Promise<ModalSubmitInteraction | null> {
   await interactor.showModal(modal);
   return interactor
     .awaitModalSubmit({
@@ -365,13 +421,13 @@ async function showModalAndAwait(
 
 function createPanelCollector(
   interaction: ButtonInteraction,
-  panel: any,
+  panel: PanelMessage,
   time = 60_000,
 ) {
-  return interaction.channel!.createMessageComponentCollector({
+  return resolveCollectorChannel(interaction).createMessageComponentCollector({
     time,
     filter: (i) =>
-      i.user.id === interaction.user.id && i.message.id === (panel as any).id,
+      i.user.id === interaction.user.id && i.message.id === panel.id,
   });
 }
 
@@ -535,7 +591,9 @@ function buildMenu(min: number, max: number, page: number = 1) {
 }
 
 /* ===== /menu メイン ===== */
-export async function handleMenu(interaction: ChatInputCommandInteraction) {
+export async function handleMenu(
+  interaction: ChatInputCommandInteraction,
+): Promise<void> {
   if (!interaction.inGuild()) {
     await interaction.reply({
       content: "⚠️ このコマンドはサーバー内でのみ使用できます。",
@@ -544,7 +602,15 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
     return;
   }
 
-  const gid = interaction.guildId!;
+  const gid = interaction.guildId;
+  if (!gid) {
+    await interaction.reply({
+      content: UNKNOWN_GUILD_MESSAGE,
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
   let { min: sbkMin, max: sbkMax } = getSbkRange(gid);
 
   // 現在ページ（1 = 基本）
@@ -563,11 +629,20 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
   // ★ メッセージオブジェクトは別途取得
   const msg = await interaction.fetchReply();
 
-  const collector = interaction.channel!.createMessageComponentCollector({
+  const channel = interaction.channel;
+  if (!channel) {
+    await interaction.editReply({
+      content: "⚠️ チャンネル情報を取得できませんでした。",
+      components: [],
+    });
+    return;
+  }
+
+  const collector = channel.createMessageComponentCollector({
     componentType: ComponentType.Button,
     time: 60_000,
     filter: (i) =>
-      i.user.id === interaction.user.id && i.message.id === (msg as any).id,
+      i.user.id === interaction.user.id && i.message.id === msg.id,
   });
 
   collector.on("collect", async (btn) => {
@@ -739,7 +814,8 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
             }
 
             if (i.isButton() && i.customId === "sbk_exec") {
-              if (!pickedUserId) {
+              const selectedUserId = pickedUserId;
+              if (!selectedUserId) {
                 await i.reply({
                   content: "相手を選んでください。",
                   ephemeral: true,
@@ -773,8 +849,8 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
               const submitted = await showModalAndAwait(i, modal);
               if (!submitted) return;
 
-              const localImmune = isImmune(gid, pickedUserId!);
-              const globalImmune = IMMUNE_IDS.includes(pickedUserId!);
+              const localImmune = isImmune(gid, selectedUserId);
+              const globalImmune = IMMUNE_IDS.has(selectedUserId);
               if (localImmune || globalImmune) {
                 await submitted.reply({
                   content: "🛡️ このユーザーはしばき免除のため実行できません。",
@@ -806,16 +882,14 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
                 .trim();
               const next = addCountGuild(
                 gid,
-                pickedUserId!,
+                selectedUserId,
                 pickedCount,
                 i.user.tag,
                 reason,
               );
-              const name = await displayNameFrom(submitted, pickedUserId!);
+              const name = await displayNameFrom(submitted, selectedUserId);
 
-              try {
-                await (panel as any).edit({ components: [] });
-              } catch {}
+              await clearPanelComponents(panel);
 
               await submitted.reply({
                 content: `**${name}** が ${safeCount(pickedCount)} 回 しばかれました！（累計 ${safeCount(next)} 回）\n理由: ${reason}`,
@@ -825,7 +899,7 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
               await sendLog(
                 submitted,
                 i.user.id,
-                pickedUserId!,
+                selectedUserId,
                 reason,
                 pickedCount,
                 next,
@@ -836,9 +910,7 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
           });
 
           sub.on("end", async () => {
-            try {
-              await (panel as any).edit({ components: [] });
-            } catch {}
+            await clearPanelComponents(panel);
           });
 
           break;
@@ -953,7 +1025,7 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
 
           sub.on("collect", async (i) => {
             if (i.isStringSelectMenu() && i.customId === "imm_act") {
-              act = i.values[0] as any;
+              act = pickUnionValue(i.values[0], ["add", "remove", "list"]);
               await i.deferUpdate();
               return;
             }
@@ -1000,8 +1072,17 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
                   ephemeral: true,
                 });
               } else if (act === "add") {
-                const ok = addImmuneId(gid, target!);
-                const tag = await displayNameFrom(i as any, target!);
+                const targetUserId = target;
+                if (!targetUserId) {
+                  await i.reply({
+                    content: "対象を選んでください。",
+                    ephemeral: true,
+                  });
+                  return;
+                }
+
+                const ok = addImmuneId(gid, targetUserId);
+                const tag = await displayNameFrom(i, targetUserId);
                 await i.reply({
                   content: ok
                     ? `\`${tag}\` を免除リストに追加しました。`
@@ -1009,8 +1090,17 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
                   ephemeral: true,
                 });
               } else if (act === "remove") {
-                const ok = removeImmuneId(gid, target!);
-                const tag = await displayNameFrom(i as any, target!);
+                const targetUserId = target;
+                if (!targetUserId) {
+                  await i.reply({
+                    content: "対象を選んでください。",
+                    ephemeral: true,
+                  });
+                  return;
+                }
+
+                const ok = removeImmuneId(gid, targetUserId);
+                const tag = await displayNameFrom(i, targetUserId);
                 await i.reply({
                   content: ok
                     ? `\`${tag}\` を免除リストから削除しました。`
@@ -1019,17 +1109,13 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
                 });
               }
 
-              try {
-                await (panel as any).edit({ components: [] });
-              } catch {}
+              await clearPanelComponents(panel);
               sub.stop("done");
             }
           });
 
           sub.on("end", async () => {
-            try {
-              await (panel as any).edit({ components: [] });
-            } catch {}
+            await clearPanelComponents(panel);
           });
 
           break;
@@ -1090,7 +1176,8 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
             }
 
             if (i.isButton() && i.customId === "ctl_set") {
-              if (!target) {
+              const targetUserId = target;
+              if (!targetUserId) {
                 await i.reply({
                   content: "対象を選んでください。",
                   ephemeral: true,
@@ -1124,12 +1211,10 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
                 return;
               }
 
-              const next = setCountGuild(gid, target!, value);
-              const tag = await displayNameFrom(submitted, target!);
+              const next = setCountGuild(gid, targetUserId, value);
+              const tag = await displayNameFrom(submitted, targetUserId);
 
-              try {
-                await (panel as any).edit({ components: [] });
-              } catch {}
+              await clearPanelComponents(panel);
 
               await submitted.reply({
                 content: `**${tag}** のしばかれ回数を **${safeCount(next)} 回** に設定しました。`,
@@ -1141,9 +1226,7 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
           });
 
           sub.on("end", async () => {
-            try {
-              await (panel as any).edit({ components: [] });
-            } catch {}
+            await clearPanelComponents(panel);
           });
 
           break;
@@ -1157,7 +1240,7 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
           const canMove =
             btn.memberPermissions?.has(PermissionFlagsBits.MoveMembers) ??
             false;
-          const isDev = OWNER_IDS.includes(btn.user.id);
+          const isDev = OWNER_IDS.has(btn.user.id);
           if (!isAdmin && !canMove && !isDev) {
             await btn.reply({
               content: "⚠️ VC移動は管理者/MoveMembers権限/開発者のみ使えます。",
@@ -1232,6 +1315,7 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
             }
 
             if (i.isButton() && i.customId === "movevc_exec") {
+              const selectedDestChannelId = destChannelId;
               if (!pickedUsers.length) {
                 await i.reply({
                   content: "移動するメンバーを選んでください。",
@@ -1239,7 +1323,7 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
                 });
                 return;
               }
-              if (!destChannelId) {
+              if (!selectedDestChannelId) {
                 await i.reply({
                   content: "移動先のVCを選んでください。",
                   ephemeral: true,
@@ -1249,9 +1333,17 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
 
               await i.deferUpdate();
 
-              const g = i.guild!;
+              const g = i.guild;
+              if (!g) {
+                await i.followUp({
+                  content: UNKNOWN_GUILD_MESSAGE,
+                  ephemeral: true,
+                });
+                return;
+              }
+
               const dest = await g.channels
-                .fetch(destChannelId)
+                .fetch(selectedDestChannelId)
                 .catch(() => null);
               if (
                 !dest ||
@@ -1277,7 +1369,7 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
                   continue;
                 }
                 try {
-                  await m.voice.setChannel(destChannelId!);
+                  await m.voice.setChannel(selectedDestChannelId);
                   results.push(`- ${m.displayName}: ✅ 移動しました`);
                 } catch {
                   results.push(
@@ -1286,11 +1378,9 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
                 }
               }
 
-              try {
-                await (panel as any).edit({ components: [] });
-              } catch {}
+              await clearPanelComponents(panel);
               await i.followUp({
-                content: `📦 VC移動結果（→ <#${destChannelId}>）\n${results.join("\n")}`,
+                content: `📦 VC移動結果（→ <#${selectedDestChannelId}>）\n${results.join("\n")}`,
                 ephemeral: true,
                 allowedMentions: { parse: [] },
               });
@@ -1299,9 +1389,7 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
           });
 
           sub.on("end", async () => {
-            try {
-              await (panel as any).edit({ components: [] });
-            } catch {}
+            await clearPanelComponents(panel);
           });
 
           break;
@@ -1315,7 +1403,7 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
           const canMove =
             btn.memberPermissions?.has(PermissionFlagsBits.MoveMembers) ??
             false;
-          const isDev = OWNER_IDS.includes(btn.user.id);
+          const isDev = OWNER_IDS.has(btn.user.id);
           if (!isAdmin && !canMove && !isDev) {
             await btn.reply({
               content: "⚠️ VC切断は管理者/MoveMembers権限/開発者のみ使えます。",
@@ -1381,7 +1469,15 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
 
               await i.deferUpdate();
 
-              const g = i.guild!;
+              const g = i.guild;
+              if (!g) {
+                await i.followUp({
+                  content: UNKNOWN_GUILD_MESSAGE,
+                  ephemeral: true,
+                });
+                return;
+              }
+
               const results: string[] = [];
               for (const uid of pickedUsers) {
                 const m = await g.members.fetch(uid).catch(() => null);
@@ -1403,9 +1499,7 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
                 }
               }
 
-              try {
-                await (panel as any).edit({ components: [] });
-              } catch {}
+              await clearPanelComponents(panel);
               await i.followUp({
                 content: `🪓 VC切断結果\n${results.join("\n")}`,
                 ephemeral: true,
@@ -1416,9 +1510,7 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
           });
 
           sub.on("end", async () => {
-            try {
-              await (panel as any).edit({ components: [] });
-            } catch {}
+            await clearPanelComponents(panel);
           });
 
           break;
@@ -1432,7 +1524,7 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
           const canMute =
             btn.memberPermissions?.has(PermissionFlagsBits.MuteMembers) ??
             false;
-          const isDev = OWNER_IDS.includes(btn.user.id);
+          const isDev = OWNER_IDS.has(btn.user.id);
           if (!isAdmin && !canMute && !isDev) {
             await btn.reply({
               content:
@@ -1499,7 +1591,15 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
 
               await i.deferUpdate();
 
-              const g = i.guild!;
+              const g = i.guild;
+              if (!g) {
+                await i.followUp({
+                  content: UNKNOWN_GUILD_MESSAGE,
+                  ephemeral: true,
+                });
+                return;
+              }
+
               const results: string[] = [];
               for (const uid of pickedUsers) {
                 const m = await g.members.fetch(uid).catch(() => null);
@@ -1521,9 +1621,7 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
                 }
               }
 
-              try {
-                await (panel as any).edit({ components: [] });
-              } catch {}
+              await clearPanelComponents(panel);
               await i.followUp({
                 content: `🔇 VCミュート結果\n${results.join("\n")}`,
                 ephemeral: true,
@@ -1534,9 +1632,7 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
           });
 
           sub.on("end", async () => {
-            try {
-              await (panel as any).edit({ components: [] });
-            } catch {}
+            await clearPanelComponents(panel);
           });
 
           break;
@@ -1550,7 +1646,7 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
           const canMute =
             btn.memberPermissions?.has(PermissionFlagsBits.MuteMembers) ??
             false;
-          const isDev = OWNER_IDS.includes(btn.user.id);
+          const isDev = OWNER_IDS.has(btn.user.id);
           if (!isAdmin && !canMute && !isDev) {
             await btn.reply({
               content:
@@ -1617,7 +1713,15 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
 
               await i.deferUpdate();
 
-              const g = i.guild!;
+              const g = i.guild;
+              if (!g) {
+                await i.followUp({
+                  content: UNKNOWN_GUILD_MESSAGE,
+                  ephemeral: true,
+                });
+                return;
+              }
+
               const results: string[] = [];
               for (const uid of pickedUsers) {
                 const m = await g.members.fetch(uid).catch(() => null);
@@ -1639,9 +1743,7 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
                 }
               }
 
-              try {
-                await (panel as any).edit({ components: [] });
-              } catch {}
+              await clearPanelComponents(panel);
               await i.followUp({
                 content: `🔈 VCミュート解除結果\n${results.join("\n")}`,
                 ephemeral: true,
@@ -1652,9 +1754,7 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
           });
 
           sub.on("end", async () => {
-            try {
-              await (panel as any).edit({ components: [] });
-            } catch {}
+            await clearPanelComponents(panel);
           });
 
           break;
@@ -1736,7 +1836,8 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
               i.isButton() &&
               (i.customId === "bank_set" || i.customId === "bank_add")
             ) {
-              if (!targetId) {
+              const selectedTargetId = targetId;
+              if (!selectedTargetId) {
                 await i.reply({
                   content: "先に対象ユーザーを選択してください。",
                   ephemeral: true,
@@ -1787,16 +1888,17 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
 
               let after: bigint;
               if (mode === "set") {
-                after = await setMedals(targetId!, num);
+                after = await setMedals(selectedTargetId, num);
               } else {
-                after = await addMedals(targetId!, num);
+                after = await addMedals(selectedTargetId, num);
               }
 
-              const targetName = await displayNameFrom(submitted, targetId!);
+              const targetName = await displayNameFrom(
+                submitted,
+                selectedTargetId,
+              );
 
-              try {
-                await (panel as any).edit({ components: [] });
-              } catch {}
+              await clearPanelComponents(panel);
 
               await submitted.reply({
                 content:
@@ -1812,9 +1914,7 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
           });
 
           sub.on("end", async () => {
-            try {
-              await (panel as any).edit({ components: [] });
-            } catch {}
+            await clearPanelComponents(panel);
           });
 
           break;
@@ -1852,68 +1952,62 @@ export async function handleMenu(interaction: ChatInputCommandInteraction) {
           break;
         }
 
-       /* --- 管理者: 監査ログ --- */
-case "menu_audit": {
-  if (
-    !(await requireAdminOrDev(
-      btn,
-      "監査ログは管理者/開発者のみ利用できます。",
-    ))
-  )
-    break;
+        /* --- 管理者: 監査ログ --- */
+        case "menu_audit": {
+          if (
+            !(await requireAdminOrDev(
+              btn,
+              "監査ログは管理者/開発者のみ利用できます。",
+            ))
+          )
+            break;
 
-  await btn.deferUpdate();
+          await btn.deferUpdate();
 
-  const logs = getRecentLogs(gid, AUDIT_LIMIT);
-  if (!logs.length) {
-    await btn.followUp({
-      content: "監査ログはまだありません。",
-      ephemeral: true,
-    });
-    break;
-  }
+          const logs = getRecentLogs(gid, AUDIT_LIMIT);
+          if (!logs.length) {
+            await btn.followUp({
+              content: "監査ログはまだありません。",
+              ephemeral: true,
+            });
+            break;
+          }
 
-  const lines = await Promise.all(
-    logs.map(async (log) => {
-      const actorLabel = log.actor
-        ? looksLikeSnowflake(log.actor)
-          ? await displayNameFrom(btn, log.actor)
-          : log.actor
-        : "不明";
-      const targetLabel = await displayNameFrom(btn, log.target);
-     const delta = safeSignedBigInt(log.delta);
+          const lines = await Promise.all(
+            logs.map(async (log) => {
+              const actorLabel = log.actor
+                ? looksLikeSnowflake(log.actor)
+                  ? await displayNameFrom(btn, log.actor)
+                  : log.actor
+                : "不明";
+              const targetLabel = await displayNameFrom(btn, log.target);
+              const delta = safeSignedBigInt(log.delta);
+              const when = new Date(log.at).toLocaleString("ja-JP");
 
-function safeSignedBigInt(x: bigint): string {
-  const sign = x < 0n ? "-" : "+";
-  const abs = x < 0n ? -x : x;
-  return sign + safeCount(abs, 16); // 監査ログは短め
-}
+              const reasonRaw = (log.reason ?? "").replace(/\s+/g, " ").trim();
+              const reason = reasonRaw
+                ? reasonRaw.length > 40
+                  ? `${reasonRaw.slice(0, 40)}...`
+                  : reasonRaw
+                : "（理由なし）";
 
-      const when = new Date(log.at).toLocaleString("ja-JP");
+              return `- ${when} ${actorLabel} -> ${targetLabel} (${delta}) ${reason}`;
+            }),
+          );
 
-      const reasonRaw = (log.reason ?? "").replace(/\s+/g, " ").trim();
-      const reason = reasonRaw
-        ? reasonRaw.length > 40
-          ? `${reasonRaw.slice(0, 40)}...`
-          : reasonRaw
-        : "（理由なし）";
+          const desc =
+            joinLinesWithLimitOrNull(lines, EMBED_DESC_LIMIT) ??
+            "（表示できるログがありません）";
 
-      return `- ${when} ${actorLabel} -> ${targetLabel} (${delta}) ${reason}`;
-    }),
-  );
+          const total = getLogCount(gid);
+          const embed = new EmbedBuilder()
+            .setTitle("監査ログ（しばき）")
+            .setDescription(desc)
+            .setFooter({ text: `最新 ${logs.length} 件 / 全 ${total} 件` });
 
-  // ★ description の長さ制限（4096対策）
-  const desc = joinLinesWithLimitOrNull(lines, EMBED_DESC_LIMIT) ?? "（表示できるログがありません）";
-
-  const total = getLogCount(gid);
-  const embed = new EmbedBuilder()
-    .setTitle("監査ログ（しばき）")
-    .setDescription(desc)
-    .setFooter({ text: `最新 ${logs.length} 件 / 全 ${total} 件` });
-
-  await btn.followUp({ embeds: [embed], ephemeral: true });
-  break;
-}
+          await btn.followUp({ embeds: [embed], ephemeral: true });
+          break;
+        }
 
         /* --- 管理者: サーバー設定 --- */
         case "menu_settings": {
@@ -1995,9 +2089,7 @@ function safeSignedBigInt(x: bigint): string {
                 content: `ログチャンネル設定をクリアしました。現在: ${fallbackText}`,
                 ephemeral: true,
               });
-              try {
-                await (panel as any).edit({ components: [] });
-              } catch {}
+              await clearPanelComponents(panel);
               sub.stop("done");
               return;
             }
@@ -2017,24 +2109,20 @@ function safeSignedBigInt(x: bigint): string {
                 ephemeral: true,
               });
 
-              try {
-                await (panel as any).edit({ components: [] });
-              } catch {}
+              await clearPanelComponents(panel);
               sub.stop("done");
             }
           });
 
           sub.on("end", async () => {
-            try {
-              await (panel as any).edit({ components: [] });
-            } catch {}
+            await clearPanelComponents(panel);
           });
           break;
         }
 
         /* --- 管理者: 開発者ツール --- */
         case "menu_devtools": {
-          const isDev = OWNER_IDS.includes(btn.user.id);
+          const isDev = OWNER_IDS.has(btn.user.id);
           if (!isDev) {
             await btn.reply({
               content: "開発者ツールは OWNER_IDS のみ利用できます。",
@@ -2077,7 +2165,11 @@ function safeSignedBigInt(x: bigint): string {
 
           sub.on("collect", async (i) => {
             if (i.isStringSelectMenu() && i.customId === "dev_act") {
-              act = i.values[0] as any;
+              act = pickUnionValue(i.values[0], [
+                "info",
+                "checkpoint",
+                "vacuum",
+              ]);
               await i.deferUpdate();
               return;
             }
@@ -2189,17 +2281,13 @@ function safeSignedBigInt(x: bigint): string {
                 }
               }
 
-              try {
-                await (panel as any).edit({ components: [] });
-              } catch {}
+              await clearPanelComponents(panel);
               sub.stop("done");
             }
           });
 
           sub.on("end", async () => {
-            try {
-              await (panel as any).edit({ components: [] });
-            } catch {}
+            await clearPanelComponents(panel);
           });
           break;
         }
@@ -2302,7 +2390,7 @@ function safeSignedBigInt(x: bigint): string {
 
           sub.on("collect", async (i) => {
             if (i.isStringSelectMenu() && i.customId === "backup_act") {
-              act = i.values[0] as any;
+              act = pickUnionValue(i.values[0], ["guild", "medal", "list"]);
               await i.deferUpdate();
               return;
             }
@@ -2361,7 +2449,7 @@ function safeSignedBigInt(x: bigint): string {
               }
 
               if (act === "medal") {
-                const isDev = OWNER_IDS.includes(i.user.id);
+                const isDev = OWNER_IDS.has(i.user.id);
                 if (!isDev) {
                   await i.followUp({
                     content: "メダルDBのバックアップは開発者のみ利用できます。",
@@ -2392,7 +2480,7 @@ function safeSignedBigInt(x: bigint): string {
               if (act === "list") {
                 const guildDir = path.join(BACKUP_ROOT, "guilds", gid);
                 const guildList = listBackupFiles(guildDir, BACKUP_LIST_LIMIT);
-                const isDev = OWNER_IDS.includes(i.user.id);
+                const isDev = OWNER_IDS.has(i.user.id);
                 const medalDir = path.join(BACKUP_ROOT, "medalbank");
                 const medalList = isDev
                   ? listBackupFiles(medalDir, BACKUP_LIST_LIMIT)
@@ -2417,17 +2505,13 @@ function safeSignedBigInt(x: bigint): string {
                 });
               }
 
-              try {
-                await (panel as any).edit({ components: [] });
-              } catch {}
+              await clearPanelComponents(panel);
               sub.stop("done");
             }
           });
 
           sub.on("end", async () => {
-            try {
-              await (panel as any).edit({ components: [] });
-            } catch {}
+            await clearPanelComponents(panel);
           });
           break;
         }
@@ -2458,7 +2542,7 @@ function safeSignedBigInt(x: bigint): string {
 
   collector.on("end", async () => {
     try {
-      await (msg as any).edit({ components: disabledCopyOfRows(built.rows) });
+      await msg.edit({ components: disabledCopyOfRows(built.rows) });
     } catch {}
   });
 }

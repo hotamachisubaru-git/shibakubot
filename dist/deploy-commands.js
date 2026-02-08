@@ -3,12 +3,23 @@ Object.defineProperty(exports, "__esModule", { value: true });
 // src/deploy-commands.ts
 require("dotenv/config");
 const discord_js_1 = require("discord.js");
-const TOKEN = process.env.TOKEN;
-const CLIENT_ID = process.env.CLIENT_ID;
-const GUILD_IDS = (process.env.GUILD_IDS || process.env.GUILD_ID || "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
+function parseCsvEnv(raw) {
+    if (!raw)
+        return [];
+    return raw
+        .split(",")
+        .map((token) => token.trim())
+        .filter((token) => token.length > 0);
+}
+function arrayCount(value) {
+    return Array.isArray(value) ? value.length : 0;
+}
+function hasRawError(value) {
+    return typeof value === "object" && value !== null && "rawError" in value;
+}
+const TOKEN = process.env.TOKEN?.trim() ?? "";
+const CLIENT_ID = process.env.CLIENT_ID?.trim() ?? "";
+const GUILD_IDS = parseCsvEnv(process.env.GUILD_IDS ?? process.env.GUILD_ID);
 // 環境チェック
 if (!TOKEN || !CLIENT_ID || GUILD_IDS.length === 0) {
     console.error("❌ 環境変数が不足しています。TOKEN, CLIENT_ID, GUILD_IDS を確認してください。");
@@ -84,7 +95,7 @@ const rest = new discord_js_1.REST({ version: "10" }).setToken(TOKEN);
             const res = await rest.put(discord_js_1.Routes.applicationCommands(CLIENT_ID), {
                 body: [],
             });
-            console.log(`   ✔ グローバル削除完了（${Array.isArray(res) ? res.length : 0} 件）`);
+            console.log(`   ✔ グローバル削除完了（${arrayCount(res)} 件）`);
         }
         else {
             console.log("（グローバル削除はスキップ: CLEAR_GLOBAL=false）");
@@ -93,7 +104,7 @@ const rest = new discord_js_1.REST({ version: "10" }).setToken(TOKEN);
         for (const gid of GUILD_IDS) {
             console.log(`📝 ギルド(${gid}) に置換登録中...`);
             const registered = await rest.put(discord_js_1.Routes.applicationGuildCommands(CLIENT_ID, gid), { body: commands });
-            console.log(`   ✔ 登録完了: guild=${gid} / count=${Array.isArray(registered) ? registered.length : 0}`);
+            console.log(`   ✔ 登録完了: guild=${gid} / count=${arrayCount(registered)}`);
         }
         console.log("✅ すべての登録処理が完了しました。");
         process.exit(0);
@@ -101,7 +112,7 @@ const rest = new discord_js_1.REST({ version: "10" }).setToken(TOKEN);
     catch (err) {
         // Discord 側のエラー内容を見やすく
         console.error("❌ 登録中にエラー:");
-        if (err?.rawError)
+        if (hasRawError(err))
             console.error(err.rawError);
         console.error(err);
         process.exit(1);

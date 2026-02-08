@@ -1,17 +1,18 @@
 // src/commands/stats.ts
 import {
-  ChatInputCommandInteraction,
+  type ChatInputCommandInteraction,
   EmbedBuilder,
   PermissionFlagsBits,
 } from "discord.js";
 import { loadGuildStore } from "../data";
 import { compareBigIntDesc } from "../utils/bigint";
 
-// .env の OWNER_IDS=id1,id2,... を許可
-const OWNER_IDS = (process.env.OWNER_IDS || "")
-  .split(",")
-  .map((s) => s.trim())
-  .filter(Boolean);
+const OWNER_IDS = new Set(
+  (process.env.OWNER_IDS ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter((value): value is string => value.length > 0),
+);
 
 function formatAverage(total: bigint, members: number): string {
   if (members <= 0) return "0";
@@ -22,7 +23,17 @@ function formatAverage(total: bigint, members: number): string {
   return `${integer}.${fraction}`;
 }
 
-export async function handleStats(interaction: ChatInputCommandInteraction) {
+function canViewStats(interaction: ChatInputCommandInteraction): boolean {
+  const isAdmin =
+    interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) ??
+    false;
+  const isOwner = OWNER_IDS.has(interaction.user.id);
+  return isAdmin || isOwner;
+}
+
+export async function handleStats(
+  interaction: ChatInputCommandInteraction,
+): Promise<void> {
   if (!interaction.inGuild()) {
     await interaction.reply({
       content: "このコマンドはサーバー内でのみ使用できます。",
@@ -31,12 +42,7 @@ export async function handleStats(interaction: ChatInputCommandInteraction) {
     return;
   }
 
-  const isAdmin =
-    interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) ??
-    false;
-  const isOwner = OWNER_IDS.includes(interaction.user.id);
-
-  if (!isAdmin && !isOwner) {
+  if (!canViewStats(interaction)) {
     await interaction.reply({
       content: "権限がありません（管理者/開発者のみ）",
       ephemeral: true,
@@ -44,7 +50,16 @@ export async function handleStats(interaction: ChatInputCommandInteraction) {
     return;
   }
 
-  const store = loadGuildStore(interaction.guildId!);
+  const guildId = interaction.guildId;
+  if (!guildId) {
+    await interaction.reply({
+      content: "サーバー情報を取得できませんでした。",
+      ephemeral: true,
+    });
+    return;
+  }
+
+  const store = loadGuildStore(guildId);
   const counts = Object.values(store.counts);
   const total = counts.reduce((a, b) => a + b, 0n);
   const members = counts.length;

@@ -1,9 +1,15 @@
-import { Collection, Guild, GuildMember } from "discord.js";
+import type { Collection, Guild, GuildMember } from "discord.js";
 
 export type MemberFetchResult = {
-  members: Collection<string, GuildMember>;
-  fromCache: boolean;
+  readonly members: Collection<string, GuildMember>;
+  readonly fromCache: boolean;
 };
+
+function isGuildMembersTimeoutError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const code = (error as { code?: unknown }).code;
+  return code === "GuildMembersTimeout";
+}
 
 export async function fetchGuildMembersSafe(
   guild: Guild,
@@ -11,11 +17,10 @@ export async function fetchGuildMembersSafe(
   try {
     const members = await guild.members.fetch();
     return { members, fromCache: false };
-  } catch (err) {
-    const code = (err as { code?: string } | null)?.code;
-    if (code === "GuildMembersTimeout") {
+  } catch (error: unknown) {
+    if (isGuildMembersTimeoutError(error)) {
       return { members: guild.members.cache, fromCache: true };
     }
-    throw err;
+    throw error;
   }
 }

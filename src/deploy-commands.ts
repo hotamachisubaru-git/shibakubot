@@ -2,12 +2,25 @@
 import "dotenv/config";
 import { ChannelType, REST, Routes, SlashCommandBuilder } from "discord.js";
 
-const TOKEN = process.env.TOKEN!;
-const CLIENT_ID = process.env.CLIENT_ID!;
-const GUILD_IDS = (process.env.GUILD_IDS || process.env.GUILD_ID || "")
-  .split(",")
-  .map((s) => s.trim())
-  .filter(Boolean);
+function parseCsvEnv(raw: string | undefined): string[] {
+  if (!raw) return [];
+  return raw
+    .split(",")
+    .map((token) => token.trim())
+    .filter((token): token is string => token.length > 0);
+}
+
+function arrayCount(value: unknown): number {
+  return Array.isArray(value) ? value.length : 0;
+}
+
+function hasRawError(value: unknown): value is { rawError: unknown } {
+  return typeof value === "object" && value !== null && "rawError" in value;
+}
+
+const TOKEN = process.env.TOKEN?.trim() ?? "";
+const CLIENT_ID = process.env.CLIENT_ID?.trim() ?? "";
+const GUILD_IDS = parseCsvEnv(process.env.GUILD_IDS ?? process.env.GUILD_ID);
 
 // 環境チェック
 if (!TOKEN || !CLIENT_ID || GUILD_IDS.length === 0) {
@@ -18,7 +31,7 @@ if (!TOKEN || !CLIENT_ID || GUILD_IDS.length === 0) {
 }
 
 // ---- ここで「/menu」だけを登録（他はUIから呼び出す前提） ----
-const commands = [
+const commands: Array<ReturnType<SlashCommandBuilder["toJSON"]>> = [
   // /sbk 本体
   new SlashCommandBuilder()
     .setName("sbk")
@@ -67,7 +80,7 @@ const commands = [
         .setName("channel")
         .setDescription("移動先のボイスチャンネル")
         .addChannelTypes(ChannelType.GuildVoice, ChannelType.GuildStageVoice)
-    .setRequired(true),
+        .setRequired(true),
     )
     .toJSON(),
 
@@ -102,7 +115,6 @@ const commands = [
         ),
     )
     .toJSON(),
-
 ];
 
 const rest = new REST({ version: "10" }).setToken(TOKEN);
@@ -116,12 +128,10 @@ const rest = new REST({ version: "10" }).setToken(TOKEN);
     // --- 任意: グローバルコマンドを全削除（残っていると古い表示が混在しがち） ---
     if ((process.env.CLEAR_GLOBAL || "true").toLowerCase() === "true") {
       console.log("🧹 グローバルコマンドを全削除します...");
-      const res: any = await rest.put(Routes.applicationCommands(CLIENT_ID), {
+      const res = await rest.put(Routes.applicationCommands(CLIENT_ID), {
         body: [],
       });
-      console.log(
-        `   ✔ グローバル削除完了（${Array.isArray(res) ? res.length : 0} 件）`,
-      );
+      console.log(`   ✔ グローバル削除完了（${arrayCount(res)} 件）`);
     } else {
       console.log("（グローバル削除はスキップ: CLEAR_GLOBAL=false）");
     }
@@ -129,21 +139,21 @@ const rest = new REST({ version: "10" }).setToken(TOKEN);
     // --- ギルド単位で順次（直列）登録：レート制限を避け、失敗点を特定しやすくする ---
     for (const gid of GUILD_IDS) {
       console.log(`📝 ギルド(${gid}) に置換登録中...`);
-      const registered: any = await rest.put(
+      const registered = await rest.put(
         Routes.applicationGuildCommands(CLIENT_ID, gid),
         { body: commands },
       );
       console.log(
-        `   ✔ 登録完了: guild=${gid} / count=${Array.isArray(registered) ? registered.length : 0}`,
+        `   ✔ 登録完了: guild=${gid} / count=${arrayCount(registered)}`,
       );
     }
 
     console.log("✅ すべての登録処理が完了しました。");
     process.exit(0);
-  } catch (err: any) {
+  } catch (err: unknown) {
     // Discord 側のエラー内容を見やすく
     console.error("❌ 登録中にエラー:");
-    if (err?.rawError) console.error(err.rawError);
+    if (hasRawError(err)) console.error(err.rawError);
     console.error(err);
     process.exit(1);
   }

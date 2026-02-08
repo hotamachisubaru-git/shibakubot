@@ -33,8 +33,8 @@ exports.getTopMedals = getTopMedals;
 exports.setMedals = setMedals;
 exports.addMedals = addMedals;
 // src/data.ts
-const fs_1 = __importDefault(require("fs"));
-const path_1 = __importDefault(require("path"));
+const node_fs_1 = __importDefault(require("node:fs"));
+const node_path_1 = __importDefault(require("node:path"));
 const better_sqlite3_1 = __importDefault(require("better-sqlite3"));
 // メダル用（非同期 sqlite）
 const sqlite3_1 = __importDefault(require("sqlite3"));
@@ -75,18 +75,23 @@ function toBigIntInput(value) {
 function toDbText(value) {
     return value.toString();
 }
+function parseSettingBoolean(raw, fallback) {
+    if (raw === null)
+        return fallback;
+    return raw.toLowerCase() === "true";
+}
 // ---------- パス系 ----------
-const DATA_DIR = path_1.default.join(process.cwd(), "data", "guilds");
+const DATA_DIR = node_path_1.default.join(process.cwd(), "data", "guilds");
 function ensureDir(p) {
-    if (!fs_1.default.existsSync(p))
-        fs_1.default.mkdirSync(p, { recursive: true });
+    if (!node_fs_1.default.existsSync(p))
+        node_fs_1.default.mkdirSync(p, { recursive: true });
 }
 function dbPath(gid) {
     ensureDir(DATA_DIR);
-    return path_1.default.join(DATA_DIR, `${gid}.db`);
+    return node_path_1.default.join(DATA_DIR, `${gid}.db`);
 }
 // メダルバンク DB パス
-const MEDAL_DB_PATH = path_1.default.join(process.cwd(), "data", "medalbank.db");
+const MEDAL_DB_PATH = node_path_1.default.join(process.cwd(), "data", "medalbank.db");
 // ---------- スキーマ & マイグレ ----------
 function ensureSchema(db) {
     // 期待する各テーブルを作成
@@ -394,10 +399,7 @@ function clearMusicNgWords(gid) {
 // ---------- 音楽機能有効化設定 ----------
 const MUSIC_ENABLED_KEY = "musicEnabled";
 function getMusicEnabled(gid) {
-    const raw = getSetting(gid, MUSIC_ENABLED_KEY);
-    if (!raw)
-        return true; // デフォルト有効
-    return raw.toLowerCase() === "true";
+    return parseSettingBoolean(getSetting(gid, MUSIC_ENABLED_KEY), true);
 }
 function setMusicEnabled(gid, enabled) {
     setSetting(gid, MUSIC_ENABLED_KEY, enabled ? "true" : "false");
@@ -405,33 +407,27 @@ function setMusicEnabled(gid, enabled) {
 // ---------- メンテナンスモード ----------
 const MAINTENANCE_KEY = "maintenanceEnabled";
 function getMaintenanceEnabled(gid) {
-    const raw = getSetting(gid, MAINTENANCE_KEY);
-    if (!raw)
-        return false; // デフォルト無効
-    return raw.toLowerCase() === "true";
+    return parseSettingBoolean(getSetting(gid, MAINTENANCE_KEY), false);
 }
 function setMaintenanceEnabled(gid, enabled) {
     setSetting(gid, MAINTENANCE_KEY, enabled ? "true" : "false");
 }
 function setSbkRange(gid, min, max) {
     const db = openDb(gid);
-    if (!Number.isFinite(min) || min < 1)
-        min = SBK_MIN_DEFAULT;
-    if (!Number.isFinite(max) || max < min)
-        max = min;
-    min = Math.floor(min);
-    max = Math.floor(max);
+    const normalizedMin = Number.isFinite(min) && min >= 1 ? Math.floor(min) : SBK_MIN_DEFAULT;
+    const normalizedMaxCandidate = Number.isFinite(max) ? Math.floor(max) : normalizedMin;
+    const normalizedMax = Math.max(normalizedMin, normalizedMaxCandidate);
     db.transaction(() => {
         db.prepare(`
       INSERT INTO settings(key, value) VALUES(?, ?)
       ON CONFLICT(key) DO UPDATE SET value=excluded.value
-    `).run(SBK_MIN_KEY, String(min));
+    `).run(SBK_MIN_KEY, String(normalizedMin));
         db.prepare(`
       INSERT INTO settings(key, value) VALUES(?, ?)
       ON CONFLICT(key) DO UPDATE SET value=excluded.value
-    `).run(SBK_MAX_KEY, String(max));
+    `).run(SBK_MAX_KEY, String(normalizedMax));
     })();
-    return { min, max };
+    return { min: normalizedMin, max: normalizedMax };
 }
 // ---------- 互換ラッパ ----------
 function loadGuildStore(gid) {
@@ -448,7 +444,7 @@ function loadGuildStore(gid) {
 let medalDB = null;
 async function getMedalDB() {
     if (!medalDB) {
-        ensureDir(path_1.default.dirname(MEDAL_DB_PATH));
+        ensureDir(node_path_1.default.dirname(MEDAL_DB_PATH));
         medalDB = await (0, sqlite_1.open)({
             filename: MEDAL_DB_PATH,
             driver: sqlite3_1.default.Database,

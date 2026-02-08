@@ -1,28 +1,36 @@
-// src/utils/displayNameUtil.ts
-import {
-  ChatInputCommandInteraction,
-  ButtonInteraction,
-  ModalSubmitInteraction,
-} from "discord.js";
+import type { BaseInteraction } from "discord.js";
 
-export type AnyInteraction =
-  | ChatInputCommandInteraction
-  | ButtonInteraction
-  | ModalSubmitInteraction;
+export type AnyInteraction = Pick<BaseInteraction, "guild" | "guildId" | "client">;
+
+async function tryFetchGuildDisplayName(
+  interaction: AnyInteraction,
+  userId: string,
+): Promise<string | null> {
+  const guild = interaction.guild;
+  if (!guild) return null;
+
+  const member = await guild.members.fetch(userId).catch(() => null);
+  return member?.displayName ?? null;
+}
+
+async function tryFetchUserTag(
+  interaction: AnyInteraction,
+  userId: string,
+): Promise<string | null> {
+  const user = await interaction.client.users.fetch(userId).catch(() => null);
+  return user?.tag ?? null;
+}
 
 /**
- * ギルドに居ればニックネーム、いなければユーザータグを返すユーティリティ
+ * ギルドに居ればニックネーム、いなければユーザータグを返す。
  */
 export async function displayNameFrom(
-  i: AnyInteraction,
+  interaction: AnyInteraction,
   userId: string,
 ): Promise<string> {
-  const g = i.guild;
-  if (g) {
-    const m = await g.members.fetch(userId).catch(() => null);
-    if (m?.displayName) return m.displayName;
-  }
+  const guildDisplayName = await tryFetchGuildDisplayName(interaction, userId);
+  if (guildDisplayName) return guildDisplayName;
 
-  const u = await i.client.users.fetch(userId).catch(() => null);
-  return u?.tag ?? userId;
+  const userTag = await tryFetchUserTag(interaction, userId);
+  return userTag ?? userId;
 }

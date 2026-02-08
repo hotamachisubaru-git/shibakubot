@@ -2,11 +2,11 @@
 import {
   ActionRowBuilder,
   ButtonBuilder,
-  ButtonInteraction,
+  type ButtonInteraction,
   ButtonStyle,
   EmbedBuilder,
   ModalBuilder,
-  ModalSubmitInteraction,
+  type ModalSubmitInteraction,
   TextInputBuilder,
   TextInputStyle,
   UserSelectMenuBuilder,
@@ -14,19 +14,34 @@ import {
 
 import { getMedalBalance, addMedals, setMedals, getTopMedals } from "../data";
 import { parseBigIntInput } from "../utils/bigint";
+import { displayNameFrom } from "../utils/displayNameUtil";
+
+type PanelMessage = Awaited<ReturnType<ButtonInteraction["followUp"]>>;
 
 /* ユーザーID → ニックネーム(あれば) / tag の簡易ユーティリティ */
 async function displayNameFromInteraction(
   i: ButtonInteraction | ModalSubmitInteraction,
   userId: string,
 ): Promise<string> {
-  const g = i.guild;
-  if (g) {
-    const m = await g.members.fetch(userId).catch(() => null);
-    if (m?.displayName) return m.displayName;
-    if (m?.user?.tag) return m.user.tag;
+  return displayNameFrom(i, userId);
+}
+
+async function clearPanelComponents(panel: PanelMessage): Promise<void> {
+  try {
+    await panel.edit({ components: [] });
+  } catch {
+    // noop
   }
-  return `<@${userId}>`;
+}
+
+function createPanelCollector(btn: ButtonInteraction, panel: PanelMessage) {
+  const channel = btn.channel;
+  if (!channel) return null;
+
+  return channel.createMessageComponentCollector({
+    time: 60_000,
+    filter: (i) => i.user.id === btn.user.id && i.message.id === panel.id,
+  });
 }
 
 /* ===========================
@@ -86,20 +101,23 @@ export async function handleMedalSendButton(btn: ButtonInteraction) {
       .setStyle(ButtonStyle.Secondary),
   );
 
-  await btn.followUp({
+  const panel = await btn.followUp({
     content: "💱 送金相手を選んでください。",
     components: [rowUser, rowButtons],
     ephemeral: true,
+    fetchReply: true,
   });
 
-  const panel = await btn.fetchReply();
   let targetId: string | null = null;
 
-  const sub = btn.channel!.createMessageComponentCollector({
-    time: 60_000,
-    filter: (i) =>
-      i.user.id === btn.user.id && i.message.id === (panel as any).id,
-  });
+  const sub = createPanelCollector(btn, panel);
+  if (!sub) {
+    await btn.followUp({
+      content: "チャンネル情報を取得できなかったため、操作を続行できませんでした。",
+      ephemeral: true,
+    });
+    return;
+  }
 
   sub.on("collect", async (i) => {
     // 送金相手選択
@@ -118,7 +136,8 @@ export async function handleMedalSendButton(btn: ButtonInteraction) {
 
     // 実行
     if (i.isButton() && i.customId === "medal_send_exec") {
-      if (!targetId) {
+      const selectedTargetId = targetId;
+      if (!selectedTargetId) {
         await i.reply({
           content: "送金相手を選択してください。",
           ephemeral: true,
@@ -175,14 +194,12 @@ export async function handleMedalSendButton(btn: ButtonInteraction) {
 
       // 送金処理
       await setMedals(fromId, fromBalance - amount);
-      const toAfter = await addMedals(targetId!, amount);
+      const toAfter = await addMedals(selectedTargetId, amount);
 
-      const toName = await displayNameFromInteraction(submitted, targetId!);
+      const toName = await displayNameFromInteraction(submitted, selectedTargetId);
       const meName = await displayNameFromInteraction(submitted, fromId);
 
-      try {
-        await (panel as any).edit({ components: [] });
-      } catch {}
+      await clearPanelComponents(panel);
 
       await submitted.reply({
         content:
@@ -200,8 +217,6 @@ export async function handleMedalSendButton(btn: ButtonInteraction) {
   });
 
   sub.on("end", async () => {
-    try {
-      await (panel as any).edit({ components: [] });
-    } catch {}
+    await clearPanelComponents(panel);
   });
 }

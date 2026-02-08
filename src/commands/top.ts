@@ -1,19 +1,20 @@
 // src/commands/top.ts
 import {
-  EmbedBuilder,
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
   ComponentType,
+  EmbedBuilder,
   type ChatInputCommandInteraction,
 } from "discord.js";
 import { loadGuildStore } from "../data";
 import { compareBigIntDesc } from "../utils/bigint";
 
 const PAGE_SIZE = 10;
+type RankingEntry = readonly [userId: string, count: bigint];
 
 /** ギルドでは displayName（ニックネーム） → なければ user.tag → 最後にID */
-async function getDisplayName(
+async function resolveDisplayName(
   interaction: ChatInputCommandInteraction,
   userId: string,
 ): Promise<string> {
@@ -27,11 +28,11 @@ async function getDisplayName(
 }
 
 /** 指定ページの埋め込みを作る（0-based page） */
-async function makePageEmbed(
+async function buildPageEmbed(
   interaction: ChatInputCommandInteraction,
-  sortedEntries: Array<[string, bigint]>,
+  sortedEntries: readonly RankingEntry[],
   page: number,
-) {
+): Promise<EmbedBuilder> {
   const totalPages = Math.max(1, Math.ceil(sortedEntries.length / PAGE_SIZE));
   const start = page * PAGE_SIZE;
   const slice = sortedEntries.slice(start, start + PAGE_SIZE);
@@ -39,8 +40,8 @@ async function makePageEmbed(
   const lines = await Promise.all(
     slice.map(async ([userId, count], i) => {
       const rank = start + i + 1;
-      const name = await getDisplayName(interaction, userId);
-      return `#${rank} ${name} × **${count}**`;
+      const name = await resolveDisplayName(interaction, userId);
+      return `#${rank} ${name} × **${count.toString()}**`;
     }),
   );
 
@@ -53,8 +54,11 @@ async function makePageEmbed(
 }
 
 /** ページボタンの行を作る */
-function makeRow(page: number, totalPages: number) {
-  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+function buildNavRow(
+  page: number,
+  totalPages: number,
+): ActionRowBuilder<ButtonBuilder> {
+  return new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
       .setCustomId("top_prev")
       .setLabel("◀")
@@ -66,10 +70,11 @@ function makeRow(page: number, totalPages: number) {
       .setStyle(ButtonStyle.Secondary)
       .setDisabled(page === totalPages - 1 || totalPages <= 1),
   );
-  return row;
 }
 
-export async function handleTop(interaction: ChatInputCommandInteraction) {
+export async function handleTop(
+  interaction: ChatInputCommandInteraction,
+): Promise<void> {
   if (!interaction.inGuild()) {
     await interaction.reply({
       content: "サーバー内で使ってね。",
@@ -78,11 +83,21 @@ export async function handleTop(interaction: ChatInputCommandInteraction) {
     return;
   }
 
-  await interaction.deferReply({ ephemeral: false });
+  const guildId = interaction.guildId;
+  if (!guildId) {
+    await interaction.reply({
+      content: "サーバー情報を取得できませんでした。",
+      ephemeral: true,
+    });
+    return;
+  }
 
-  const store = loadGuildStore(interaction.guildId!);
-  const entries = Object.entries(store.counts);
-  const sorted = entries.sort((a, b) => compareBigIntDesc(a[1], b[1]));
+  await interaction.deferReply();
+
+  const store = loadGuildStore(guildId);
+  const sorted: RankingEntry[] = Object.entries(store.counts).sort((a, b) =>
+    compareBigIntDesc(a[1], b[1]),
+  );
 
   if (sorted.length === 0) {
     await interaction.editReply({
@@ -98,8 +113,8 @@ export async function handleTop(interaction: ChatInputCommandInteraction) {
   let page = 0;
   const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
 
-  const embed = await makePageEmbed(interaction, sorted, page);
-  const row = makeRow(page, totalPages);
+  const embed = await buildPageEmbed(interaction, sorted, page);
+  const row = buildNavRow(page, totalPages);
 
   // 一部の環境で InteractionReply の components が取得できないエラーを避けるため、reply → fetchReply の二段
   await interaction.editReply({
@@ -107,10 +122,10 @@ export async function handleTop(interaction: ChatInputCommandInteraction) {
     components: [row],
     allowedMentions: { parse: [] },
   });
-  const msg = await interaction.fetchReply();
+  const message = await interaction.fetchReply();
 
   // ボタン収集
-  const collector = msg.createMessageComponentCollector({
+  const collector = message.createMessageComponentCollector({
     componentType: ComponentType.Button,
     time: 60_000,
     filter: (i) => i.user.id === interaction.user.id,
@@ -129,10 +144,10 @@ export async function handleTop(interaction: ChatInputCommandInteraction) {
     page = Math.max(0, Math.min(page + dir, totalPages - 1));
 
     // ❸ メッセージ編集（Interaction.update は使わない）
-    const newEmbed = await makePageEmbed(interaction, sorted, page);
-    await msg.edit({
+    const newEmbed = await buildPageEmbed(interaction, sorted, page);
+    await message.edit({
       embeds: [newEmbed],
-      components: [makeRow(page, totalPages)],
+      components: [buildNavRow(page, totalPages)],
       allowedMentions: { parse: [] },
     });
   });
@@ -152,6 +167,6 @@ export async function handleTop(interaction: ChatInputCommandInteraction) {
         .setDisabled(true),
     );
     // メッセージの編集は、fetchReply が成功している前提で msg.edit を使う
-    await msg.edit({ components: [disabledRow] }).catch(() => null);
+    await message.edit({ components: [disabledRow] }).catch(() => undefined);
   });
 }

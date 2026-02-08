@@ -2,15 +2,36 @@
 import {
   ChannelType,
   TextChannel,
-  ChatInputCommandInteraction,
-  ButtonInteraction,
-  ModalSubmitInteraction,
 } from "discord.js";
 import { LOG_CHANNEL_ID } from "./config";
 import { getSetting } from "./data";
 import { displayNameFrom, AnyInteraction } from "./utils/displayNameUtil";
 
 const LOG_CHANNEL_KEY = "logChannelId";
+
+async function resolveLogChannel(
+  interaction: AnyInteraction,
+  guildId: string,
+): Promise<TextChannel | null> {
+  const channelCandidates = Array.from(
+    new Set(
+      [getSetting(guildId, LOG_CHANNEL_KEY), LOG_CHANNEL_ID].filter(
+        (value): value is string => Boolean(value),
+      ),
+    ),
+  );
+
+  for (const channelId of channelCandidates) {
+    const channel = await interaction.client.channels
+      .fetch(channelId)
+      .catch(() => null);
+    if (!channel || channel.type !== ChannelType.GuildText) continue;
+    if (channel.guildId !== guildId) continue;
+    return channel;
+  }
+
+  return null;
+}
 
 export async function sendLog(
   interaction: AnyInteraction,
@@ -24,28 +45,13 @@ export async function sendLog(
   if (!guild) return;
 
   const guildId = interaction.guildId ?? guild.id;
-  const customChannelId = guildId ? getSetting(guildId, LOG_CHANNEL_KEY) : null;
-  let channelId = customChannelId || LOG_CHANNEL_ID;
-  if (!channelId) return;
-
-  let ch = await interaction.client.channels.fetch(channelId).catch(() => null);
-
-  if (
-    !ch &&
-    customChannelId &&
-    LOG_CHANNEL_ID &&
-    LOG_CHANNEL_ID !== customChannelId
-  ) {
-    channelId = LOG_CHANNEL_ID;
-    ch = await interaction.client.channels.fetch(channelId).catch(() => null);
-  }
-
-  if (!ch || ch.type !== ChannelType.GuildText) return;
+  const channel = await resolveLogChannel(interaction, guildId);
+  if (!channel) return;
 
   const actorName = await displayNameFrom(interaction, actorId);
   const targetName = await displayNameFrom(interaction, targetId);
 
-  await (ch as TextChannel).send({
+  await channel.send({
     content:
       `${actorName} → ${targetName}\n` +
       `理由: ${reason}\n` +

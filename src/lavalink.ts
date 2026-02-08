@@ -1,13 +1,12 @@
 // src/lavalink.ts
 import { Client } from "discord.js";
-import { LavalinkManager } from "lavalink-client";
+import { LavalinkManager, type ManagerOptions, type Player } from "lavalink-client";
 
 // このプロジェクト用の Client 型
-export type ShibakuClient = Client & { lavalink: LavalinkManager };
+export type ShibakuClient = Client & { lavalink: LavalinkManager<Player> };
 
-export function initLavalink(client: ShibakuClient) {
-  // LavalinkManager を1回だけ作る
-  client.lavalink = new LavalinkManager({
+function createLavalinkOptions(client: Client): ManagerOptions<Player> {
+  return {
     nodes: [
       {
         id: "local",
@@ -18,8 +17,9 @@ export function initLavalink(client: ShibakuClient) {
       },
     ],
     // Discord 側へボイス関連のパケットを送る
-    sendToShard: (guildId, payload) =>
-      client.guilds.cache.get(guildId)?.shard?.send(payload),
+    sendToShard: (guildId, payload) => {
+      client.guilds.cache.get(guildId)?.shard?.send(payload);
+    },
     client: {
       // ready 前は undefined なので、とりあえずダミー
       id: client.user?.id ?? "0",
@@ -34,11 +34,23 @@ export function initLavalink(client: ShibakuClient) {
     queueOptions: {
       maxPreviousTracks: 25,
     },
-  });
+  };
+}
+
+export function initLavalink(client: Client): ShibakuClient {
+  const typedClient = client as ShibakuClient;
+
+  typedClient.lavalink = new LavalinkManager<Player>(
+    createLavalinkOptions(typedClient),
+  );
 
   // Discord の raw イベントを Lavalink に渡す
-  // 変更後
-  client.on("raw", (data: any) => {
-    client.lavalink.sendRawData(data);
-  });
+  typedClient.on(
+    "raw",
+    (data: Parameters<LavalinkManager<Player>["sendRawData"]>[0]) => {
+      void typedClient.lavalink.sendRawData(data);
+    },
+  );
+
+  return typedClient;
 }
