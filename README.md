@@ -16,7 +16,7 @@ Discordサーバー向けの「しばくカウント」Bot。
 - Discord Bot の Privileged Intents: **Server Members / Message Content**
 - Voice States Intent（音楽/VC操作用）
 - 音楽機能を使う場合: Lavalink を別プロセスで起動  
-  - 接続先は `src/index.ts` の `LavalinkManager` 設定に合わせてください  
+  - 接続先は `.env` の `LAVALINK_*` 設定に合わせてください  
     （デフォルト: `127.0.0.1:2333`, password `youshallnotpass`）
 
 ## セットアップ
@@ -55,10 +55,16 @@ LOG_CHANNEL_ID=...        # 任意：ログチャンネル（未設定なら /me
 
 # 音楽/アップロード
 FILE_DIR=./files          # 任意：アップロード保存先
+FILE_HOST=0.0.0.0         # 任意：ファイルサーバーのバインド先
 FILE_PORT=3001            # 任意：ファイルサーバーのポート
 UPLOAD_INTERNAL_URL=http://127.0.0.1:3001/uploads
 UPLOAD_BASE_URL=http://your.domain:3001/uploads
 MUSIC_MAX_MINUTES=15      # 任意：1曲の上限(分)
+
+# Lavalink（任意、未設定時は下記デフォルト）
+LAVALINK_HOST=127.0.0.1
+LAVALINK_PORT=2333
+LAVALINK_PASSWORD=youshallnotpass
 
 # コマンド登録時の挙動
 CLEAR_GLOBAL=true         # 任意：register 時にグローバルコマンドを削除
@@ -69,8 +75,8 @@ CLEAR_GLOBAL=true         # 任意：register 時にグローバルコマンド�
 - `OWNER_IDS` は管理者権限に加えて「開発者扱い」のユーザーIDです。
 - `LOG_CHANNEL_ID` はログ送信のデフォルト。/menu → サーバー設定で上書き可能です。
 - `UPLOAD_INTERNAL_URL` は Lavalink から到達できる URL を指定してください。
-- `UPLOAD_INTERNAL_URL` / `UPLOAD_BASE_URL` を未設定の場合、`src/music.ts` 内の既定値が使われます。
-- ファイルサーバーのホストは `src/index.ts` の `FILE_HOST` で固定です。必要なら編集してください。
+- `UPLOAD_INTERNAL_URL` / `UPLOAD_BASE_URL` 未設定時は、`FILE_HOST` / `FILE_PORT` から自動で既定URLが組み立てられます。
+- ファイルサーバーのホストは `FILE_HOST`（未設定時 `0.0.0.0`）で変更できます。
 
 ## コマンド
 ### スラッシュコマンド（`npm run register` で登録）

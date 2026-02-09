@@ -2,16 +2,13 @@ import {
   type ChatInputCommandInteraction,
   PermissionFlagsBits,
 } from "discord.js";
+import { getRuntimeConfig } from "../config/runtime";
+import { COMMON_MESSAGES } from "../constants/messages";
 import { setMaintenanceEnabled } from "../data";
 
 type MaintenanceMode = "on" | "off";
 
-const OWNER_IDS = new Set(
-  (process.env.OWNER_IDS ?? "")
-    .split(",")
-    .map((value) => value.trim())
-    .filter((value): value is string => value.length > 0),
-);
+const runtimeConfig = getRuntimeConfig();
 
 function toMaintenanceMode(raw: string): MaintenanceMode | null {
   const normalized = raw.trim().toLowerCase();
@@ -28,7 +25,7 @@ function canToggleMaintenance(
     interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) ??
     false;
   const isGuildOwner = interaction.guild?.ownerId === interaction.user.id;
-  const isDevOwner = OWNER_IDS.has(interaction.user.id);
+  const isDevOwner = runtimeConfig.discord.ownerIds.has(interaction.user.id);
   return isAdmin || isGuildOwner || isDevOwner;
 }
 
@@ -37,7 +34,7 @@ export async function handleMaintenance(
 ): Promise<void> {
   if (!interaction.inGuild()) {
     await interaction.reply({
-      content: "⚠️ サーバー内でのみ使用できます。",
+      content: `⚠️ ${COMMON_MESSAGES.guildOnly}`,
       ephemeral: true,
     });
     return;
@@ -54,7 +51,7 @@ export async function handleMaintenance(
   const guildId = interaction.guildId;
   if (!guildId) {
     await interaction.reply({
-      content: "⚠️ サーバー情報を取得できませんでした。",
+      content: `⚠️ ${COMMON_MESSAGES.guildUnavailable}`,
       ephemeral: true,
     });
     return;

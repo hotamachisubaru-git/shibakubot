@@ -3,20 +3,17 @@ import {
   type ChatInputCommandInteraction,
   PermissionFlagsBits,
 } from "discord.js";
-import { loadGuildStore } from "../data";
+import { getRuntimeConfig } from "../config/runtime";
+import { COMMON_MESSAGES } from "../constants/messages";
+import { loadGuildStore, setCountGuild } from "../data";
 
-const OWNER_IDS = new Set(
-  (process.env.OWNER_IDS ?? "")
-    .split(",")
-    .map((value) => value.trim())
-    .filter((value): value is string => value.length > 0),
-);
+const runtimeConfig = getRuntimeConfig();
 
 function canReset(interaction: ChatInputCommandInteraction): boolean {
   const isAdmin =
     interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) ??
     false;
-  const isOwner = OWNER_IDS.has(interaction.user.id);
+  const isOwner = runtimeConfig.discord.ownerIds.has(interaction.user.id);
   return isAdmin || isOwner;
 }
 
@@ -25,7 +22,7 @@ export async function handleReset(
 ): Promise<void> {
   if (!interaction.inGuild()) {
     await interaction.reply({
-      content: "このコマンドはサーバー内でのみ使用できます。",
+      content: COMMON_MESSAGES.guildOnly,
       ephemeral: true,
     });
     return;
@@ -43,7 +40,7 @@ export async function handleReset(
   const guildId = interaction.guildId;
   if (!guild || !guildId) {
     await interaction.reply({
-      content: "サーバー情報を取得できませんでした。",
+      content: COMMON_MESSAGES.guildUnavailable,
       ephemeral: true,
     });
     return;
@@ -54,7 +51,9 @@ export async function handleReset(
   const store = loadGuildStore(guildId);
 
   if (resetAll) {
-    store.counts = {};
+    for (const userId of Object.keys(store.counts)) {
+      setCountGuild(guildId, userId, 0n);
+    }
 
     await interaction.reply({
       content: "全員のしばき回数を0にリセットしました。",
@@ -64,7 +63,7 @@ export async function handleReset(
   }
 
   if (target) {
-    store.counts[target.id] = 0n;
+    setCountGuild(guildId, target.id, 0n);
 
     const member = await guild.members.fetch(target.id).catch(() => null);
     const display = member?.displayName ?? target.tag;

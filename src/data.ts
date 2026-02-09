@@ -2,6 +2,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
+import { getRuntimeConfig } from "./config/runtime";
+import { GUILD_DB_ROOT } from "./constants/paths";
+import { SETTING_KEYS } from "./constants/settings";
 
 export type CounterMap = Record<string, bigint>;
 export type SbkRange = { min: number; max: number };
@@ -15,6 +18,7 @@ export type SbkLogRow = {
 };
 
 const BIGINT_RE = /^-?\d+$/;
+const runtimeConfig = getRuntimeConfig();
 
 function hasTextAffinity(type?: string | null): boolean {
   const t = (type ?? "").toUpperCase();
@@ -55,7 +59,7 @@ function parseSettingBoolean(raw: string | null, fallback: boolean): boolean {
 }
 
 // ---------- パス系 ----------
-const DATA_DIR = path.join(process.cwd(), "data", "guilds");
+const DATA_DIR = GUILD_DB_ROOT;
 function ensureDir(p: string) {
   if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true });
 }
@@ -315,10 +319,8 @@ export function isImmune(gid: string, userId: string): boolean {
 }
 
 // ---------- しばく回数の範囲 ----------
-const SBK_MIN_KEY = "sbkMin";
-const SBK_MAX_KEY = "sbkMax";
-const SBK_MIN_DEFAULT = 1;
-const SBK_MAX_DEFAULT = 25; // 初期値としてだけ使う
+const SBK_MIN_DEFAULT = runtimeConfig.sbk.min;
+const SBK_MAX_DEFAULT = runtimeConfig.sbk.max; // 初期値としてだけ使う
 
 export function getSetting(gid: string, key: string): string | null {
   const db = openDb(gid);
@@ -346,10 +348,10 @@ export function getSbkRange(gid: string): SbkRange {
   const db = openDb(gid);
   const minRow = db
     .prepare(`SELECT value FROM settings WHERE key=?`)
-    .get(SBK_MIN_KEY) as { value: string } | undefined;
+    .get(SETTING_KEYS.sbkMin) as { value: string } | undefined;
   const maxRow = db
     .prepare(`SELECT value FROM settings WHERE key=?`)
-    .get(SBK_MAX_KEY) as { value: string } | undefined;
+    .get(SETTING_KEYS.sbkMax) as { value: string } | undefined;
 
   let min = Number(minRow?.value ?? SBK_MIN_DEFAULT);
   let max = Number(maxRow?.value ?? SBK_MAX_DEFAULT);
@@ -364,16 +366,15 @@ export function getSbkRange(gid: string): SbkRange {
   return { min, max };
 }
 // ---------- 音量設定 ----------
-const MUSIC_VOL_KEY = "musicVolume";
-const MUSIC_VOL_DEFAULT = 20;
+const MUSIC_VOL_DEFAULT = runtimeConfig.music.fixedVolume;
 const MUSIC_VOL_MIN = 0;
-const MUSIC_VOL_MAX = 20;
+const MUSIC_VOL_MAX = 100;
 
 export function getUserMusicVolume(gid: string, userId: string): number {
   const db = openDb(gid);
   const row = db
     .prepare(`SELECT value FROM user_music_settings WHERE userId=? AND key=?`)
-    .get(userId, MUSIC_VOL_KEY) as { value: string } | undefined;
+    .get(userId, SETTING_KEYS.musicVolume) as { value: string } | undefined;
 
   const v = Number(row?.value ?? MUSIC_VOL_DEFAULT);
   if (!Number.isFinite(v)) return MUSIC_VOL_DEFAULT;
@@ -398,14 +399,12 @@ export function setUserMusicVolume(
     INSERT INTO user_music_settings(userId, key, value) VALUES(?, ?, ?)
     ON CONFLICT(userId, key) DO UPDATE SET value = excluded.value
   `,
-  ).run(userId, MUSIC_VOL_KEY, String(clamped));
+  ).run(userId, SETTING_KEYS.musicVolume, String(clamped));
 
   return clamped;
 }
 
 // ---------- 音楽 NG ワード ----------
-const MUSIC_NG_KEY = "musicNgWords";
-
 function normalizeNgWord(word: string): string {
   return word.trim().toLowerCase();
 }
@@ -414,12 +413,12 @@ function saveMusicNgWords(gid: string, words: string[]): string[] {
   const normalized = Array.from(
     new Set(words.map(normalizeNgWord).filter((w) => w.length > 0)),
   ).sort();
-  setSetting(gid, MUSIC_NG_KEY, JSON.stringify(normalized));
+  setSetting(gid, SETTING_KEYS.musicNgWords, JSON.stringify(normalized));
   return normalized;
 }
 
 export function getMusicNgWords(gid: string): string[] {
-  const raw = getSetting(gid, MUSIC_NG_KEY);
+  const raw = getSetting(gid, SETTING_KEYS.musicNgWords);
   if (!raw) return [];
 
   try {
@@ -467,28 +466,27 @@ export function removeMusicNgWord(
 }
 
 export function clearMusicNgWords(gid: string): void {
-  setSetting(gid, MUSIC_NG_KEY, JSON.stringify([]));
+  setSetting(gid, SETTING_KEYS.musicNgWords, JSON.stringify([]));
 }
 // ---------- 音楽機能有効化設定 ----------
-const MUSIC_ENABLED_KEY = "musicEnabled";
-
 export function getMusicEnabled(gid: string): boolean {
-  return parseSettingBoolean(getSetting(gid, MUSIC_ENABLED_KEY), true);
+  return parseSettingBoolean(getSetting(gid, SETTING_KEYS.musicEnabled), true);
 }
 
 export function setMusicEnabled(gid: string, enabled: boolean): void {
-  setSetting(gid, MUSIC_ENABLED_KEY, enabled ? "true" : "false");
+  setSetting(gid, SETTING_KEYS.musicEnabled, enabled ? "true" : "false");
 }
 
 // ---------- メンテナンスモード ----------
-const MAINTENANCE_KEY = "maintenanceEnabled";
-
 export function getMaintenanceEnabled(gid: string): boolean {
-  return parseSettingBoolean(getSetting(gid, MAINTENANCE_KEY), false);
+  return parseSettingBoolean(
+    getSetting(gid, SETTING_KEYS.maintenanceEnabled),
+    false,
+  );
 }
 
 export function setMaintenanceEnabled(gid: string, enabled: boolean): void {
-  setSetting(gid, MAINTENANCE_KEY, enabled ? "true" : "false");
+  setSetting(gid, SETTING_KEYS.maintenanceEnabled, enabled ? "true" : "false");
 }
 
 export function setSbkRange(gid: string, min: number, max: number): SbkRange {
@@ -506,13 +504,13 @@ export function setSbkRange(gid: string, min: number, max: number): SbkRange {
       INSERT INTO settings(key, value) VALUES(?, ?)
       ON CONFLICT(key) DO UPDATE SET value=excluded.value
     `,
-    ).run(SBK_MIN_KEY, String(normalizedMin));
+    ).run(SETTING_KEYS.sbkMin, String(normalizedMin));
     db.prepare(
       `
       INSERT INTO settings(key, value) VALUES(?, ?)
       ON CONFLICT(key) DO UPDATE SET value=excluded.value
     `,
-    ).run(SBK_MAX_KEY, String(normalizedMax));
+    ).run(SETTING_KEYS.sbkMax, String(normalizedMax));
   })();
 
   return { min: normalizedMin, max: normalizedMax };

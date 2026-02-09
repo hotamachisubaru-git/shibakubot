@@ -1,19 +1,22 @@
 // src/lavalink.ts
 import { Client } from "discord.js";
 import { LavalinkManager, type ManagerOptions, type Player } from "lavalink-client";
+import { getRuntimeConfig } from "./config/runtime";
 
 // このプロジェクト用の Client 型
 export type ShibakuClient = Client & { lavalink: LavalinkManager<Player> };
 
 function createLavalinkOptions(client: Client): ManagerOptions<Player> {
+  const runtimeConfig = getRuntimeConfig();
+
   return {
     nodes: [
       {
-        id: "local",
-        host: "0.0.0.0",
-        port: 2333,
-        authorization: "youshallnotpass", // application.yml と合わせる
-        secure: false,
+        id: runtimeConfig.lavalink.nodeId,
+        host: runtimeConfig.lavalink.host,
+        port: runtimeConfig.lavalink.port,
+        authorization: runtimeConfig.lavalink.authorization,
+        secure: runtimeConfig.lavalink.secure,
       },
     ],
     // Discord 側へボイス関連のパケットを送る
@@ -23,16 +26,25 @@ function createLavalinkOptions(client: Client): ManagerOptions<Player> {
     client: {
       // ready 前は undefined なので、とりあえずダミー
       id: client.user?.id ?? "0",
-      username: client.user?.username ?? "shibakubot",
+      username: client.user?.username ?? runtimeConfig.lavalink.username,
     },
-    // 以下はお好みで
+
     autoSkip: true,
     playerOptions: {
-      defaultSearchPlatform: "ytmsearch",
-      volumeDecrementer: 0.75,
+      defaultSearchPlatform: runtimeConfig.lavalink.defaultSearchPlatform,
+      volumeDecrementer: runtimeConfig.lavalink.volumeDecrementer,
+      clientBasedPositionUpdateInterval:
+        runtimeConfig.lavalink.clientPositionUpdateInterval,
+      onDisconnect: {
+        autoReconnect: true,
+        destroyPlayer: false,
+      },
+      onEmptyQueue: {
+        destroyAfterMs: runtimeConfig.lavalink.emptyQueueDestroyMs,
+      },
     },
     queueOptions: {
-      maxPreviousTracks: 25,
+      maxPreviousTracks: runtimeConfig.lavalink.maxPreviousTracks,
     },
   };
 }

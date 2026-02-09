@@ -3,13 +3,15 @@ Object.defineProperty(exports, "__esModule", { value: true });
 // src/deploy-commands.ts
 require("dotenv/config");
 const discord_js_1 = require("discord.js");
-function parseCsvEnv(raw) {
-    if (!raw)
-        return [];
-    return raw
-        .split(",")
-        .map((token) => token.trim())
-        .filter((token) => token.length > 0);
+const runtime_1 = require("./config/runtime");
+const commandCatalog_1 = require("./discord/commandCatalog");
+function resolveDeployConfig() {
+    const runtimeConfig = (0, runtime_1.getRuntimeConfig)();
+    return {
+        token: runtimeConfig.discord.token,
+        clientId: runtimeConfig.discord.clientId,
+        guildIds: runtimeConfig.discord.guildIds,
+    };
 }
 function arrayCount(value) {
     return Array.isArray(value) ? value.length : 0;
@@ -17,87 +19,26 @@ function arrayCount(value) {
 function hasRawError(value) {
     return typeof value === "object" && value !== null && "rawError" in value;
 }
-const TOKEN = process.env.TOKEN?.trim() ?? "";
-const CLIENT_ID = process.env.CLIENT_ID?.trim() ?? "";
-const GUILD_IDS = parseCsvEnv(process.env.GUILD_IDS ?? process.env.GUILD_ID);
+const deployConfig = resolveDeployConfig();
+const runtimeConfig = (0, runtime_1.getRuntimeConfig)();
 // 環境チェック
-if (!TOKEN || !CLIENT_ID || GUILD_IDS.length === 0) {
+if (!deployConfig.token ||
+    !deployConfig.clientId ||
+    deployConfig.guildIds.length === 0) {
     console.error("❌ 環境変数が不足しています。TOKEN, CLIENT_ID, GUILD_IDS を確認してください。");
     process.exit(1);
 }
-// ---- ギルド向けのスラッシュコマンドを登録 ----
-const commands = [
-    // /ping 生存確認
-    new discord_js_1.SlashCommandBuilder()
-        .setName("ping")
-        .setDescription("BOTが生きているか確認する")
-        .toJSON(),
-    // /sbk 本体
-    new discord_js_1.SlashCommandBuilder()
-        .setName("sbk")
-        .setDescription("ユーザーをしばく")
-        .addUserOption((opt) => opt.setName("user").setDescription("しばく対象").setRequired(true))
-        .addStringOption((opt) => opt
-        .setName("count")
-        .setDescription("しばく回数（省略可・ランダム）")
-        .setRequired(false))
-        .addStringOption((opt) => opt
-        .setName("reason")
-        .setDescription("理由（省略可・ランダム）")
-        .setRequired(false))
-        .toJSON(),
-    // /menu メニュー
-    new discord_js_1.SlashCommandBuilder()
-        .setName("menu")
-        .setDescription("しばくbot メニューを表示する")
-        .toJSON(),
-    // /help コマンド一覧
-    new discord_js_1.SlashCommandBuilder()
-        .setName("help")
-        .setDescription("コマンド一覧を表示する")
-        .toJSON(),
-    // /suimin VC移動
-    new discord_js_1.SlashCommandBuilder()
-        .setName("suimin")
-        .setDescription("指定ユーザーをVCに移動")
-        .addUserOption((opt) => opt.setName("user").setDescription("移動するユーザー").setRequired(true))
-        .addChannelOption((opt) => opt
-        .setName("channel")
-        .setDescription("移動先のボイスチャンネル")
-        .addChannelTypes(discord_js_1.ChannelType.GuildVoice, discord_js_1.ChannelType.GuildStageVoice)
-        .setRequired(true))
-        .toJSON(),
-    // /maintenance メンテナンスモード切り替え
-    new discord_js_1.SlashCommandBuilder()
-        .setName("maintenance")
-        .setDescription("メンテナンスモードを切り替える（管理者のみ）")
-        .addStringOption((opt) => opt
-        .setName("mode")
-        .setDescription("on / off を指定")
-        .setRequired(true)
-        .addChoices({ name: "on", value: "on" }, { name: "off", value: "off" }))
-        .toJSON(),
-    // /mt メンテナンスモード切り替え（短縮）
-    new discord_js_1.SlashCommandBuilder()
-        .setName("mt")
-        .setDescription("メンテナンスモードを切り替える（短縮コマンド）")
-        .addStringOption((opt) => opt
-        .setName("mode")
-        .setDescription("on / off を指定")
-        .setRequired(true)
-        .addChoices({ name: "on", value: "on" }, { name: "off", value: "off" }))
-        .toJSON(),
-];
-const rest = new discord_js_1.REST({ version: "10" }).setToken(TOKEN);
+const commands = (0, commandCatalog_1.getSlashCommandJson)();
+const rest = new discord_js_1.REST({ version: "10" }).setToken(deployConfig.token);
 (async () => {
     console.log("⏫ コマンド登録中...");
-    console.log(`   CLIENT_ID=${CLIENT_ID}`);
-    console.log(`   GUILD_IDS=${GUILD_IDS.join(", ")}`);
+    console.log(`   CLIENT_ID=${deployConfig.clientId}`);
+    console.log(`   GUILD_IDS=${deployConfig.guildIds.join(", ")}`);
     try {
         // --- 任意: グローバルコマンドを全削除（残っていると古い表示が混在しがち） ---
-        if ((process.env.CLEAR_GLOBAL || "true").toLowerCase() === "true") {
+        if (runtimeConfig.app.clearGlobalCommandsOnRegister) {
             console.log("🧹 グローバルコマンドを全削除します...");
-            const res = await rest.put(discord_js_1.Routes.applicationCommands(CLIENT_ID), {
+            const res = await rest.put(discord_js_1.Routes.applicationCommands(deployConfig.clientId), {
                 body: [],
             });
             console.log(`   ✔ グローバル削除完了（${arrayCount(res)} 件）`);
@@ -106,10 +47,10 @@ const rest = new discord_js_1.REST({ version: "10" }).setToken(TOKEN);
             console.log("（グローバル削除はスキップ: CLEAR_GLOBAL=false）");
         }
         // --- ギルド単位で順次（直列）登録：レート制限を避け、失敗点を特定しやすくする ---
-        for (const gid of GUILD_IDS) {
-            console.log(`📝 ギルド(${gid}) に置換登録中...`);
-            const registered = await rest.put(discord_js_1.Routes.applicationGuildCommands(CLIENT_ID, gid), { body: commands });
-            console.log(`   ✔ 登録完了: guild=${gid} / count=${arrayCount(registered)}`);
+        for (const guildId of deployConfig.guildIds) {
+            console.log(`📝 ギルド(${guildId}) に置換登録中...`);
+            const registered = await rest.put(discord_js_1.Routes.applicationGuildCommands(deployConfig.clientId, guildId), { body: commands });
+            console.log(`   ✔ 登録完了: guild=${guildId} / count=${arrayCount(registered)}`);
         }
         console.log("✅ すべての登録処理が完了しました。");
         process.exit(0);

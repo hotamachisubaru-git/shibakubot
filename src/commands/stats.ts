@@ -4,15 +4,13 @@ import {
   EmbedBuilder,
   PermissionFlagsBits,
 } from "discord.js";
+import { getRuntimeConfig } from "../config/runtime";
+import { EMBED_COLORS } from "../constants/embedColors";
+import { COMMON_MESSAGES } from "../constants/messages";
 import { loadGuildStore } from "../data";
 import { compareBigIntDesc } from "../utils/bigint";
 
-const OWNER_IDS = new Set(
-  (process.env.OWNER_IDS ?? "")
-    .split(",")
-    .map((value) => value.trim())
-    .filter((value): value is string => value.length > 0),
-);
+const runtimeConfig = getRuntimeConfig();
 
 function formatAverage(total: bigint, members: number): string {
   if (members <= 0) return "0";
@@ -27,7 +25,7 @@ function canViewStats(interaction: ChatInputCommandInteraction): boolean {
   const isAdmin =
     interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) ??
     false;
-  const isOwner = OWNER_IDS.has(interaction.user.id);
+  const isOwner = runtimeConfig.discord.ownerIds.has(interaction.user.id);
   return isAdmin || isOwner;
 }
 
@@ -36,7 +34,7 @@ export async function handleStats(
 ): Promise<void> {
   if (!interaction.inGuild()) {
     await interaction.reply({
-      content: "このコマンドはサーバー内でのみ使用できます。",
+      content: COMMON_MESSAGES.guildOnly,
       ephemeral: true,
     });
     return;
@@ -53,7 +51,7 @@ export async function handleStats(
   const guildId = interaction.guildId;
   if (!guildId) {
     await interaction.reply({
-      content: "サーバー情報を取得できませんでした。",
+      content: COMMON_MESSAGES.guildUnavailable,
       ephemeral: true,
     });
     return;
@@ -82,7 +80,7 @@ export async function handleStats(
       { name: "しばかれ回数 TOP 5", value: top },
     )
     .setFooter({ text: `最終更新: ${new Date().toLocaleString("ja-JP")}` })
-    .setColor(0x00ff7f);
+    .setColor(EMBED_COLORS.success);
 
   await interaction.reply({ embeds: [embed], ephemeral: true });
 }

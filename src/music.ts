@@ -1,7 +1,6 @@
 // src/music.ts
 import { GuildMember, Message, PermissionFlagsBits } from "discord.js";
 import * as mm from "music-metadata";
-import express from "express";
 import fs from "node:fs";
 import crypto from "node:crypto";
 import path from "node:path";
@@ -21,26 +20,23 @@ import {
   getMusicEnabled,
   setMusicEnabled,
 } from "./data";
+import { getRuntimeConfig } from "./config/runtime";
+import { MUSIC_TEXT_COMMAND } from "./constants/commands";
+import { makeInternalUrl } from "./utils/makeInternalUrl";
+import { makePublicUrl } from "./utils/makePublicUrl";
 
-const PREFIX = "s!";
-const FIXED_VOLUME = 20;
-const MAX_SELECTION_RESULTS = 10;
-const PENDING_SEARCH_TTL_MS = 5 * 60 * 1000;
-
-function parsePositiveInt(raw: string | undefined, fallback: number): number {
-  if (!raw) return fallback;
-  const parsed = Number.parseInt(raw, 10);
-  if (!Number.isFinite(parsed) || parsed < 1) return fallback;
-  return parsed;
-}
-
-function parseCsvIds(raw: string | undefined): string[] {
-  if (!raw) return [];
-  return raw
-    .split(",")
-    .map((token) => token.trim())
-    .filter((token): token is string => token.length > 0);
-}
+const runtimeConfig = getRuntimeConfig();
+const PREFIX = runtimeConfig.music.prefix;
+const FIXED_VOLUME = runtimeConfig.music.fixedVolume;
+const MAX_SELECTION_RESULTS = runtimeConfig.music.maxSelectionResults;
+const PENDING_SEARCH_TTL_MS = runtimeConfig.music.pendingSearchTtlMs;
+const MAX_TRACK_MINUTES = runtimeConfig.music.maxTrackMinutes;
+const MAX_TRACK_MS = runtimeConfig.music.maxTrackMs;
+const OWNER_IDS = runtimeConfig.discord.ownerIds;
+const UPLOAD_DIR = runtimeConfig.fileServer.uploadDir;
+const ALLOWED_EXTENSIONS = runtimeConfig.music.allowedExtensions;
+const ALLOWED_EXTENSIONS_LABEL = runtimeConfig.music.allowedExtensionsLabel;
+const CONTENT_TYPE_TO_EXTENSION = runtimeConfig.music.contentTypeToExtension;
 
 function getLavalink(message: Message): LavalinkManager<Player> | null {
   const client = message.client as Message["client"] & {
@@ -77,10 +73,6 @@ type PendingSearch = {
   query: string;
   expiresAt: number;
 };
-
-const MAX_TRACK_MINUTES = parsePositiveInt(process.env.MUSIC_MAX_MINUTES, 15); // デフォ15分
-const MAX_TRACK_MS = MAX_TRACK_MINUTES * 60 * 1000;
-const OWNER_IDS = parseCsvIds(process.env.OWNER_IDS);
 
 // ギルドごとの自動停止タイマー（長さ不明対策・上限厳守）
 const autoStopTimers = new Map<string, NodeJS.Timeout>();
@@ -148,29 +140,6 @@ function hookManagerAutoStopOnce(lavalink: LavalinkManager<Player>): void {
 }
 
 const pendingSearches = new Map<string, PendingSearch>();
-// ===== ファイルアップロード用の簡易サーバー設定 =====
-const UPLOAD_DIR = path.resolve(process.env.FILE_DIR || "./files");
-//サーバー起動
-const app = express();
-app.use("/uploads", express.static(UPLOAD_DIR));
-const PORT = Number(process.env.FILE_PORT || 3001);
-app.listen(PORT, "0.0.0.0", () => {
-  // console.log(`📦 Upload file server: http://192.168.11.2:${PORT}/uploads/`);
-});
-
-function makeInternalUrl(filename: string) {
-  // Lavalink が同じPCならこれが最強
-  const base =
-    process.env.UPLOAD_INTERNAL_URL || "http://192.168.11.2:3001/uploads";
-  return `${base}/${filename}`;
-}
-
-function makePublicUrl(filename: string) {
-  // 人に見せる用（任意）
-  const base =
-    process.env.UPLOAD_BASE_URL || "http://play.hotamachi.jp:3001/uploads";
-  return `${base}/${filename}`;
-}
 
 function findNgWordMatch(
   texts: Array<string | undefined>,
@@ -493,21 +462,21 @@ export async function handleMusicMessage(message: Message) {
 
   // 音楽機能が無効の場合、disable/enable以外は拒否
   if (
-    command !== "disable" &&
-    command !== "enable" &&
-    command !== "d" &&
-    command !== "e"
+    command !== MUSIC_TEXT_COMMAND.disable &&
+    command !== MUSIC_TEXT_COMMAND.enable &&
+    command !== MUSIC_TEXT_COMMAND.disableAlias &&
+    command !== MUSIC_TEXT_COMMAND.enableAlias
   ) {
     if (!getMusicEnabled(guildId)) {
       await message.reply(
-        "⚠️ 音楽機能が無効化されています。管理者権限で `s!enable` で有効化してください。",
+        `⚠️ 音楽機能が無効化されています。管理者権限で \`${PREFIX}${MUSIC_TEXT_COMMAND.enable}\` で有効化してください。`,
       );
       return;
     }
   }
 
   try {
-    if (command === "play") {
+    if (command === MUSIC_TEXT_COMMAND.play) {
       const query = rest.join(" ").trim();
       if (!query) {
         await message.reply(
@@ -532,39 +501,51 @@ export async function handleMusicMessage(message: Message) {
           return;
         }
         await message.reply(
-          "⚠️ その番号を選択できる候補がありません。先に s!play で曲を検索してください。",
+          `⚠️ その番号を選択できる候補がありません。先に ${PREFIX}${MUSIC_TEXT_COMMAND.play} で曲を検索してください。`,
         );
         return;
       }
       await handlePlay(message, query);
-    } else if (command === "skip") {
+    } else if (command === MUSIC_TEXT_COMMAND.skip) {
       await handleSkip(message);
-    } else if (command === "stop") {
+    } else if (command === MUSIC_TEXT_COMMAND.stop) {
       await handleStop(message);
-    } else if (command === "queue") {
+    } else if (command === MUSIC_TEXT_COMMAND.queue) {
       await handleQueue(message);
-    } else if (command === "upload") {
+    } else if (command === MUSIC_TEXT_COMMAND.upload) {
       await handleUpload(message, rest.join(" ").trim());
-    } else if (command === "ng" || command === "ngword") {
+    } else if (
+      command === MUSIC_TEXT_COMMAND.ng ||
+      command === MUSIC_TEXT_COMMAND.ngAlias
+    ) {
       await handleNgWordCommand(message, rest);
-    } else if (command === "help") {
+    } else if (command === MUSIC_TEXT_COMMAND.help) {
       await message.reply(
         "🎵 音楽コマンド一覧:\n" +
-          "`s!play <URL or キーワード>` - 曲を再生・キューに追加\n" +
-          "`s!skip` - 曲をスキップ\n" +
-          "`s!stop` - 再生を停止し、VCから退出\n" +
-          "`s!queue` - 再生中・キュー中の曲一覧を表示\n" +
-          "`s!upload [表示名]` - 音楽ファイルをアップロードして再生（対応形式: mp3, wav, flac, m4a, aac, ogg）\n" +
-          "`s!ng <サブコマンド>` - 音楽NGワード管理コマンド（管理者のみ）\n" +
-          "（例: `s!ng add <ワード>` / `s!ng remove <ワード>` / `s!ng list` / `s!ng clear`）\n" +
-          "`s!disable` (s!d) - 音楽機能を無効化（管理者のみ）\n" +
-          "`s!enable` (s!e) - 音楽機能を有効化（管理者のみ）",
+          `\`${PREFIX}${MUSIC_TEXT_COMMAND.play} <URL or キーワード>\` - 曲を再生・キューに追加\n` +
+          `\`${PREFIX}${MUSIC_TEXT_COMMAND.skip}\` - 曲をスキップ\n` +
+          `\`${PREFIX}${MUSIC_TEXT_COMMAND.stop}\` - 再生を停止し、VCから退出\n` +
+          `\`${PREFIX}${MUSIC_TEXT_COMMAND.queue}\` - 再生中・キュー中の曲一覧を表示\n` +
+          `\`${PREFIX}${MUSIC_TEXT_COMMAND.upload} [表示名]\` - 音楽ファイルをアップロードして再生（対応形式: ${ALLOWED_EXTENSIONS_LABEL}）\n` +
+          `\`${PREFIX}${MUSIC_TEXT_COMMAND.ng} <サブコマンド>\` - 音楽NGワード管理コマンド（管理者のみ）\n` +
+          `（例: \`${PREFIX}${MUSIC_TEXT_COMMAND.ng} add <ワード>\` / \`${PREFIX}${MUSIC_TEXT_COMMAND.ng} remove <ワード>\` / \`${PREFIX}${MUSIC_TEXT_COMMAND.ng} list\` / \`${PREFIX}${MUSIC_TEXT_COMMAND.ng} clear\`）\n` +
+          `\`${PREFIX}${MUSIC_TEXT_COMMAND.disable}\` (${PREFIX}${MUSIC_TEXT_COMMAND.disableAlias}) - 音楽機能を無効化（管理者のみ）\n` +
+          `\`${PREFIX}${MUSIC_TEXT_COMMAND.enable}\` (${PREFIX}${MUSIC_TEXT_COMMAND.enableAlias}) - 音楽機能を有効化（管理者のみ）`,
       );
-    } else if (command === "remove" || command === "delete") {
+    } else if (
+      command === MUSIC_TEXT_COMMAND.remove ||
+      command === MUSIC_TEXT_COMMAND.removeAlias
+    ) {
       await handleRemoveCommand(message, rest);
-    } else if (command === "disable" || command === "d") {
+    } else if (
+      command === MUSIC_TEXT_COMMAND.disable ||
+      command === MUSIC_TEXT_COMMAND.disableAlias
+    ) {
       await handleDisable(message);
-    } else if (command === "enable" || command === "e") {
+    } else if (
+      command === MUSIC_TEXT_COMMAND.enable ||
+      command === MUSIC_TEXT_COMMAND.enableAlias
+    ) {
       await handleEnable(message);
     }
   } catch (e) {
@@ -672,7 +653,7 @@ async function handlePlay(
       await message.reply(
         `🔎 いくつか候補が見つかったよ。この中から選んでね。ない場合はURLで再生してみて。\n` +
           `${lines.join("\n")}\n` +
-          `\n\`s!play 1\`〜\`s!play ${lines.length}\``,
+          `\n\`${PREFIX}${MUSIC_TEXT_COMMAND.play} 1\`〜\`${PREFIX}${MUSIC_TEXT_COMMAND.play} ${lines.length}\``,
       );
       return;
     }
@@ -840,12 +821,12 @@ async function handleNgWordCommand(message: Message, args: string[]) {
   const isAdmin =
     message.member?.permissions.has(PermissionFlagsBits.Administrator) ?? false;
   const isOwner = message.guild?.ownerId === message.author.id;
-  const isDev = OWNER_IDS.includes(message.author.id);
+  const isDev = OWNER_IDS.has(message.author.id);
   const canManage = isAdmin || isOwner || isDev;
 
   if (!sub || sub === "help") {
     await message.reply(
-      "使い方: `s!ng add <word>` / `s!ng remove <word>` / `s!ng list` / `s!ng clear`",
+      `使い方: \`${PREFIX}${MUSIC_TEXT_COMMAND.ng} add <word>\` / \`${PREFIX}${MUSIC_TEXT_COMMAND.ng} remove <word>\` / \`${PREFIX}${MUSIC_TEXT_COMMAND.ng} list\` / \`${PREFIX}${MUSIC_TEXT_COMMAND.ng} clear\``,
     );
     return;
   }
@@ -903,7 +884,7 @@ async function handleNgWordCommand(message: Message, args: string[]) {
   }
 
   await message.reply(
-    "⚠️ コマンドが不明です。`s!ng help` で使い方を確認できます。",
+    `⚠️ コマンドが不明です。\`${PREFIX}${MUSIC_TEXT_COMMAND.ng} help\` で使い方を確認できます。`,
   );
 }
 
@@ -914,21 +895,6 @@ async function handleUpload(message: Message, customTitleRaw?: string) {
     return;
   }
 
-  const allowedExts = [".mp3", ".wav", ".flac", ".m4a", ".aac", ".ogg"];
-  const allowedExtsLabel = allowedExts
-    .map((ext) => ext.replace(".", ""))
-    .join(", ");
-  const contentTypeToExt: Record<string, string> = {
-    "audio/mpeg": ".mp3",
-    "audio/wav": ".wav",
-    "audio/x-wav": ".wav",
-    "audio/flac": ".flac",
-    "audio/x-flac": ".flac",
-    "audio/mp4": ".m4a",
-    "audio/aac": ".aac",
-    "audio/ogg": ".ogg",
-  };
-
   const att = message.attachments.first();
   if (!att) {
     await message.reply("📎 ファイルを添付してね。");
@@ -938,10 +904,10 @@ async function handleUpload(message: Message, customTitleRaw?: string) {
   const attachmentName = pickAttachmentName(att);
   let ext = path.extname(attachmentName).toLowerCase();
   if (!ext && att.contentType) {
-    ext = contentTypeToExt[att.contentType] ?? "";
+    ext = CONTENT_TYPE_TO_EXTENSION[att.contentType] ?? "";
   }
-  if (!ext || !allowedExts.includes(ext)) {
-    await message.reply(`⚠️ 対応形式は **${allowedExtsLabel}** です。`);
+  if (!ext || !ALLOWED_EXTENSIONS.includes(ext)) {
+    await message.reply(`⚠️ 対応形式は **${ALLOWED_EXTENSIONS_LABEL}** です。`);
     return;
   }
   const initialDisplayName = ensureFileExtension(attachmentName, ext);
@@ -1073,7 +1039,7 @@ async function handleRemoveCommand(message: Message, rest: string[]) {
   const indexStr = rest[0];
   if (!indexStr || !/^\d+$/.test(indexStr)) {
     await message.reply(
-      "⚠️ 削除する曲の番号を指定してください。（例: `s!remove 2`）",
+      `⚠️ 削除する曲の番号を指定してください。（例: \`${PREFIX}${MUSIC_TEXT_COMMAND.remove} 2\`）`,
     );
     return;
   }
@@ -1104,7 +1070,7 @@ async function handleDisable(message: Message) {
   const isAdmin =
     message.member?.permissions.has(PermissionFlagsBits.Administrator) ?? false;
   const isOwner = message.guild?.ownerId === message.author.id;
-  const isDev = OWNER_IDS.includes(message.author.id);
+  const isDev = OWNER_IDS.has(message.author.id);
   if (!isAdmin && !isOwner && !isDev) {
     await message.reply("⚠️ 権限がありません。（管理者のみ）");
     return;
@@ -1124,7 +1090,7 @@ async function handleEnable(message: Message) {
   const isAdmin =
     message.member?.permissions.has(PermissionFlagsBits.Administrator) ?? false;
   const isOwner = message.guild?.ownerId === message.author.id;
-  const isDev = OWNER_IDS.includes(message.author.id);
+  const isDev = OWNER_IDS.has(message.author.id);
   if (!isAdmin && !isOwner && !isDev) {
     await message.reply("⚠️ 権限がありません。（管理者のみ）");
     return;

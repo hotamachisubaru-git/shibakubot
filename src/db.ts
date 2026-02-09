@@ -2,8 +2,9 @@
 import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
+import { GUILD_DB_ROOT } from "./constants/paths";
 
-const ROOT = path.join(process.cwd(), "data", "guilds");
+const ROOT = GUILD_DB_ROOT;
 const UPSERT_SETTING_SQL = `
   INSERT INTO settings(key, value) VALUES(?, ?)
   ON CONFLICT(key) DO UPDATE SET value=excluded.value

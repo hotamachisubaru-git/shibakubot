@@ -3,11 +3,12 @@ import {
   ChannelType,
   TextChannel,
 } from "discord.js";
-import { LOG_CHANNEL_ID } from "./config";
+import { getRuntimeConfig } from "./config/runtime";
+import { SETTING_KEYS } from "./constants/settings";
 import { getSetting } from "./data";
 import { displayNameFrom, AnyInteraction } from "./utils/displayNameUtil";
 
-const LOG_CHANNEL_KEY = "logChannelId";
+const runtimeConfig = getRuntimeConfig();
 
 async function resolveLogChannel(
   interaction: AnyInteraction,
@@ -15,7 +16,7 @@ async function resolveLogChannel(
 ): Promise<TextChannel | null> {
   const channelCandidates = Array.from(
     new Set(
-      [getSetting(guildId, LOG_CHANNEL_KEY), LOG_CHANNEL_ID].filter(
+      [getSetting(guildId, SETTING_KEYS.logChannelId), runtimeConfig.discord.logChannelId].filter(
         (value): value is string => Boolean(value),
       ),
     ),

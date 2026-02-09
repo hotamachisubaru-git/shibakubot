@@ -11,7 +11,7 @@ function encodeFilePath(filename: string): string {
 
 const runtimeConfig = getRuntimeConfig();
 
-export function makePublicUrl(filename: string): string {
+export function makeInternalUrl(filename: string): string {
   const encodedPath = encodeFilePath(filename);
-  return new URL(encodedPath, runtimeConfig.upload.publicBaseUrl).toString();
+  return new URL(encodedPath, runtimeConfig.upload.internalBaseUrl).toString();
 }

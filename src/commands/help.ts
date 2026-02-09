@@ -1,29 +1,10 @@
 import { type ChatInputCommandInteraction, EmbedBuilder } from "discord.js";
-
-type HelpCommand = Readonly<{
-  name: string;
-  description: string;
-}>;
-
-const HELP_COMMANDS = [
-  { name: "/ping", description: "BOTが生きているか確認する" },
-  { name: "/sbk", description: "ユーザーをしばく" },
-  { name: "/menu", description: "しばくbot メニューを表示する" },
-  { name: "/help", description: "コマンド一覧を表示する" },
-  { name: "/suimin", description: "指定ユーザーをVCに移動" },
-  {
-    name: "/maintenance",
-    description: "メンテナンスモードを切り替える（管理者のみ）",
-  },
-  {
-    name: "/mt",
-    description: "メンテナンスモードを切り替える（短縮コマンド）",
-  },
-] satisfies readonly HelpCommand[];
+import { EMBED_COLORS } from "../constants/embedColors";
+import { HELP_COMMANDS, type HelpCommand } from "../discord/commandCatalog";
 
 const HELP_TITLE = "📘 コマンド一覧";
 const HELP_FOOTER = "しばくbot - コマンドヘルプ";
-const HELP_COLOR = 0x00aaff;
+const HELP_COLOR = EMBED_COLORS.info;
 
 function renderHelpLines(commands: readonly HelpCommand[]): string {
   return commands

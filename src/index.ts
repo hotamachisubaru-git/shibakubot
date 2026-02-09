@@ -1,515 +1,404 @@
-// src/index.ts
 import "dotenv/config";
-import express from "express";
-import fs from "node:fs";
-import path from "node:path";
-import { randomInt, randomReason } from "./utils/sbkRandom";
-import { LavalinkManager, type Player } from "lavalink-client";
 import {
   Client,
-  GatewayIntentBits,
   Events,
-  PermissionFlagsBits,
-  Message,
+  GatewayIntentBits,
   Interaction,
+  Message,
+  PermissionFlagsBits,
+  type ChatInputCommandInteraction,
 } from "discord.js";
-
-import {
-  loadGuildStore,
-  setCountGuild,
-  isImmune,
-  addCountGuild,
-  getImmuneList,
-  addImmuneId,
-  removeImmuneId,
-  getSbkRange,
-  getMaintenanceEnabled,
-} from "./data";
-
-import { sendLog } from "./logging";
-import { handleTop } from "./commands/top";
-import { handleMembers } from "./commands/members";
-import { handleMenu } from "./commands/menu";
 import { handleHelp } from "./commands/help";
 import { handleMaintenance } from "./commands/maintenance";
+import { handleMembers } from "./commands/members";
+import { handleMenu } from "./commands/menu";
 import { handlePing } from "./commands/ping";
 import { handleReset } from "./commands/reset";
 import { handleStats } from "./commands/stats";
 import { handleSuimin } from "./commands/suiminbunihaire";
+import { handleTop } from "./commands/top";
+import { getRuntimeConfig } from "./config/runtime";
+import { isMaintenanceCommand, SLASH_COMMAND } from "./constants/commands";
+import { COMMON_MESSAGES } from "./constants/messages";
+import {
+  addCountGuild,
+  addImmuneId,
+  getImmuneList,
+  getMaintenanceEnabled,
+  getSbkRange,
+  isImmune,
+  loadGuildStore,
+  removeImmuneId,
+  setCountGuild,
+} from "./data";
+import { startFileServer } from "./fileserver/fileServer";
+import { initLavalink } from "./lavalink";
+import { sendLog } from "./logging";
 import { handleMusicMessage } from "./music";
 import { formatBigIntJP } from "./utils/formatCount";
+import { randomInt, randomReason } from "./utils/sbkRandom";
 
-function parseCsvIds(raw: string | undefined): string[] {
-  if (!raw) return [];
-  return raw
-    .split(",")
-    .map((token) => token.trim())
-    .filter((token): token is string => token.length > 0);
+type SlashHandler = (
+  interaction: ChatInputCommandInteraction,
+) => Promise<void>;
+
+const runtimeConfig = getRuntimeConfig();
+const TOKEN = runtimeConfig.discord.token;
+
+if (!TOKEN) {
+  throw new Error("Missing required environment variable: TOKEN");
 }
 
-function parsePositiveInt(raw: string | undefined, fallback: number): number {
-  if (!raw) return fallback;
-  const parsed = Number.parseInt(raw, 10);
-  if (!Number.isFinite(parsed) || parsed < 1) return fallback;
-  return parsed;
-}
+startFileServer();
 
-function requiredEnv(name: "TOKEN"): string {
-  const value = process.env[name]?.trim();
-  if (!value) {
-    throw new Error(`Missing required environment variable: ${name}`);
-  }
-  return value;
-}
-
-const TOKEN = requiredEnv("TOKEN");
-const UPLOAD_DIR = path.resolve(process.env.FILE_DIR ?? "./files");
-fs.mkdirSync(UPLOAD_DIR, { recursive: true });
-
-const FILE_HOST = "play.hotamachi.jp";
-const FILE_PORT = parsePositiveInt(process.env.FILE_PORT, 3001);
-
-const app = express();
-app.use("/uploads", express.static(UPLOAD_DIR));
-
-app.listen(FILE_PORT, FILE_HOST, () => {
-  console.log(
-    `📦 Upload file server: http://${FILE_HOST}:${FILE_PORT}/uploads/`,
-  );
-});
-
-// ---- クライアント設定 ----
-// 🔹 追加: Lavalink をぶら下げたクライアント型
-type ShibakuClient = Client & {
-  lavalink: LavalinkManager<Player>;
+const OWNER_IDS = runtimeConfig.discord.ownerIds;
+const IMMUNE_IDS = runtimeConfig.discord.immuneIds;
+const MAX_REASON_LENGTH = runtimeConfig.app.maxLogReasonLength;
+const ROOT_SLASH_HANDLERS: Readonly<Record<string, SlashHandler>> = {
+  [SLASH_COMMAND.ping]: handlePing,
+  [SLASH_COMMAND.menu]: handleMenu,
+  [SLASH_COMMAND.suimin]: handleSuimin,
+  [SLASH_COMMAND.members]: handleMembers,
+  [SLASH_COMMAND.help]: handleHelp,
+  [SLASH_COMMAND.maintenance]: handleMaintenance,
+  [SLASH_COMMAND.maintenanceAlias]: handleMaintenance,
+  [SLASH_COMMAND.stats]: handleStats,
+  [SLASH_COMMAND.reset]: handleReset,
+  [SLASH_COMMAND.top]: handleTop,
 };
 
-const client = new Client({
-  intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMembers,
-    GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent,
-    GatewayIntentBits.GuildVoiceStates,
-  ],
-}) as ShibakuClient;
+const client = initLavalink(
+  new Client({
+    intents: [
+      GatewayIntentBits.Guilds,
+      GatewayIntentBits.GuildMembers,
+      GatewayIntentBits.GuildMessages,
+      GatewayIntentBits.MessageContent,
+      GatewayIntentBits.GuildVoiceStates,
+    ],
+  }),
+);
 
-// ---- Lavalink 接続設定 ----
+function hasAdminOrOwnerPermission(
+  interaction: ChatInputCommandInteraction,
+): boolean {
+  const isAdmin =
+    interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) ??
+    false;
+  const isOwner = OWNER_IDS.has(interaction.user.id);
+  return isAdmin || isOwner;
+}
 
-const lavalink = new LavalinkManager<Player>({
-  nodes: [
-    {
-      id: "local",
-      host: "127.0.0.1",
-      port: 2333,
-      authorization: "youshallnotpass", // application.yml の password
-      secure: false,
-    },
-  ],
-
-  // 🔹 ここは sendPayload ではなく sendToShard
-  sendToShard: (guildId, payload) => {
-    const guild = client.guilds.cache.get(guildId);
-    if (!guild) return;
-    guild.shard.send(payload);
-  },
-
-  client: {
-    id: "0", // ここはダミーでOK（後で init で上書き）
-    username: "shibaku-bot",
-  },
-
-  // （オプション）お好みで
-  autoSkip: true,
-  playerOptions: {
-    defaultSearchPlatform: "ytmsearch",
-    clientBasedPositionUpdateInterval: 150,
-    volumeDecrementer: 0.75,
-    onDisconnect: {
-      autoReconnect: true,
-      destroyPlayer: false,
-    },
-    onEmptyQueue: {
-      destroyAfterMs: 60_000,
-    },
-  },
-  queueOptions: {
-    maxPreviousTracks: 25,
-  },
-});
-
-// client にぶら下げる
-client.lavalink = lavalink;
-// Discord の Raw イベントを Lavalink に渡す
-client.on("raw", (data: Parameters<LavalinkManager<Player>["sendRawData"]>[0]) => {
-  void client.lavalink.sendRawData(data);
-});
-
-// ---- 定数 ----
-const OWNER_IDS = parseCsvIds(process.env.OWNER_IDS);
-const IMMUNE_IDS = parseCsvIds(process.env.IMMUNE_IDS);
-
-// Ready
-client.once(Events.ClientReady, async (b: Client<true>) => {
-  console.log(`✅ ログイン完了: ${b.user.tag}`);
-
-  // Lavalink と Bot 情報を紐付け（ヘッダーは ASCII のみ）
-  await client.lavalink.init({
-    id: b.user.id,
-    username: "shibakubot", // 日本語を入れない
-  });
-});
-
-// ---- コマンドハンドラ ----
-client.on(Events.InteractionCreate, async (interaction: Interaction) => {
-  if (!interaction.isChatInputCommand()) return;
-
-  const name = interaction.commandName;
-
-  if (interaction.inGuild()) {
-    const gid = interaction.guildId;
-    if (!gid) return;
-    if (getMaintenanceEnabled(gid) && name !== "maintenance" && name !== "mt") {
-      await interaction.reply({
-        content: "⚠️ 現在メンテナンス中です。しばらくお待ちください。",
-        ephemeral: true,
-      });
-      return;
-    }
+function normalizeCountInput(raw: string): bigint {
+  try {
+    const parsed = BigInt(raw);
+    return parsed < 0n ? 0n : parsed;
+  } catch {
+    return 0n;
   }
+}
 
-  if (name === "ping") {
-    await handlePing(interaction);
-    return;
-  }
-
-  // /sbk
-  if (name === "sbk") {
-    if (!interaction.inGuild()) {
-      await interaction.reply({
-        content: "サーバー内で使ってね。",
-        ephemeral: true,
-      });
-      return;
-    }
-
-    const gid = interaction.guildId;
-    if (!gid) {
-      await interaction.reply({
-        content: "サーバー情報を取得できませんでした。",
-        ephemeral: true,
-      });
-      return;
-    }
-    const user = interaction.options.getUser("user", true);
-
-    if (user.bot || user.id === interaction.client.user?.id) {
-      await interaction.reply({
-        content: "BOTは対象外です。",
-        ephemeral: true,
-      });
-      return;
-    }
-
-    const localImmune = isImmune(gid, user.id);
-    const globalImmune = IMMUNE_IDS.includes(user.id);
-    if (localImmune || globalImmune) {
-      await interaction.reply({
-        content: "このユーザーはしばき免除のため実行できません。",
-        ephemeral: true,
-      });
-      return;
-    }
-
-    const { min: SBK_MIN, max: SBK_MAX } = getSbkRange(gid);
-
-    // ★ optional 取得（count は string で受ける）
-    const countStr = interaction.options.getString("count");
-    let reason = interaction.options.getString("reason");
-
-    // ★ count の決定（BigInt）
-    let countBig: bigint;
-
-    if (!countStr) {
-      // 未指定 → ランダム（この時だけ範囲内）
-      const n = randomInt(SBK_MIN, SBK_MAX);
-      countBig = BigInt(n);
-    } else {
-      // 指定 → BigIntとしてそのまま通す（上限で丸めない）
-      if (!/^\d+$/.test(countStr)) {
-        await interaction.reply({
-          content: "count は数字で入力してね。",
-          ephemeral: true,
-        });
-        return;
-      }
-
-      countBig = BigInt(countStr);
-
-      // 0回やマイナス（今回は許してない）を防ぐ最低保証
-      if (countBig < 1n) countBig = 1n;
-    }
-
-    // 範囲補正（BigIntでやる）
-    const minB = BigInt(SBK_MIN);
-    const maxB = BigInt(SBK_MAX);
-    if (countBig < minB) countBig = minB;
-    if (countBig > maxB) countBig = maxB;
-
-    // ★ reason 未指定 → ランダム
-    if (!reason) reason = randomReason();
-
-   const nextCount = addCountGuild(
-     gid,
-     user.id,
-     countBig,
-     interaction.user.id, // actorId
-     reason               // reason（ランダム確定後のやつ）
-    );
-
-
-    const member = await interaction
-      .guild!.members.fetch(user.id)
-      .catch(() => null);
-    const display = member?.displayName ?? user.tag;
-    const MAX_REASON = 2000;
-    const safeReason =
-      reason.length > MAX_REASON ? reason.slice(0, MAX_REASON) + "…" : reason;
-
-    await interaction.reply(
-  `**${display}** を **${formatBigIntJP(countBig)}回** しばきました！\n` +
-  `（累計 ${formatBigIntJP(nextCount)}回 / 今回 +${formatBigIntJP(countBig)}回）\n` +
-  `理由: ${safeReason}`
-  );
-
-
-    await sendLog(
-      interaction,
-      interaction.user.id,
-      user.id,
-      reason,
-      countBig,
-      nextCount,
-    );
-  }
-
-  // /check
-  if (name === "check") {
-    if (!interaction.inGuild()) {
-      await interaction.reply({
-        content: "サーバー内で使用してください。",
-        ephemeral: true,
-      });
-      return;
-    }
-    const gid = interaction.guildId;
-    if (!gid) {
-      await interaction.reply({
-        content: "サーバー情報を取得できませんでした。",
-        ephemeral: true,
-      });
-      return;
-    }
-    const target = interaction.options.getUser("user", true);
-    const store = loadGuildStore(gid);
-    const count = store.counts[target.id] ?? 0n;
-    const member = await interaction
-      .guild!.members.fetch(target.id)
-      .catch(() => null);
-    const displayName = member?.displayName ?? target.tag;
+async function handleSbk(interaction: ChatInputCommandInteraction): Promise<void> {
+  if (!interaction.inGuild()) {
     await interaction.reply({
-      content: `**${displayName}** は今までに ${count} 回 しばかれました。`,
-      allowedMentions: { parse: [] },
+      content: "サーバー内で使ってね。",
+      ephemeral: true,
     });
     return;
   }
 
-  // 外部ハンドラ
-  if (name === "menu") {
-    await handleMenu(interaction);
-    return;
-  }
-  if (name === "suimin") {
-    await handleSuimin(interaction);
-    return;
-  }
-  if (name === "members") {
-    await handleMembers(interaction);
-    return;
-  }
-  if (name === "help") {
-    await handleHelp(interaction);
-    return;
-  }
-  if (name === "maintenance" || name === "mt") {
-    await handleMaintenance(interaction);
-    return;
-  }
-  if (name === "stats") {
-    await handleStats(interaction);
-    return;
-  }
-  if (name === "reset") {
-    await handleReset(interaction);
-    return;
-  }
-  if (name === "top") {
-    await handleTop(interaction);
-    return;
-  }
-
-  // /control（管理者 / 開発者のみ）
-  if (name === "control") {
-    if (!interaction.inGuild()) {
-      await interaction.reply({
-        content: "このコマンドはサーバー内でのみ使用できます。",
-        ephemeral: true,
-      });
-      return;
-    }
-    const isAdmin =
-      interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) ??
-      false;
-    const isOwner = OWNER_IDS.includes(interaction.user.id);
-    if (!isAdmin && !isOwner) {
-      await interaction.reply({
-        content: "権限がありません。（管理者または開発者のみ）",
-        ephemeral: true,
-      });
-      return;
-    }
-
-    const gid = interaction.guildId;
-    if (!gid) {
-      await interaction.reply({
-        content: "サーバー情報を取得できませんでした。",
-        ephemeral: true,
-      });
-      return;
-    }
-    const target = interaction.options.getUser("user", true);
-    const newCountRaw = interaction.options.getString("count", true);
-    let newCount: bigint;
-    try {
-      newCount = BigInt(newCountRaw);
-      if (newCount < 0n) newCount = 0n;
-    } catch {
-      newCount = 0n;
-    }
-    const after = setCountGuild(gid, target.id, newCount);
-
-    const store = loadGuildStore(gid);
-    store.counts[target.id] = after;
-
-    const member = await interaction
-      .guild!.members.fetch(target.id)
-      .catch(() => null);
-    const displayName = member?.displayName ?? target.tag;
-
+  const guildId = interaction.guildId;
+  if (!guildId) {
     await interaction.reply({
-      content: `**${displayName}** のしばかれ回数を **${after} 回** に設定しました。`,
+      content: COMMON_MESSAGES.guildUnavailable,
+      ephemeral: true,
+    });
+    return;
+  }
+
+  const targetUser = interaction.options.getUser("user", true);
+  if (targetUser.bot || targetUser.id === interaction.client.user?.id) {
+    await interaction.reply({
+      content: "BOTは対象外です。",
+      ephemeral: true,
+    });
+    return;
+  }
+
+  if (isImmune(guildId, targetUser.id) || IMMUNE_IDS.has(targetUser.id)) {
+    await interaction.reply({
+      content: "このユーザーはしばき免除のため実行できません。",
+      ephemeral: true,
+    });
+    return;
+  }
+
+  const { min: sbkMin, max: sbkMax } = getSbkRange(guildId);
+  const countRaw = interaction.options.getString("count");
+  let reason = interaction.options.getString("reason") ?? randomReason();
+
+  if (countRaw && !/^\d+$/.test(countRaw)) {
+    await interaction.reply({
+      content: "count は数字で入力してね。",
+      ephemeral: true,
+    });
+    return;
+  }
+
+  let count = countRaw ? BigInt(countRaw) : BigInt(randomInt(sbkMin, sbkMax));
+  if (count < 1n) count = 1n;
+
+  const min = BigInt(sbkMin);
+  const max = BigInt(sbkMax);
+  if (count < min) count = min;
+  if (count > max) count = max;
+
+  const nextCount = addCountGuild(
+    guildId,
+    targetUser.id,
+    count,
+    interaction.user.id,
+    reason,
+  );
+
+  const member = await interaction.guild?.members
+    .fetch(targetUser.id)
+    .catch(() => null);
+  const displayName = member?.displayName ?? targetUser.tag;
+
+  if (reason.length > MAX_REASON_LENGTH) {
+    reason = `${reason.slice(0, MAX_REASON_LENGTH)}…`;
+  }
+
+  await interaction.reply(
+    `**${displayName}** を **${formatBigIntJP(count)}回** しばきました！\n` +
+      `（累計 ${formatBigIntJP(nextCount)}回 / 今回 +${formatBigIntJP(count)}回）\n` +
+      `理由: ${reason}`,
+  );
+
+  await sendLog(
+    interaction,
+    interaction.user.id,
+    targetUser.id,
+    reason,
+    count,
+    nextCount,
+  );
+}
+
+async function handleCheck(interaction: ChatInputCommandInteraction): Promise<void> {
+  if (!interaction.inGuild()) {
+    await interaction.reply({
+      content: "サーバー内で使用してください。",
+      ephemeral: true,
+    });
+    return;
+  }
+
+  const guildId = interaction.guildId;
+  if (!guildId) {
+    await interaction.reply({
+      content: COMMON_MESSAGES.guildUnavailable,
+      ephemeral: true,
+    });
+    return;
+  }
+
+  const target = interaction.options.getUser("user", true);
+  const store = loadGuildStore(guildId);
+  const count = store.counts[target.id] ?? 0n;
+  const member = await interaction.guild?.members.fetch(target.id).catch(() => null);
+  const displayName = member?.displayName ?? target.tag;
+
+  await interaction.reply({
+    content: `**${displayName}** は今までに ${count} 回 しばかれました。`,
+    allowedMentions: { parse: [] },
+  });
+}
+
+async function handleControl(interaction: ChatInputCommandInteraction): Promise<void> {
+  if (!interaction.inGuild()) {
+    await interaction.reply({
+      content: COMMON_MESSAGES.guildOnly,
+      ephemeral: true,
+    });
+    return;
+  }
+
+  if (!hasAdminOrOwnerPermission(interaction)) {
+    await interaction.reply({
+      content: COMMON_MESSAGES.noPermissionAdminOrDev,
+      ephemeral: true,
+    });
+    return;
+  }
+
+  const guildId = interaction.guildId;
+  if (!guildId) {
+    await interaction.reply({
+      content: COMMON_MESSAGES.guildUnavailable,
+      ephemeral: true,
+    });
+    return;
+  }
+
+  const target = interaction.options.getUser("user", true);
+  const newCountRaw = interaction.options.getString("count", true);
+  const nextCount = normalizeCountInput(newCountRaw);
+  const after = setCountGuild(guildId, target.id, nextCount);
+
+  const member = await interaction.guild?.members.fetch(target.id).catch(() => null);
+  const displayName = member?.displayName ?? target.tag;
+
+  await interaction.reply({
+    content: `**${displayName}** のしばかれ回数を **${after} 回** に設定しました。`,
+    allowedMentions: { parse: [] },
+    ephemeral: true,
+  });
+}
+
+async function handleImmune(interaction: ChatInputCommandInteraction): Promise<void> {
+  if (!interaction.inGuild()) {
+    await interaction.reply({
+      content: COMMON_MESSAGES.guildOnly,
+      ephemeral: true,
+    });
+    return;
+  }
+
+  if (!hasAdminOrOwnerPermission(interaction)) {
+    await interaction.reply({
+      content: COMMON_MESSAGES.noPermissionAdminOrDev,
+      ephemeral: true,
+    });
+    return;
+  }
+
+  const guildId = interaction.guildId;
+  if (!guildId) {
+    await interaction.reply({
+      content: COMMON_MESSAGES.guildUnavailable,
+      ephemeral: true,
+    });
+    return;
+  }
+
+  const subCommand = interaction.options.getSubcommand();
+
+  if (subCommand === "add") {
+    const user = interaction.options.getUser("user", true);
+    if (user.bot) {
+      await interaction.reply({
+        content: "BOTはそもそもしばけません。",
+        ephemeral: true,
+      });
+      return;
+    }
+
+    const added = addImmuneId(guildId, user.id);
+    await interaction.reply({
+      content: added
+        ? `\`${user.tag}\` を免除リストに追加しました。`
+        : `\`${user.tag}\` はすでに免除リストに存在します。`,
       allowedMentions: { parse: [] },
       ephemeral: true,
     });
     return;
   }
 
-  // /immune（管理者 / 開発者のみ） …（既存のまま）
-  if (name === "immune") {
-    if (!interaction.inGuild()) {
-      await interaction.reply({
-        content: "このコマンドはサーバー内でのみ使用できます。",
-        ephemeral: true,
-      });
-      return;
-    }
-    const isAdmin =
-      interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) ??
-      false;
-    const isOwner = OWNER_IDS.includes(interaction.user.id);
-    if (!isAdmin && !isOwner) {
-      await interaction.reply({
-        content: "権限がありません。（管理者または開発者のみ）",
-        ephemeral: true,
-      });
-      return;
-    }
+  if (subCommand === "remove") {
+    const user = interaction.options.getUser("user", true);
+    const removed = removeImmuneId(guildId, user.id);
+    await interaction.reply({
+      content: removed
+        ? `\`${user.tag}\` を免除リストから削除しました。`
+        : `\`${user.tag}\` は免除リストにありません。`,
+      allowedMentions: { parse: [] },
+      ephemeral: true,
+    });
+    return;
+  }
 
-    const sub = interaction.options.getSubcommand();
-    const gid = interaction.guildId;
-    if (!gid) {
-      await interaction.reply({
-        content: "サーバー情報を取得できませんでした。",
-        ephemeral: true,
-      });
-      return;
-    }
+  if (subCommand === "list") {
+    const localIds = getImmuneList(guildId);
+    const globalIds = Array.from(IMMUNE_IDS);
 
-    if (sub === "add") {
-      const u = interaction.options.getUser("user", true);
-      if (u.bot) {
-        await interaction.reply({
-          content: "BOTはそもそもしばけません。",
-          ephemeral: true,
-        });
-        return;
-      }
-      const added = addImmuneId(gid, u.id);
-      await interaction.reply({
-        content: added
-          ? `\`${u.tag}\` を免除リストに追加しました。`
-          : `\`${u.tag}\` はすでに免除リストに存在します。`,
-        allowedMentions: { parse: [] },
-        ephemeral: true,
-      });
-      return;
-    }
+    const localText = localIds.length
+      ? localIds.map((id, i) => `${i + 1}. <@${id}> (\`${id}\`)`).join("\n")
+      : "（なし）";
+    const globalText = globalIds.length
+      ? globalIds.map((id, i) => `${i + 1}. <@${id}> (\`${id}\`)`).join("\n")
+      : "（なし）";
 
-    if (sub === "remove") {
-      const u = interaction.options.getUser("user", true);
-      const removed = removeImmuneId(gid, u.id);
-      await interaction.reply({
-        content: removed
-          ? `\`${u.tag}\` を免除リストから削除しました。`
-          : `\`${u.tag}\` は免除リストにありません。`,
-        allowedMentions: { parse: [] },
-        ephemeral: true,
-      });
-      return;
-    }
+    await interaction.reply({
+      embeds: [
+        {
+          title: "🛡️ しばき免除リスト",
+          fields: [
+            { name: "ギルド免除", value: localText },
+            { name: "グローバル免除（.env IMMUNE_IDS）", value: globalText },
+          ],
+        },
+      ],
+      allowedMentions: { parse: [] },
+      ephemeral: true,
+    });
+  }
+}
 
-    if (sub === "list") {
-      const ids = getImmuneList(gid);
-      const global = IMMUNE_IDS;
+client.once(Events.ClientReady, async (readyClient) => {
+  console.log(`✅ ログイン完了: ${readyClient.user.tag}`);
 
-      const textLocal = ids.length
-        ? ids.map((x, i) => `${i + 1}. <@${x}> (\`${x}\`)`).join("\n")
-        : "（なし）";
-      const textGlobal = global.length
-        ? global.map((x, i) => `${i + 1}. <@${x}> (\`${x}\`)`).join("\n")
-        : "（なし）";
+  await client.lavalink.init({
+    id: readyClient.user.id,
+    username: runtimeConfig.lavalink.username,
+  });
+});
 
-      await interaction.reply({
-        embeds: [
-          {
-            title: "🛡️ しばき免除リスト",
-            fields: [
-              { name: "ギルド免除", value: textLocal },
-              { name: "グローバル免除（.env IMMUNE_IDS）", value: textGlobal },
-            ],
-          },
-        ],
-        allowedMentions: { parse: [] },
-        ephemeral: true,
-      });
-      return;
-    }
+client.on(Events.InteractionCreate, async (interaction: Interaction) => {
+  if (!interaction.isChatInputCommand()) return;
+
+  const commandName = interaction.commandName;
+  if (
+    interaction.guildId &&
+    getMaintenanceEnabled(interaction.guildId) &&
+    !isMaintenanceCommand(commandName)
+  ) {
+    await interaction.reply({
+      content: "⚠️ 現在メンテナンス中です。しばらくお待ちください。",
+      ephemeral: true,
+    });
+    return;
+  }
+
+  if (commandName === SLASH_COMMAND.sbk) {
+    await handleSbk(interaction);
+    return;
+  }
+
+  if (commandName === SLASH_COMMAND.check) {
+    await handleCheck(interaction);
+    return;
+  }
+
+  if (commandName === SLASH_COMMAND.control) {
+    await handleControl(interaction);
+    return;
+  }
+
+  if (commandName === SLASH_COMMAND.immune) {
+    await handleImmune(interaction);
+    return;
+  }
+
+  const handler = ROOT_SLASH_HANDLERS[commandName];
+  if (handler) {
+    await handler(interaction);
   }
 });
 
 void client.login(TOKEN);
 
-// index.ts 最後あたり
 client.on("messageCreate", async (message: Message) => {
   if (message.guildId && getMaintenanceEnabled(message.guildId)) return;
   await handleMusicMessage(message);

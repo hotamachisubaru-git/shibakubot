@@ -39,6 +39,10 @@ import {
   openDb,
 } from "../data";
 import { LOG_CHANNEL_ID } from "../config";
+import { getRuntimeConfig } from "../config/runtime";
+import { BACKUP_ROOT, GUILD_DB_ROOT } from "../constants/paths";
+import { COMMON_MESSAGES } from "../constants/messages";
+import { SETTING_KEYS } from "../constants/settings";
 import { sendLog } from "../logging";
 import { displayNameFrom } from "../utils/displayNameUtil";
 import {
@@ -51,26 +55,15 @@ type GuildScopedInteraction = ChatInputCommandInteraction | ButtonInteraction;
 type PanelMessage = Awaited<ReturnType<ButtonInteraction["fetchReply"]>>;
 
 /* ===== 設定 ===== */
-function parseCsvIds(raw: string | undefined): ReadonlySet<string> {
-  return new Set(
-    (raw ?? "")
-      .split(",")
-      .map((value) => value.trim())
-      .filter((value): value is string => value.length > 0),
-  );
-}
-
-const OWNER_IDS = parseCsvIds(process.env.OWNER_IDS);
-const IMMUNE_IDS = parseCsvIds(process.env.IMMUNE_IDS);
+const runtimeConfig = getRuntimeConfig();
+const OWNER_IDS = runtimeConfig.discord.ownerIds;
+const IMMUNE_IDS = runtimeConfig.discord.immuneIds;
 const PAGE_SIZE = 10;
 const AUDIT_LIMIT = 10;
 const BACKUP_LIST_LIMIT = 5;
-const LOG_CHANNEL_KEY = "logChannelId";
-const DATA_ROOT = path.join(process.cwd(), "data");
-const GUILD_DB_ROOT = path.join(DATA_ROOT, "guilds");
-const BACKUP_ROOT = path.join(process.cwd(), "backup");
+const LOG_CHANNEL_KEY = SETTING_KEYS.logChannelId;
 const EMBED_DESC_LIMIT = 4096; // ← ここは自由に変更OK
-const UNKNOWN_GUILD_MESSAGE = "⚠️ サーバー情報を取得できませんでした。";
+const UNKNOWN_GUILD_MESSAGE = `⚠️ ${COMMON_MESSAGES.guildUnavailable}`;
 
 
 function joinLinesWithLimitOrNull(
