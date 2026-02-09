@@ -595,6 +595,7 @@ async function handlePlay(
     titleFallback?: string;
     forceTitle?: boolean;
     selectedTrack?: PendingTrack;
+    throwOnNotFound?: boolean;
   },
 ): Promise<void> {
   const member = message.member as GuildMember | null;
@@ -636,6 +637,9 @@ async function handlePlay(
     }
 
     if (!result?.tracks?.length) {
+      if (options?.throwOnNotFound) {
+        throw new Error("TRACK_NOT_FOUND");
+      }
       await message.reply("🔍 曲が見つかりませんでした…。");
       return;
     }
@@ -1010,6 +1014,7 @@ async function handleUpload(message: Message, customTitleRaw?: string) {
       await handlePlay(message, internalUrl, {
         titleFallback: playbackTitle,
         forceTitle: true,
+        throwOnNotFound: true,
       });
     } catch {
       await handlePlay(message, publicUrl, {
