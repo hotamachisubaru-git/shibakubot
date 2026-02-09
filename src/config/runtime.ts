@@ -196,7 +196,7 @@ function buildRuntimeConfig(): RuntimeConfig {
       fixedVolume: parseInteger(
         process.env.MUSIC_FIXED_VOLUME,
         DEFAULT_MUSIC_FIXED_VOLUME,
-        { min: 0, max: 100 },
+        { min: 0, max: 20 },
       ),
       maxTrackMinutes: musicMaxTrackMinutes,
       maxTrackMs: musicMaxTrackMinutes * 60 * 1000,

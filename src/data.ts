@@ -368,7 +368,7 @@ export function getSbkRange(gid: string): SbkRange {
 // ---------- 音量設定 ----------
 const MUSIC_VOL_DEFAULT = runtimeConfig.music.fixedVolume;
 const MUSIC_VOL_MIN = 0;
-const MUSIC_VOL_MAX = 100;
+const MUSIC_VOL_MAX = 20;
 
 export function getUserMusicVolume(gid: string, userId: string): number {
   const db = openDb(gid);
