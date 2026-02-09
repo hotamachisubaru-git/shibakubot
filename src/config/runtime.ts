@@ -90,6 +90,24 @@ function normalizeUrl(raw: string | undefined, fallback: string): URL {
   }
 }
 
+function normalizeUploadBaseUrl(
+  raw: string | undefined,
+  fallback: string,
+): URL {
+  const url = normalizeUrl(raw, fallback);
+
+  if (url.pathname === "/") {
+    url.pathname = "/uploads/";
+    return url;
+  }
+
+  if (!url.pathname.endsWith("/")) {
+    url.pathname = `${url.pathname}/`;
+  }
+
+  return url;
+}
+
 function buildUploadUrlConfig(
   fileHost: string,
   filePort: number,
@@ -97,11 +115,11 @@ function buildUploadUrlConfig(
   const fallbackPublic = `http://localhost:${filePort}/uploads/`;
   const fallbackInternal = `http://127.0.0.1:${filePort}/uploads/`;
 
-  const publicBase = normalizeUrl(
+  const publicBase = normalizeUploadBaseUrl(
     process.env.UPLOAD_BASE_URL ?? process.env.FILE_BASE_URL,
     fallbackPublic,
   );
-  const internalBase = normalizeUrl(
+  const internalBase = normalizeUploadBaseUrl(
     process.env.UPLOAD_INTERNAL_URL,
     fallbackInternal,
   );
