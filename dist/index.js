@@ -16,7 +16,6 @@ const logging_1 = require("./logging");
 const top_1 = require("./commands/top");
 const members_1 = require("./commands/members");
 const menu_1 = require("./commands/menu");
-const daimongamecenter_1 = require("./commands/daimongamecenter");
 const help_1 = require("./commands/help");
 const maintenance_1 = require("./commands/maintenance");
 const ping_1 = require("./commands/ping");
@@ -270,10 +269,6 @@ client.on(discord_js_1.Events.InteractionCreate, async (interaction) => {
     }
     if (name === "members") {
         await (0, members_1.handleMembers)(interaction);
-        return;
-    }
-    if (name === "room") {
-        await (0, daimongamecenter_1.handleRoom)(interaction);
         return;
     }
     if (name === "help") {

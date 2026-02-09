@@ -28,17 +28,10 @@ exports.getMaintenanceEnabled = getMaintenanceEnabled;
 exports.setMaintenanceEnabled = setMaintenanceEnabled;
 exports.setSbkRange = setSbkRange;
 exports.loadGuildStore = loadGuildStore;
-exports.getMedalBalance = getMedalBalance;
-exports.getTopMedals = getTopMedals;
-exports.setMedals = setMedals;
-exports.addMedals = addMedals;
 // src/data.ts
 const node_fs_1 = __importDefault(require("node:fs"));
 const node_path_1 = __importDefault(require("node:path"));
 const better_sqlite3_1 = __importDefault(require("better-sqlite3"));
-// メダル用（非同期 sqlite）
-const sqlite3_1 = __importDefault(require("sqlite3"));
-const sqlite_1 = require("sqlite");
 const BIGINT_RE = /^-?\d+$/;
 function hasTextAffinity(type) {
     const t = (type ?? "").toUpperCase();
@@ -90,8 +83,6 @@ function dbPath(gid) {
     ensureDir(DATA_DIR);
     return node_path_1.default.join(DATA_DIR, `${gid}.db`);
 }
-// メダルバンク DB パス
-const MEDAL_DB_PATH = node_path_1.default.join(process.cwd(), "data", "medalbank.db");
 // ---------- スキーマ & マイグレ ----------
 function ensureSchema(db) {
     // 期待する各テーブルを作成
@@ -437,98 +428,4 @@ function loadGuildStore(gid) {
         immune: getImmuneList(gid),
         settings: { sbkMin: min, sbkMax: max },
     };
-}
-// ------------------------------
-// メダルバンク（SQLite, 非同期）
-// ------------------------------
-let medalDB = null;
-async function getMedalDB() {
-    if (!medalDB) {
-        ensureDir(node_path_1.default.dirname(MEDAL_DB_PATH));
-        medalDB = await (0, sqlite_1.open)({
-            filename: MEDAL_DB_PATH,
-            driver: sqlite3_1.default.Database,
-        });
-        await medalDB.exec(`
-      CREATE TABLE IF NOT EXISTS medals (
-        user_id TEXT PRIMARY KEY,
-        balance TEXT NOT NULL DEFAULT '0'
-      );
-    `);
-        const cols = await medalDB.all(`PRAGMA table_info(medals)`);
-        const balanceCol = cols.find((c) => c.name === "balance");
-        if (balanceCol && !hasTextAffinity(balanceCol.type)) {
-            await medalDB.exec("BEGIN");
-            try {
-                await medalDB.exec(`ALTER TABLE medals RENAME TO medals_text_legacy;`);
-                await medalDB.exec(`
-          CREATE TABLE medals (
-            user_id TEXT PRIMARY KEY,
-            balance TEXT NOT NULL DEFAULT '0'
-          );
-        `);
-                await medalDB.exec(`
-          INSERT INTO medals(user_id, balance)
-          SELECT user_id, CAST(balance AS TEXT) FROM medals_text_legacy;
-        `);
-                await medalDB.exec(`DROP TABLE medals_text_legacy;`);
-                await medalDB.exec("COMMIT");
-            }
-            catch (e) {
-                await medalDB.exec("ROLLBACK");
-                throw e;
-            }
-        }
-    }
-    return medalDB;
-}
-// 残高取得（なければ自動で 1000 を付与）
-async function getMedalBalance(userId) {
-    const db = await getMedalDB();
-    const row = await db.get("SELECT balance FROM medals WHERE user_id = ?", userId);
-    if (row) {
-        return coerceBigInt(row.balance);
-    }
-    // ★ ここ：未登録ユーザー → 自動で 1000 を保存
-    const defaultBalance = 1000n;
-    await db.run("INSERT INTO medals (user_id, balance) VALUES (?, ?)", userId, toDbText(defaultBalance));
-    return defaultBalance;
-}
-async function getTopMedals(limit = 20) {
-    const db = await getMedalDB();
-    const rows = await db.all(`
-      SELECT user_id, balance
-      FROM medals
-      ORDER BY LENGTH(balance) DESC, balance DESC
-      LIMIT ?
-    `, [limit]);
-    return rows.map((r) => ({
-        userId: r.user_id,
-        balance: coerceBigInt(r.balance),
-    }));
-}
-// 残高を上書き
-async function setMedals(userId, amount) {
-    const db = await getMedalDB();
-    const next = toBigIntInput(amount);
-    await db.run(`
-      INSERT INTO medals (user_id, balance)
-      VALUES (?, ?)
-      ON CONFLICT(user_id) DO UPDATE SET balance = excluded.balance;
-    `, userId, toDbText(next));
-    return next;
-}
-// 増減
-async function addMedals(userId, diff) {
-    const db = await getMedalDB();
-    const before = await getMedalBalance(userId);
-    const delta = toBigIntInput(diff);
-    const next = before + delta;
-    const after = next < 0n ? 0n : next;
-    await db.run(`
-      INSERT INTO medals (user_id, balance)
-      VALUES (?, ?)
-      ON CONFLICT(user_id) DO UPDATE SET balance = excluded.balance;
-    `, userId, toDbText(after));
-    return after;
 }

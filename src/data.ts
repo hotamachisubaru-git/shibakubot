@@ -3,10 +3,6 @@ import fs from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
 
-// メダル用（非同期 sqlite）
-import sqlite3 from "sqlite3";
-import { open, Database as SqliteDatabase } from "sqlite";
-
 export type CounterMap = Record<string, bigint>;
 export type SbkRange = { min: number; max: number };
 export type SbkLogRow = {
@@ -67,9 +63,6 @@ function dbPath(gid: string) {
   ensureDir(DATA_DIR);
   return path.join(DATA_DIR, `${gid}.db`);
 }
-
-// メダルバンク DB パス
-const MEDAL_DB_PATH = path.join(process.cwd(), "data", "medalbank.db");
 
 // ---------- スキーマ & マイグレ ----------
 
@@ -537,144 +530,4 @@ export function loadGuildStore(gid: string): {
     immune: getImmuneList(gid),
     settings: { sbkMin: min, sbkMax: max },
   };
-}
-
-// ------------------------------
-// メダルバンク（SQLite, 非同期）
-// ------------------------------
-
-let medalDB: SqliteDatabase | null = null;
-
-async function getMedalDB(): Promise<SqliteDatabase> {
-  if (!medalDB) {
-    ensureDir(path.dirname(MEDAL_DB_PATH));
-    medalDB = await open({
-      filename: MEDAL_DB_PATH,
-      driver: sqlite3.Database,
-    });
-    await medalDB.exec(`
-      CREATE TABLE IF NOT EXISTS medals (
-        user_id TEXT PRIMARY KEY,
-        balance TEXT NOT NULL DEFAULT '0'
-      );
-    `);
-
-    const cols = await medalDB.all<{ name: string; type: string }[]>(
-      `PRAGMA table_info(medals)`,
-    );
-    const balanceCol = cols.find((c) => c.name === "balance");
-    if (balanceCol && !hasTextAffinity(balanceCol.type)) {
-      await medalDB.exec("BEGIN");
-      try {
-        await medalDB.exec(`ALTER TABLE medals RENAME TO medals_text_legacy;`);
-        await medalDB.exec(`
-          CREATE TABLE medals (
-            user_id TEXT PRIMARY KEY,
-            balance TEXT NOT NULL DEFAULT '0'
-          );
-        `);
-        await medalDB.exec(`
-          INSERT INTO medals(user_id, balance)
-          SELECT user_id, CAST(balance AS TEXT) FROM medals_text_legacy;
-        `);
-        await medalDB.exec(`DROP TABLE medals_text_legacy;`);
-        await medalDB.exec("COMMIT");
-      } catch (e) {
-        await medalDB.exec("ROLLBACK");
-        throw e;
-      }
-    }
-  }
-  return medalDB;
-}
-
-// 残高取得（なければ自動で 1000 を付与）
-export async function getMedalBalance(userId: string): Promise<bigint> {
-  const db = await getMedalDB();
-
-  const row = await db.get(
-    "SELECT balance FROM medals WHERE user_id = ?",
-    userId,
-  );
-
-  if (row) {
-    return coerceBigInt((row as { balance?: unknown }).balance);
-  }
-
-  // ★ ここ：未登録ユーザー → 自動で 1000 を保存
-  const defaultBalance = 1000n;
-  await db.run(
-    "INSERT INTO medals (user_id, balance) VALUES (?, ?)",
-    userId,
-    toDbText(defaultBalance),
-  );
-
-  return defaultBalance;
-}
-
-export async function getTopMedals(
-  limit: number = 20,
-): Promise<Array<{ userId: string; balance: bigint }>> {
-  const db = await getMedalDB();
-
-  const rows = await db.all<
-    {
-      user_id: string;
-      balance: unknown;
-    }[]
-  >(
-    `
-      SELECT user_id, balance
-      FROM medals
-      ORDER BY LENGTH(balance) DESC, balance DESC
-      LIMIT ?
-    `,
-    [limit],
-  );
-
-  return rows.map((r) => ({
-    userId: r.user_id,
-    balance: coerceBigInt(r.balance),
-  }));
-}
-
-// 残高を上書き
-export async function setMedals(
-  userId: string,
-  amount: bigint | number,
-): Promise<bigint> {
-  const db = await getMedalDB();
-  const next = toBigIntInput(amount);
-  await db.run(
-    `
-      INSERT INTO medals (user_id, balance)
-      VALUES (?, ?)
-      ON CONFLICT(user_id) DO UPDATE SET balance = excluded.balance;
-    `,
-    userId,
-    toDbText(next),
-  );
-  return next;
-}
-
-// 増減
-export async function addMedals(
-  userId: string,
-  diff: bigint | number,
-): Promise<bigint> {
-  const db = await getMedalDB();
-  const before = await getMedalBalance(userId);
-  const delta = toBigIntInput(diff);
-  const next = before + delta;
-  const after = next < 0n ? 0n : next;
-  await db.run(
-    `
-      INSERT INTO medals (user_id, balance)
-      VALUES (?, ?)
-      ON CONFLICT(user_id) DO UPDATE SET balance = excluded.balance;
-    `,
-    userId,
-    toDbText(after),
-  );
-  return after;
 }

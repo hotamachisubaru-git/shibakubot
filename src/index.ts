@@ -30,7 +30,6 @@ import { sendLog } from "./logging";
 import { handleTop } from "./commands/top";
 import { handleMembers } from "./commands/members";
 import { handleMenu } from "./commands/menu";
-import { handleRoom } from "./commands/daimongamecenter";
 import { handleHelp } from "./commands/help";
 import { handleMaintenance } from "./commands/maintenance";
 import { handlePing } from "./commands/ping";
@@ -336,10 +335,6 @@ client.on(Events.InteractionCreate, async (interaction: Interaction) => {
   }
   if (name === "members") {
     await handleMembers(interaction);
-    return;
-  }
-  if (name === "room") {
-    await handleRoom(interaction);
     return;
   }
   if (name === "help") {

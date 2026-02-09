@@ -22,7 +22,6 @@ import {
   MessageFlags,
   MessageComponentInteraction,
 } from "discord.js";
-import { handleMedalRankingButton, handleMedalSendButton } from "./medal";
 import {
   loadGuildStore,
   addCountGuild,
@@ -32,9 +31,6 @@ import {
   getImmuneList,
   addImmuneId,
   removeImmuneId,
-  getMedalBalance,
-  addMedals,
-  setMedals,
   isImmune,
   getRecentLogs,
   getLogCount,
@@ -47,7 +43,6 @@ import { sendLog } from "../logging";
 import { displayNameFrom } from "../utils/displayNameUtil";
 import {
   compareBigIntDesc,
-  formatSignedBigInt,
   parseBigIntInput,
 } from "../utils/bigint";
 import { fetchGuildMembersSafe } from "../utils/memberFetch";
@@ -73,7 +68,6 @@ const BACKUP_LIST_LIMIT = 5;
 const LOG_CHANNEL_KEY = "logChannelId";
 const DATA_ROOT = path.join(process.cwd(), "data");
 const GUILD_DB_ROOT = path.join(DATA_ROOT, "guilds");
-const MEDAL_DB_PATH = path.join(DATA_ROOT, "medalbank.db");
 const BACKUP_ROOT = path.join(process.cwd(), "backup");
 const EMBED_DESC_LIMIT = 4096; // ← ここは自由に変更OK
 const UNKNOWN_GUILD_MESSAGE = "⚠️ サーバー情報を取得できませんでした。";
@@ -435,7 +429,13 @@ function createPanelCollector(
 function buildMenu(min: number, max: number, page: number = 1) {
   const maxPage = 4;
   const pageName =
-    page === 1 ? "基本" : page === 2 ? "メダル" : page === 3 ? "VC" : "管理者";
+    page === 1
+      ? "基本"
+      : page === 2
+        ? "VC"
+        : page === 3
+          ? "管理者"
+          : "管理者（2）";
 
   const embed = new EmbedBuilder()
     .setTitle("しばくbot メニュー")
@@ -463,18 +463,10 @@ function buildMenu(min: number, max: number, page: number = 1) {
       .setCustomId("menu_help")
       .setLabel("ヘルプ")
       .setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder()
-      .setCustomId("menu_close")
-      .setLabel("閉じる")
-      .setStyle(ButtonStyle.Danger),
   );
 
-  // sbk / ルーム告知 / 上限設定 / 免除管理 / 値直接設定
+  // 管理者（設定系）
   const row2 = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder()
-      .setCustomId("menu_room")
-      .setLabel("ルーム告知")
-      .setStyle(ButtonStyle.Success),
     new ButtonBuilder()
       .setCustomId("menu_limit")
       .setLabel("上限設定")
@@ -487,26 +479,6 @@ function buildMenu(min: number, max: number, page: number = 1) {
       .setCustomId("menu_control")
       .setLabel("値を直接設定")
       .setStyle(ButtonStyle.Secondary),
-  );
-
-  // メダル周りの管理
-  const row3 = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder()
-      .setCustomId("menu_admin")
-      .setLabel("メダル管理")
-      .setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder()
-      .setCustomId("menu_bank")
-      .setLabel("メダルバンク")
-      .setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder()
-      .setCustomId("menu_medal_ranking")
-      .setLabel("メダルランキング")
-      .setStyle(ButtonStyle.Primary),
-    new ButtonBuilder()
-      .setCustomId("menu_medal_send")
-      .setLabel("メダル送金")
-      .setStyle(ButtonStyle.Success),
   );
 
   // VC 関連
@@ -529,7 +501,7 @@ function buildMenu(min: number, max: number, page: number = 1) {
       .setStyle(ButtonStyle.Secondary),
   );
 
-  // 管理者向け（監査ログなど）
+  // 管理者（2）向け（監査ログなど）
   const row5 = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
       .setCustomId("menu_audit")
@@ -557,13 +529,13 @@ function buildMenu(min: number, max: number, page: number = 1) {
   const rows: ActionRowBuilder<ButtonBuilder>[] = [];
 
   if (page === 1) {
-    rows.push(row1, row2); // 基本
+    rows.push(row1); // 基本
   } else if (page === 2) {
-    rows.push(row3); // メダル
-  } else if (page === 3) {
     rows.push(row4); // VC
+  } else if (page === 3) {
+    rows.push(row2); // 管理者
   } else if (page === 4) {
-    rows.push(row5); // 管理者
+    rows.push(row5); // 管理者（2）
   }
 
   // 下部ページナビ
@@ -573,17 +545,21 @@ function buildMenu(min: number, max: number, page: number = 1) {
       .setLabel("基本")
       .setStyle(page === 1 ? ButtonStyle.Primary : ButtonStyle.Secondary),
     new ButtonBuilder()
-      .setCustomId("menu_page_medal")
-      .setLabel("メダル")
-      .setStyle(page === 2 ? ButtonStyle.Primary : ButtonStyle.Secondary),
-    new ButtonBuilder()
       .setCustomId("menu_page_vc")
       .setLabel("VC")
-      .setStyle(page === 3 ? ButtonStyle.Primary : ButtonStyle.Secondary),
+      .setStyle(page === 2 ? ButtonStyle.Primary : ButtonStyle.Secondary),
     new ButtonBuilder()
       .setCustomId("menu_page_admin")
       .setLabel("管理者")
+      .setStyle(page === 3 ? ButtonStyle.Primary : ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId("menu_page_admin2")
+      .setLabel("管理者（2）")
       .setStyle(page === 4 ? ButtonStyle.Primary : ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId("menu_close")
+      .setLabel("閉じる")
+      .setStyle(ButtonStyle.Danger),
   );
   rows.push(navRow);
 
@@ -650,15 +626,15 @@ export async function handleMenu(
       switch (btn.customId) {
         /* --- ページ切り替え --- */
         case "menu_page_basic":
-        case "menu_page_medal":
         case "menu_page_vc":
-        case "menu_page_admin": {
+        case "menu_page_admin":
+        case "menu_page_admin2": {
           await btn.deferUpdate();
 
           if (btn.customId === "menu_page_basic") currentPage = 1;
-          if (btn.customId === "menu_page_medal") currentPage = 2;
-          if (btn.customId === "menu_page_vc") currentPage = 3;
-          if (btn.customId === "menu_page_admin") currentPage = 4;
+          if (btn.customId === "menu_page_vc") currentPage = 2;
+          if (btn.customId === "menu_page_admin") currentPage = 3;
+          if (btn.customId === "menu_page_admin2") currentPage = 4;
 
           const rebuilt = buildMenu(sbkMin, sbkMax, currentPage);
           built = rebuilt;
@@ -712,53 +688,6 @@ export async function handleMenu(
                 ),
             ],
             ephemeral: true,
-          });
-          break;
-        }
-
-        /* --- ルーム告知 --- */
-        case "menu_room": {
-          const modal = new ModalBuilder()
-            .setCustomId("menu_room_modal")
-            .setTitle("ルーム告知");
-          modal.addComponents(
-            new ActionRowBuilder<TextInputBuilder>().addComponents(
-              new TextInputBuilder()
-                .setCustomId("game")
-                .setStyle(TextInputStyle.Short)
-                .setRequired(true)
-                .setMaxLength(16)
-                .setLabel("ゲーム名（例: PPR）"),
-            ),
-            new ActionRowBuilder<TextInputBuilder>().addComponents(
-              new TextInputBuilder()
-                .setCustomId("area")
-                .setStyle(TextInputStyle.Short)
-                .setRequired(true)
-                .setMaxLength(4)
-                .setLabel("エリア番号（例: 156）"),
-            ),
-            new ActionRowBuilder<TextInputBuilder>().addComponents(
-              new TextInputBuilder()
-                .setCustomId("pass")
-                .setStyle(TextInputStyle.Short)
-                .setRequired(true)
-                .setMaxLength(18)
-                .setLabel("パスワード（例: 10005）"),
-            ),
-          );
-          const submitted = await showModalAndAwait(btn, modal);
-          if (!submitted) break;
-
-          const g = submitted.fields.getTextInputValue("game").trim() || "PPR";
-          const a = Number(
-            submitted.fields.getTextInputValue("area").trim() || "156",
-          );
-          const p =
-            submitted.fields.getTextInputValue("pass").trim() || "10005";
-          await submitted.reply({
-            content: `本日は **${g}** の **${isNaN(a) ? 156 : a}** で、**${p.slice(0, 16)}** で入れます。`,
-            allowedMentions: { parse: [] },
           });
           break;
         }
@@ -1760,176 +1689,6 @@ export async function handleMenu(
           break;
         }
 
-        /* --- メダルバンク --- */
-        case "menu_bank": {
-          await btn.deferUpdate();
-          const balance = await getMedalBalance(btn.user.id);
-          await btn.followUp({
-            content: `💰 あなたのメダル残高は **${balance} 枚** です。`,
-            ephemeral: true,
-          });
-          break;
-        }
-
-        /* --- メダル管理 --- */
-        case "menu_admin": {
-          if (
-            !(await requireAdminOrDev(
-              btn,
-              "メダル管理は管理者/開発者のみ利用できます。",
-            ))
-          )
-            break;
-
-          const rowUser =
-            new ActionRowBuilder<UserSelectMenuBuilder>().addComponents(
-              new UserSelectMenuBuilder()
-                .setCustomId("bank_user")
-                .setPlaceholder("対象ユーザーを選択")
-                .setMaxValues(1),
-            );
-
-          await btn.reply({
-            content: "メダル残高を変更するユーザーを選んでください。",
-            components: [
-              rowUser,
-              new ActionRowBuilder<ButtonBuilder>().addComponents(
-                new ButtonBuilder()
-                  .setCustomId("bank_set")
-                  .setLabel("残高を設定")
-                  .setStyle(ButtonStyle.Primary),
-                new ButtonBuilder()
-                  .setCustomId("bank_add")
-                  .setLabel("増減させる")
-                  .setStyle(ButtonStyle.Secondary),
-                new ButtonBuilder()
-                  .setCustomId("bank_cancel")
-                  .setLabel("キャンセル")
-                  .setStyle(ButtonStyle.Danger),
-              ),
-            ],
-            ephemeral: true,
-          });
-
-          const panel = await btn.fetchReply();
-          let targetId: string | null = null;
-
-          const sub = createPanelCollector(btn, panel);
-
-          sub.on("collect", async (i) => {
-            if (i.isUserSelectMenu() && i.customId === "bank_user") {
-              targetId = i.values[0] ?? null;
-              await i.deferUpdate();
-              return;
-            }
-
-            if (i.isButton() && i.customId === "bank_cancel") {
-              await i.update({
-                content: "キャンセルしました。",
-                components: [],
-              });
-              sub.stop("cancel");
-              return;
-            }
-
-            if (
-              i.isButton() &&
-              (i.customId === "bank_set" || i.customId === "bank_add")
-            ) {
-              const selectedTargetId = targetId;
-              if (!selectedTargetId) {
-                await i.reply({
-                  content: "先に対象ユーザーを選択してください。",
-                  ephemeral: true,
-                });
-                return;
-              }
-
-              const mode = i.customId === "bank_set" ? "set" : "add";
-              const modal = new ModalBuilder()
-                .setCustomId(`bank_modal_${mode}`)
-                .setTitle(
-                  mode === "set" ? "メダル残高を設定" : "メダル残高を増減",
-                );
-
-              modal.addComponents(
-                new ActionRowBuilder<TextInputBuilder>().addComponents(
-                  new TextInputBuilder()
-                    .setCustomId("value")
-                    .setStyle(TextInputStyle.Short)
-                    .setRequired(true)
-                    .setLabel(
-                      mode === "set"
-                        ? "新しい残高（0以上の整数）"
-                        : "増減する枚数（+/- の整数）",
-                    ),
-                ),
-              );
-
-              const submitted = await showModalAndAwait(i, modal);
-              if (!submitted) return;
-
-              const raw = submitted.fields.getTextInputValue("value");
-              const num = parseBigIntInput(raw);
-              if (num === null) {
-                await submitted.reply({
-                  content: "数値を入力してください。",
-                  ephemeral: true,
-                });
-                return;
-              }
-              if (mode === "set" && num < 0n) {
-                await submitted.reply({
-                  content: "0以上の数値を入力してください。",
-                  ephemeral: true,
-                });
-                return;
-              }
-
-              let after: bigint;
-              if (mode === "set") {
-                after = await setMedals(selectedTargetId, num);
-              } else {
-                after = await addMedals(selectedTargetId, num);
-              }
-
-              const targetName = await displayNameFrom(
-                submitted,
-                selectedTargetId,
-              );
-
-              await clearPanelComponents(panel);
-
-              await submitted.reply({
-                content:
-                  `💰 **${targetName}** のメダル残高を更新しました。\n` +
-                  (mode === "set"
-                    ? `新しい残高: **${after} 枚**`
-                    : `変化量: ${formatSignedBigInt(num)} 枚 → 残高: **${after} 枚**`),
-                ephemeral: true,
-              });
-
-              sub.stop("done");
-            }
-          });
-
-          sub.on("end", async () => {
-            await clearPanelComponents(panel);
-          });
-
-          break;
-        }
-
-        /* --- メダルランキング/送金 --- */
-        case "menu_medal_ranking": {
-          await handleMedalRankingButton(btn);
-          break;
-        }
-        case "menu_medal_send": {
-          await handleMedalSendButton(btn);
-          break;
-        }
-
         /* --- ヘルプ --- */
         case "menu_help": {
           await btn.deferUpdate();
@@ -1939,10 +1698,11 @@ export async function handleMenu(
                 .setTitle("ヘルプ")
                 .setDescription(
                   [
-                    "このメニューから、ランキング/メンバー/統計/ルーム告知/上限設定/免除管理/値の直接設定/VC移動/VC切断/VCミュート/VCミュート解除/メダル機能 が使えます。",
-                    "管理者ページから、監査ログ/サーバー設定/システム統計/バックアップ作業が利用できます。",
-                    "※ 上限設定・免除管理・値の直接設定・VC移動・VC切断・VCミュート・ミュート解除・メダル管理は 管理者 or OWNER_IDS で利用可。",
-                    "※ 開発者ツール/メダルDBバックアップは OWNER_IDS のみ利用可。",
+                    "このメニューから、ランキング/メンバー/統計/VC移動/VC切断/VCミュート/VCミュート解除 が使えます。",
+                    "管理者ページから、上限設定/免除管理/値の直接設定 が利用できます。",
+                    "管理者（2）ページから、監査ログ/サーバー設定/開発者ツール/システム統計/バックアップ作業 が利用できます。",
+                    "※ 上限設定・免除管理・値の直接設定・VC移動・VC切断・VCミュート・ミュート解除は 管理者 or OWNER_IDS で利用可。",
+                    "※ 開発者ツールは OWNER_IDS のみ利用可。",
                     `現在の回数レンジ: **${safeCount(BigInt(sbkMin))}〜${safeCount(BigInt(sbkMax))}回**`,
                   ].join("\n"),
                 ),
@@ -2360,10 +2120,6 @@ export async function handleMenu(
                 .setPlaceholder("操作を選択")
                 .addOptions(
                   { label: "ギルドDBをバックアップ", value: "guild" },
-                  {
-                    label: "メダルDBをバックアップ（開発者のみ）",
-                    value: "medal",
-                  },
                   { label: "バックアップ一覧", value: "list" },
                 ),
             );
@@ -2385,12 +2141,12 @@ export async function handleMenu(
           });
 
           const panel = await btn.fetchReply();
-          let act: "guild" | "medal" | "list" | null = null;
+          let act: "guild" | "list" | null = null;
           const sub = createPanelCollector(btn, panel);
 
           sub.on("collect", async (i) => {
             if (i.isStringSelectMenu() && i.customId === "backup_act") {
-              act = pickUnionValue(i.values[0], ["guild", "medal", "list"]);
+              act = pickUnionValue(i.values[0], ["guild", "list"]);
               await i.deferUpdate();
               return;
             }
@@ -2448,55 +2204,15 @@ export async function handleMenu(
                 }
               }
 
-              if (act === "medal") {
-                const isDev = OWNER_IDS.has(i.user.id);
-                if (!isDev) {
-                  await i.followUp({
-                    content: "メダルDBのバックアップは開発者のみ利用できます。",
-                    ephemeral: true,
-                  });
-                } else if (!fs.existsSync(MEDAL_DB_PATH)) {
-                  await i.followUp({
-                    content: "メダルDBが見つかりません。",
-                    ephemeral: true,
-                  });
-                } else {
-                  const stamp = formatTimestamp();
-                  const destDir = path.join(BACKUP_ROOT, "medalbank");
-                  const dest = path.join(destDir, `${stamp}.db`);
-                  const copied = copyDbWithWal(MEDAL_DB_PATH, dest);
-                  const list = copied
-                    .map((p) => `- ${path.relative(process.cwd(), p)}`)
-                    .join("\n");
-                  await i.followUp({
-                    content: copied.length
-                      ? `バックアップを作成しました:\n${list}`
-                      : "バックアップに失敗しました。",
-                    ephemeral: true,
-                  });
-                }
-              }
-
               if (act === "list") {
                 const guildDir = path.join(BACKUP_ROOT, "guilds", gid);
                 const guildList = listBackupFiles(guildDir, BACKUP_LIST_LIMIT);
-                const isDev = OWNER_IDS.has(i.user.id);
-                const medalDir = path.join(BACKUP_ROOT, "medalbank");
-                const medalList = isDev
-                  ? listBackupFiles(medalDir, BACKUP_LIST_LIMIT)
-                  : [];
 
                 const lines = [
                   "ギルドDBバックアップ:",
                   ...(guildList.length
                     ? guildList.map((x) => `- ${x}`)
                     : ["（なし）"]),
-                  "メダルDBバックアップ:",
-                  ...(isDev
-                    ? medalList.length
-                      ? medalList.map((x) => `- ${x}`)
-                      : ["（なし）"]
-                    : ["（開発者のみ）"]),
                 ];
 
                 await i.followUp({
