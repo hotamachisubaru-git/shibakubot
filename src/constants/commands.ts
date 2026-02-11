@@ -24,6 +24,7 @@ export function isMaintenanceCommand(name: string): boolean {
 export const MUSIC_TEXT_COMMAND = {
   play: "play",
   skip: "skip",
+  skipAlias: "s",
   stop: "stop",
   queue: "queue",
   upload: "upload",
