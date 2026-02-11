@@ -5,6 +5,7 @@ import {
   handleDisable,
   handleEnable,
   handleNgWordCommand,
+  handleNowPlaying,
   handlePlay,
   handleQueue,
   handleRemoveCommand,
@@ -25,7 +26,7 @@ import { getLavalink } from "./music/trackUtils";
 
 /**
  * メッセージコマンドのルーター
- *  s!play / s!skip / s!s / s!stop / s!queue / s!upload / s!ng
+ *  s!play / s!np / s!skip / s!s / s!stop / s!queue / s!upload / s!ng
  */
 export async function handleMusicMessage(message: Message): Promise<void> {
   if (!message.guild) return;
@@ -93,6 +94,8 @@ export async function handleMusicMessage(message: Message): Promise<void> {
       }
 
       await handlePlay(message, query);
+    } else if (command === MUSIC_TEXT_COMMAND.np) {
+      await handleNowPlaying(message);
     } else if (
       command === MUSIC_TEXT_COMMAND.skip ||
       command === MUSIC_TEXT_COMMAND.skipAlias
@@ -113,6 +116,7 @@ export async function handleMusicMessage(message: Message): Promise<void> {
       await message.reply(
         "🎵 音楽コマンド一覧:\n" +
           `\`${PREFIX}${MUSIC_TEXT_COMMAND.play} <URL or キーワード>\` - 曲を再生・キューに追加\n` +
+          `\`${PREFIX}${MUSIC_TEXT_COMMAND.np}\` - 現在再生中の曲を表示\n` +
           `\`${PREFIX}${MUSIC_TEXT_COMMAND.skip}\` (${PREFIX}${MUSIC_TEXT_COMMAND.skipAlias}) - 曲をスキップ\n` +
           `\`${PREFIX}${MUSIC_TEXT_COMMAND.stop}\` - 再生を停止し、VCから退出\n` +
           `\`${PREFIX}${MUSIC_TEXT_COMMAND.queue}\` - 再生中・キュー中の曲一覧を表示\n` +
