@@ -24,14 +24,12 @@ import {
 } from "discord.js";
 import {
   loadGuildStore,
-  addCountGuild,
   getSbkRange,
   setSbkRange,
   setCountGuild,
   getImmuneList,
   addImmuneId,
   removeImmuneId,
-  isImmune,
   getRecentLogs,
   getLogCount,
   getSetting,
@@ -43,7 +41,6 @@ import { getRuntimeConfig } from "../config/runtime";
 import { BACKUP_ROOT, GUILD_DB_ROOT } from "../constants/paths";
 import { COMMON_MESSAGES } from "../constants/messages";
 import { SETTING_KEYS } from "../constants/settings";
-import { sendLog } from "../logging";
 import { displayNameFrom } from "../utils/displayNameUtil";
 import {
   compareBigIntDesc,
@@ -57,7 +54,6 @@ type PanelMessage = Awaited<ReturnType<ButtonInteraction["fetchReply"]>>;
 /* ===== 設定 ===== */
 const runtimeConfig = getRuntimeConfig();
 const OWNER_IDS = runtimeConfig.discord.ownerIds;
-const IMMUNE_IDS = runtimeConfig.discord.immuneIds;
 const PAGE_SIZE = 10;
 const AUDIT_LIMIT = 10;
 const BACKUP_LIST_LIMIT = 5;
@@ -409,12 +405,21 @@ async function showModalAndAwait(
 function createPanelCollector(
   interaction: ButtonInteraction,
   panel: PanelMessage,
-  time = 60_000,
+  time = 120_000,
 ) {
   return resolveCollectorChannel(interaction).createMessageComponentCollector({
     time,
     filter: (i) =>
       i.user.id === interaction.user.id && i.message.id === panel.id,
+  });
+}
+
+function bindPanelCleanup(
+  collector: ReturnType<typeof createPanelCollector>,
+  panel: PanelMessage,
+) {
+  collector.on("end", async () => {
+    await clearPanelComponents(panel);
   });
 }
 
@@ -609,7 +614,7 @@ export async function handleMenu(
 
   const collector = channel.createMessageComponentCollector({
     componentType: ComponentType.Button,
-    time: 60_000,
+    time: 120_000,
     filter: (i) =>
       i.user.id === interaction.user.id && i.message.id === msg.id,
   });
@@ -682,159 +687,6 @@ export async function handleMenu(
             ],
             ephemeral: true,
           });
-          break;
-        }
-
-        /* --- しばく（UI） --- */
-        case "menu_sbk": {
-          const rowUser =
-            new ActionRowBuilder<UserSelectMenuBuilder>().addComponents(
-              new UserSelectMenuBuilder()
-                .setCustomId("sbk_pick_user")
-                .setPlaceholder("しばく相手を選ぶ")
-                .setMaxValues(1),
-            );
-
-          await btn.reply({
-            content:
-              "しばく相手を選んで、「理由と回数を入力して実行」を押してください。",
-            components: [
-              rowUser,
-              new ActionRowBuilder<ButtonBuilder>().addComponents(
-                new ButtonBuilder()
-                  .setCustomId("sbk_exec")
-                  .setLabel("理由と回数を入力して実行")
-                  .setStyle(ButtonStyle.Primary),
-                new ButtonBuilder()
-                  .setCustomId("sbk_cancel")
-                  .setLabel("キャンセル")
-                  .setStyle(ButtonStyle.Secondary),
-              ),
-            ],
-            ephemeral: true,
-          });
-
-          const panel = await btn.fetchReply();
-          let pickedUserId: string | null = null;
-
-          const sub = createPanelCollector(btn, panel);
-
-          sub.on("collect", async (i) => {
-            if (i.isUserSelectMenu() && i.customId === "sbk_pick_user") {
-              pickedUserId = i.values[0] ?? null;
-              await i.deferUpdate();
-              return;
-            }
-
-            if (i.isButton() && i.customId === "sbk_cancel") {
-              await i.update({
-                content: "キャンセルしました。",
-                components: [],
-              });
-              sub.stop("cancel");
-              return;
-            }
-
-            if (i.isButton() && i.customId === "sbk_exec") {
-              const selectedUserId = pickedUserId;
-              if (!selectedUserId) {
-                await i.reply({
-                  content: "相手を選んでください。",
-                  ephemeral: true,
-                });
-                return;
-              }
-
-              const modal = new ModalBuilder()
-                .setCustomId("sbk_modal")
-                .setTitle("しばく回数と理由");
-              modal.addComponents(
-                new ActionRowBuilder<TextInputBuilder>().addComponents(
-                  new TextInputBuilder()
-                    .setCustomId("count")
-                    .setStyle(TextInputStyle.Short)
-                    .setRequired(true)
-                    .setLabel(
-                      `回数（${safeCount(BigInt(sbkMin))}〜${safeCount(BigInt(sbkMax))}回 の整数）`,
-                    ),
-                ),
-                new ActionRowBuilder<TextInputBuilder>().addComponents(
-                  new TextInputBuilder()
-                    .setCustomId("reason")
-                    .setStyle(TextInputStyle.Paragraph)
-                    .setRequired(true)
-                    .setMaxLength(100)
-                    .setLabel("理由（100文字まで）"),
-                ),
-              );
-
-              const submitted = await showModalAndAwait(i, modal);
-              if (!submitted) return;
-
-              const localImmune = isImmune(gid, selectedUserId);
-              const globalImmune = IMMUNE_IDS.has(selectedUserId);
-              if (localImmune || globalImmune) {
-                await submitted.reply({
-                  content: "🛡️ このユーザーはしばき免除のため実行できません。",
-                  ephemeral: true,
-                });
-                return;
-              }
-
-              const countRaw = submitted.fields
-                .getTextInputValue("count")
-                .trim();
-              const pickedCount = parseBigIntInput(countRaw);
-              const minBig = BigInt(sbkMin);
-              const maxBig = BigInt(sbkMax);
-              if (
-                pickedCount === null ||
-                pickedCount < minBig ||
-                pickedCount > maxBig
-              ) {
-                await submitted.reply({
-                  content: `回数は ${safeCount(BigInt(sbkMin))}〜${safeCount(BigInt(sbkMax))}回 の整数で入力してください。`,
-                  ephemeral: true,
-                });
-                return;
-              }
-
-              const reason = submitted.fields
-                .getTextInputValue("reason")
-                .trim();
-              const next = addCountGuild(
-                gid,
-                selectedUserId,
-                pickedCount,
-                i.user.tag,
-                reason,
-              );
-              const name = await displayNameFrom(submitted, selectedUserId);
-
-              await clearPanelComponents(panel);
-
-              await submitted.reply({
-                content: `**${name}** が ${safeCount(pickedCount)} 回 しばかれました！（累計 ${safeCount(next)} 回）\n理由: ${reason}`,
-                allowedMentions: { parse: [] },
-              });
-
-              await sendLog(
-                submitted,
-                i.user.id,
-                selectedUserId,
-                reason,
-                pickedCount,
-                next,
-              );
-
-              sub.stop("done");
-            }
-          });
-
-          sub.on("end", async () => {
-            await clearPanelComponents(panel);
-          });
-
           break;
         }
 
@@ -1036,9 +888,7 @@ export async function handleMenu(
             }
           });
 
-          sub.on("end", async () => {
-            await clearPanelComponents(panel);
-          });
+          bindPanelCleanup(sub, panel);
 
           break;
         }
@@ -1147,9 +997,7 @@ export async function handleMenu(
             }
           });
 
-          sub.on("end", async () => {
-            await clearPanelComponents(panel);
-          });
+          bindPanelCleanup(sub, panel);
 
           break;
         }
@@ -1310,9 +1158,7 @@ export async function handleMenu(
             }
           });
 
-          sub.on("end", async () => {
-            await clearPanelComponents(panel);
-          });
+          bindPanelCleanup(sub, panel);
 
           break;
         }
@@ -1431,9 +1277,7 @@ export async function handleMenu(
             }
           });
 
-          sub.on("end", async () => {
-            await clearPanelComponents(panel);
-          });
+          bindPanelCleanup(sub, panel);
 
           break;
         }
@@ -1553,9 +1397,7 @@ export async function handleMenu(
             }
           });
 
-          sub.on("end", async () => {
-            await clearPanelComponents(panel);
-          });
+          bindPanelCleanup(sub, panel);
 
           break;
         }
@@ -1675,9 +1517,7 @@ export async function handleMenu(
             }
           });
 
-          sub.on("end", async () => {
-            await clearPanelComponents(panel);
-          });
+          bindPanelCleanup(sub, panel);
 
           break;
         }
@@ -1867,9 +1707,7 @@ export async function handleMenu(
             }
           });
 
-          sub.on("end", async () => {
-            await clearPanelComponents(panel);
-          });
+          bindPanelCleanup(sub, panel);
           break;
         }
 
@@ -2039,9 +1877,7 @@ export async function handleMenu(
             }
           });
 
-          sub.on("end", async () => {
-            await clearPanelComponents(panel);
-          });
+          bindPanelCleanup(sub, panel);
           break;
         }
 
@@ -2219,9 +2055,7 @@ export async function handleMenu(
             }
           });
 
-          sub.on("end", async () => {
-            await clearPanelComponents(panel);
-          });
+          bindPanelCleanup(sub, panel);
           break;
         }
 
@@ -2255,3 +2089,4 @@ export async function handleMenu(
     } catch {}
   });
 }
+

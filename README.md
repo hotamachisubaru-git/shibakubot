@@ -19,6 +19,40 @@ Discordサーバー向けの「しばくカウント」Bot。
   - 接続先は `.env` の `LAVALINK_*` 設定に合わせてください  
     （デフォルト: `127.0.0.1:2333`, password `youshallnotpass`）
 
+## Discordアプリ/Bot の作成手順
+1. [Discord Developer Portal](https://discord.com/developers/applications) で `New Application` を作成
+2. `Bot` タブで Bot を作成し、`Reset Token` でトークンを発行
+3. `General Information` から `Application ID`（=`CLIENT_ID`）を控える
+4. `Bot` タブで下記 Intents を有効化
+   - `SERVER MEMBERS INTENT`
+   - `MESSAGE CONTENT INTENT`
+5. `OAuth2 -> URL Generator` で以下を選択して招待URLを作成
+   - Scopes: `bot`, `applications.commands`
+   - Bot Permissions: 下記「必要な Bot 権限」を付与
+6. 生成した URL で対象サーバーに招待
+
+## 必要な権限
+### Gateway Intents（Developer Portal）
+- 必須: `SERVER MEMBERS INTENT`
+- 必須: `MESSAGE CONTENT INTENT`
+
+### 必要な Bot 権限（サーバー招待時）
+- `View Channels`
+- `Send Messages`
+- `Embed Links`
+- `Attach Files`（`/members` のCSV出力で使用）
+- `Read Message History`
+- `Connect`（音楽機能）
+- `Speak`（音楽機能）
+- `Move Members`（VC移動/切断）
+- `Mute Members`（VCミュート/解除）
+
+権限設計を簡単にする場合は `Administrator` 付与でも動作します。
+
+### 実行ユーザー側に必要な権限
+- `/menu` の管理系操作は、Bot側とは別に「実行したユーザー本人」の権限チェックがあります。
+- 例: VC移動/切断は `Move Members`、VCミュート系は `Mute Members`、その他管理系は `Administrator` または開発者ID。
+
 ## セットアップ
 1. Discord Developer Portal でアプリ作成 → Bot 作成
 2. トークン取得、Intents を有効化
