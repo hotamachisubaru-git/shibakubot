@@ -1,3 +1,4 @@
+import fs from "node:fs/promises";
 import path from "node:path";
 
 type AttachmentLike = {
@@ -219,4 +220,37 @@ function readId3v1Title(buffer: Buffer): string | null {
 
 export function getId3TitleFromBuffer(buffer: Buffer): string | null {
   return readId3v2Title(buffer) ?? readId3v1Title(buffer);
+}
+
+const ID3V2_SCAN_BYTES = 1024 * 1024;
+
+export async function getId3TitleFromFile(filePath: string): Promise<string | null> {
+  const file = await fs.open(filePath, "r");
+
+  try {
+    const stat = await file.stat();
+    const fileSize = stat.size;
+    if (fileSize <= 0) return null;
+
+    const headLength = Math.min(fileSize, ID3V2_SCAN_BYTES);
+    if (headLength > 0) {
+      const head = Buffer.alloc(headLength);
+      const { bytesRead } = await file.read(head, 0, headLength, 0);
+      const titleFromHead = getId3TitleFromBuffer(head.subarray(0, bytesRead));
+      if (titleFromHead) return titleFromHead;
+    }
+
+    if (fileSize >= 128) {
+      const tail = Buffer.alloc(128);
+      const { bytesRead } = await file.read(tail, 0, 128, fileSize - 128);
+      if (bytesRead === 128) {
+        const titleFromTail = getId3TitleFromBuffer(tail);
+        if (titleFromTail) return titleFromTail;
+      }
+    }
+  } finally {
+    await file.close();
+  }
+
+  return null;
 }

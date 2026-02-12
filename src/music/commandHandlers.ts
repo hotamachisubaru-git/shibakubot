@@ -4,7 +4,6 @@ import {
   Message,
   PermissionFlagsBits,
 } from "discord.js";
-import * as mm from "music-metadata";
 import fs from "node:fs";
 import crypto from "node:crypto";
 import path from "node:path";
@@ -49,7 +48,7 @@ import { clearAutoStop, clearPendingSearch, setPendingSearch } from "./state";
 import {
   ensureFileExtension,
   getAttachmentNameFromContentDisposition,
-  getId3TitleFromBuffer,
+  getId3TitleFromFile,
   isLikelyOpaqueTitle,
   pickAttachmentName,
   shouldPreferMetadataTitle,
@@ -65,6 +64,39 @@ export type HandlePlayOptions = {
 
 const NOW_PLAYING_BAR_SEGMENTS = 16;
 const NOW_PLAYING_COLOR = 0x57f287;
+type MusicMetadataModule = typeof import("music-metadata");
+
+let musicMetadataModulePromise: Promise<MusicMetadataModule> | null = null;
+
+function loadMusicMetadataModule(): Promise<MusicMetadataModule> {
+  if (!musicMetadataModulePromise) {
+    musicMetadataModulePromise = import("music-metadata");
+  }
+  return musicMetadataModulePromise;
+}
+
+async function saveResponseBodyToFile(
+  response: globalThis.Response,
+  savePath: string,
+): Promise<void> {
+  const body = response.body;
+  if (!body) {
+    throw new Error("download failed: empty response body");
+  }
+
+  const reader = body.getReader();
+  const fileHandle = await fs.promises.open(savePath, "w");
+  try {
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      if (!chunk.value || chunk.value.length === 0) continue;
+      await fileHandle.write(chunk.value);
+    }
+  } finally {
+    await fileHandle.close();
+  }
+}
 
 function canManageMusic(message: Message): boolean {
   const isAdmin =
@@ -548,7 +580,7 @@ export async function handleUpload(
     return;
   }
 
-  fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+  await fs.promises.mkdir(UPLOAD_DIR, { recursive: true });
 
   const id = crypto.randomUUID();
   const filename = `${id}${ext}`;
@@ -583,24 +615,25 @@ export async function handleUpload(
       }
     }
 
-    const buffer = Buffer.from(await response.arrayBuffer());
+    await saveResponseBodyToFile(response, savePath);
+
     const filenameTitle = toDisplayTrackTitleFromFilename(displayName);
     let playbackTitle = customTitle || filenameTitle;
     let metadataTitle: string | null = null;
 
     try {
-      const metadata = await mm.parseBuffer(
-        buffer,
-        attachment.contentType ?? undefined,
-      );
+      const musicMetadata = await loadMusicMetadataModule();
+      const metadata = await musicMetadata.parseFile(savePath, {
+        skipCovers: true,
+      });
       const title = metadata.common.title?.trim();
       if (title) metadataTitle = title;
-      if (!metadataTitle) {
-        const id3Title = getId3TitleFromBuffer(buffer)?.trim();
-        if (id3Title) metadataTitle = id3Title;
-      }
     } catch {
-      const id3Title = getId3TitleFromBuffer(buffer)?.trim();
+      // noop
+    }
+
+    if (!metadataTitle) {
+      const id3Title = (await getId3TitleFromFile(savePath))?.trim();
       if (id3Title) metadataTitle = id3Title;
     }
 
@@ -612,8 +645,6 @@ export async function handleUpload(
     ) {
       playbackTitle = metadataTitle;
     }
-
-    fs.writeFileSync(savePath, buffer);
 
     const publicUrl = makePublicUrl(filename);
     const internalUrl = makeInternalUrl(filename);
@@ -639,9 +670,7 @@ export async function handleUpload(
   } catch (error) {
     console.error("[music] upload error", error);
     try {
-      if (fs.existsSync(savePath)) {
-        fs.unlinkSync(savePath);
-      }
+      await fs.promises.unlink(savePath);
     } catch {
       // noop
     }
