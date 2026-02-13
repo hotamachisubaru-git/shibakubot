@@ -23,6 +23,26 @@ const DEFAULT_LAVALINK_MAX_PREVIOUS_TRACKS = 25;
 const DEFAULT_LAVALINK_EMPTY_QUEUE_DESTROY_MS = 60_000;
 const DEFAULT_LAVALINK_CLIENT_POSITION_UPDATE_INTERVAL = 150;
 const DEFAULT_LAVALINK_VOLUME_DECREMENTER = 0.75;
+const DEFAULT_MODEL_ENDPOINT = "http://localhost:11434/api/chat";
+const DEFAULT_MODEL_NAME = "gpt-oss:20b";
+const DEFAULT_MODEL_TIMEOUT_MS = 120_000;
+const DEFAULT_MAX_HISTORY_TURNS = 8;
+const DEFAULT_MAX_RESPONSE_CHARS = 8_000;
+const DEFAULT_IMAGE_TIMEOUT_MS = 120_000;
+const DEFAULT_IMAGE_SIZE = "1024x1024";
+const DEFAULT_IMAGE_STEPS = 25;
+const DEFAULT_IMAGE_CFG_SCALE = 6.5;
+const DEFAULT_IMAGE_SAMPLER_NAME = "DPM++ 2M Karras";
+const DEFAULT_AI_SYSTEM_PROMPT = [
+  "あなたはロールプレイ会話を行うAIアシスタントです。",
+  "以下の「キャラクター設定」を最優先で守って回答してください。",
+  "口調・語尾・性格・テンションを毎回一貫させてください。",
+  "説明的な回答でも、話し方は必ずキャラクター設定に合わせてください。",
+  "不明な情報は捏造せず、キャラクター口調のまま「分からない」と伝えてください。",
+  "",
+  "キャラクター設定:",
+  "あなたは親切で実用的なAIアシスタントです。回答は日本語で行ってください。",
+].join("\n");
 
 type UrlBaseConfig = Readonly<{
   publicBaseUrl: URL;
@@ -76,6 +96,24 @@ export type RuntimeConfig = Readonly<{
   app: Readonly<{
     clearGlobalCommandsOnRegister: boolean;
     maxLogReasonLength: number;
+  }>;
+  ai: Readonly<{
+    modelEndpoint: string;
+    modelName: string;
+    modelApiKey?: string;
+    modelTimeoutMs: number;
+    maxHistoryTurns: number;
+    maxResponseChars: number;
+    systemPrompt: string;
+    imageEndpoint?: string;
+    imageModel?: string;
+    imageApiKey?: string;
+    imageTimeoutMs: number;
+    imageDefaultSize: string;
+    imageSteps: number;
+    imageCfgScale: number;
+    imageSamplerName: string;
+    imageNegativePrompt?: string;
   }>;
 }>;
 
@@ -192,6 +230,52 @@ function buildRuntimeConfig(): RuntimeConfig {
   const volumeDecrementer = Number.isFinite(volumeDecrementerParsed)
     ? volumeDecrementerParsed
     : DEFAULT_LAVALINK_VOLUME_DECREMENTER;
+  const modelEndpoint = parseText(process.env.MODEL_ENDPOINT) || DEFAULT_MODEL_ENDPOINT;
+  const modelName = parseText(process.env.MODEL_NAME) || DEFAULT_MODEL_NAME;
+  const modelApiKey = parseText(process.env.MODEL_API_KEY) || undefined;
+  const modelTimeoutMs = parseInteger(
+    process.env.MODEL_TIMEOUT_MS,
+    DEFAULT_MODEL_TIMEOUT_MS,
+    { min: 1_000 },
+  );
+  const maxHistoryTurns = parseInteger(
+    process.env.MAX_HISTORY_TURNS,
+    DEFAULT_MAX_HISTORY_TURNS,
+    { min: 1, max: 100 },
+  );
+  const maxResponseChars = parseInteger(
+    process.env.MAX_RESPONSE_CHARS,
+    DEFAULT_MAX_RESPONSE_CHARS,
+    { min: 200, max: 32_000 },
+  );
+  const systemPromptRaw = parseText(process.env.SYSTEM_PROMPT);
+  const systemPrompt = (systemPromptRaw || DEFAULT_AI_SYSTEM_PROMPT)
+    .replace(/\\n/g, "\n")
+    .trim();
+  const imageEndpoint = parseText(process.env.IMAGE_ENDPOINT) || undefined;
+  const imageModel = parseText(process.env.IMAGE_MODEL) || undefined;
+  const imageApiKey = parseText(process.env.IMAGE_API_KEY) || undefined;
+  const imageTimeoutMs = parseInteger(
+    process.env.IMAGE_TIMEOUT_MS,
+    DEFAULT_IMAGE_TIMEOUT_MS,
+    { min: 1_000 },
+  );
+  const imageDefaultSizeRaw = parseText(process.env.IMAGE_DEFAULT_SIZE) || DEFAULT_IMAGE_SIZE;
+  const imageDefaultSize = /^\d+x\d+$/.test(imageDefaultSizeRaw)
+    ? imageDefaultSizeRaw
+    : DEFAULT_IMAGE_SIZE;
+  const imageSteps = parseInteger(process.env.IMAGE_STEPS, DEFAULT_IMAGE_STEPS, {
+    min: 1,
+  });
+  const imageCfgScaleRaw = parseText(process.env.IMAGE_CFG_SCALE);
+  const imageCfgScaleParsed = Number.parseFloat(imageCfgScaleRaw);
+  const imageCfgScale =
+    Number.isFinite(imageCfgScaleParsed) && imageCfgScaleParsed > 0
+      ? imageCfgScaleParsed
+      : DEFAULT_IMAGE_CFG_SCALE;
+  const imageSamplerName =
+    parseText(process.env.IMAGE_SAMPLER_NAME) || DEFAULT_IMAGE_SAMPLER_NAME;
+  const imageNegativePrompt = parseText(process.env.IMAGE_NEGATIVE_PROMPT) || undefined;
 
   return {
     discord: {
@@ -274,6 +358,24 @@ function buildRuntimeConfig(): RuntimeConfig {
       maxLogReasonLength: parseInteger(process.env.SBK_MAX_REASON_LENGTH, 2_000, {
         min: 50,
       }),
+    },
+    ai: {
+      modelEndpoint,
+      modelName,
+      modelApiKey,
+      modelTimeoutMs,
+      maxHistoryTurns,
+      maxResponseChars,
+      systemPrompt,
+      imageEndpoint,
+      imageModel,
+      imageApiKey,
+      imageTimeoutMs,
+      imageDefaultSize,
+      imageSteps,
+      imageCfgScale,
+      imageSamplerName,
+      imageNegativePrompt,
     },
   };
 }

@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 require("dotenv/config");
 const discord_js_1 = require("discord.js");
+const handlers_1 = require("./ai/handlers");
 const help_1 = require("./commands/help");
 const maintenance_1 = require("./commands/maintenance");
 const members_1 = require("./commands/members");
@@ -303,6 +304,10 @@ client.on(discord_js_1.Events.InteractionCreate, async (interaction) => {
     }
     if (commandName === commands_1.SLASH_COMMAND.immune) {
         await handleImmune(interaction);
+        return;
+    }
+    if ((0, handlers_1.isAiSlashCommand)(commandName)) {
+        await (0, handlers_1.handleAiSlashCommand)(interaction);
         return;
     }
     const handler = ROOT_SLASH_HANDLERS[commandName];

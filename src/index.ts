@@ -8,6 +8,7 @@ import {
   PermissionFlagsBits,
   type ChatInputCommandInteraction,
 } from "discord.js";
+import { handleAiSlashCommand, isAiSlashCommand } from "./ai/handlers";
 import { handleHelp } from "./commands/help";
 import { handleMaintenance } from "./commands/maintenance";
 import { handleMembers } from "./commands/members";
@@ -388,6 +389,11 @@ client.on(Events.InteractionCreate, async (interaction: Interaction) => {
 
   if (commandName === SLASH_COMMAND.immune) {
     await handleImmune(interaction);
+    return;
+  }
+
+  if (isAiSlashCommand(commandName)) {
+    await handleAiSlashCommand(interaction);
     return;
   }
 

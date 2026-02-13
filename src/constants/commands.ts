@@ -13,6 +13,14 @@ export const SLASH_COMMAND = {
   top: "top",
   control: "control",
   immune: "immune",
+  chat: "chat",
+  reply: "reply",
+  regen: "regen",
+  image: "image",
+  history: "history",
+  setPrompt: "setprompt",
+  setCharacter: "setcharacter",
+  chatReset: "chatreset",
 } as const;
 
 export function isMaintenanceCommand(name: string): boolean {
