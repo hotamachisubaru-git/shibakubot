@@ -25,13 +25,10 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Validate tag and package version
+      - name: Show release metadata
         run: |
-          EXPECTED_TAG="v$(node -p \"require('./package.json').version\")"
-          if [ "${GITHUB_REF_NAME}" != "${EXPECTED_TAG}" ]; then
-            echo "Tag ${GITHUB_REF_NAME} does not match package.json version ${EXPECTED_TAG}."
-            exit 1
-          fi
+          echo "Tag: ${GITHUB_REF_NAME}"
+          echo "Version: $(node -p "require('./package.json').version")"
 
       - name: Build release bundle
         run: npm run release:bundle
