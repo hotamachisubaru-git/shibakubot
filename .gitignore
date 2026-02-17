@@ -9,16 +9,19 @@
 data/
 *.db
 backup/
+!package.json
+!package-lock.json
+!tsconfig.json
 
 # Build and dependencies
 node_modules/
 dist/
+release/
 
 # Other
 logs/
 *.zip
 *.js
-*.json
 *.log
 *.mp3
 *.tsbuildinfo

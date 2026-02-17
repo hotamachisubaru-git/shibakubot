@@ -75,8 +75,29 @@ Discordサーバー向けの「しばくカウント」Bot。
 本番用:
 ```bash
 npm run build
+npm run register:prod
 npm run start
 ```
+
+## 配布 / リリース（v1.2以降）
+### ローカルで配布用バンドルを作成
+```bash
+npm ci
+npm run release:bundle
+```
+
+生成物:
+- `release/shibakubot-v<version>/`
+- 中身: `dist/`, `package.json`, `package-lock.json`, `.env.example`, `README.md`, `CHANGELOG.md`, `LICENSE`, `RELEASE.md`
+
+### GitHub Release を作る手順
+1. `package.json` の `version` と `CHANGELOG.md` を更新
+2. 変更を push したあと、タグを作成して push
+   ```bash
+   git tag v1.2.0
+   git push origin v1.2.0
+   ```
+3. GitHub Actions (`.github/workflows/release.yml`) が実行され、zip付き Release が自動作成される
 
 ## .env 設定
 ```env
