@@ -49,6 +49,22 @@ type UrlBaseConfig = Readonly<{
   internalBaseUrl: URL;
 }>;
 
+function parseOptionalText(raw: string | undefined): string | undefined {
+  const value = parseText(raw);
+  if (!value) return undefined;
+
+  const normalized = value.toLowerCase();
+  if (
+    normalized === "none" ||
+    normalized === "null" ||
+    normalized === "undefined"
+  ) {
+    return undefined;
+  }
+
+  return value;
+}
+
 export type RuntimeConfig = Readonly<{
   discord: Readonly<{
     token: string;
@@ -232,7 +248,7 @@ function buildRuntimeConfig(): RuntimeConfig {
     : DEFAULT_LAVALINK_VOLUME_DECREMENTER;
   const modelEndpoint = parseText(process.env.MODEL_ENDPOINT) || DEFAULT_MODEL_ENDPOINT;
   const modelName = parseText(process.env.MODEL_NAME) || DEFAULT_MODEL_NAME;
-  const modelApiKey = parseText(process.env.MODEL_API_KEY) || undefined;
+  const modelApiKey = parseOptionalText(process.env.MODEL_API_KEY);
   const modelTimeoutMs = parseInteger(
     process.env.MODEL_TIMEOUT_MS,
     DEFAULT_MODEL_TIMEOUT_MS,
@@ -252,9 +268,9 @@ function buildRuntimeConfig(): RuntimeConfig {
   const systemPrompt = (systemPromptRaw || DEFAULT_AI_SYSTEM_PROMPT)
     .replace(/\\n/g, "\n")
     .trim();
-  const imageEndpoint = parseText(process.env.IMAGE_ENDPOINT) || undefined;
-  const imageModel = parseText(process.env.IMAGE_MODEL) || undefined;
-  const imageApiKey = parseText(process.env.IMAGE_API_KEY) || undefined;
+  const imageEndpoint = parseOptionalText(process.env.IMAGE_ENDPOINT);
+  const imageModel = parseOptionalText(process.env.IMAGE_MODEL);
+  const imageApiKey = parseOptionalText(process.env.IMAGE_API_KEY);
   const imageTimeoutMs = parseInteger(
     process.env.IMAGE_TIMEOUT_MS,
     DEFAULT_IMAGE_TIMEOUT_MS,
@@ -275,7 +291,7 @@ function buildRuntimeConfig(): RuntimeConfig {
       : DEFAULT_IMAGE_CFG_SCALE;
   const imageSamplerName =
     parseText(process.env.IMAGE_SAMPLER_NAME) || DEFAULT_IMAGE_SAMPLER_NAME;
-  const imageNegativePrompt = parseText(process.env.IMAGE_NEGATIVE_PROMPT) || undefined;
+  const imageNegativePrompt = parseOptionalText(process.env.IMAGE_NEGATIVE_PROMPT);
 
   return {
     discord: {

@@ -149,7 +149,7 @@ CLEAR_GLOBAL=true         # 任意：register 時にグローバルコマンド�
 ### 変数メモ
 - `GUILD_IDS` はカンマ区切り。`npm run register` はギルド単位で登録します。
 - `OWNER_IDS` は管理者権限に加えて「開発者扱い」のユーザーIDです。
-- `LOG_CHANNEL_ID` はログ送信のデフォルト。/menu → サーバー設定で上書き可能です。
+- `LOG_CHANNEL_ID` はログ送信のデフォルト。カンマ区切りで複数指定でき、各ギルドに一致するチャンネルへ送信されます。/menu → サーバー設定で上書き可能です。
 - `MODEL_ENDPOINT`/`MODEL_NAME` は AI チャットの接続先です。既定値は Ollama (`gpt-oss:20b`) を想定しています。
 - `SYSTEM_PROMPT` は `\\n` で改行を埋め込めます。
 - `IMAGE_ENDPOINT` を設定した場合のみ `/image` が有効になります。

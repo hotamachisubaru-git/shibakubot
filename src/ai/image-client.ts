@@ -101,7 +101,7 @@ function resolveTxt2ImgEndpoint(endpoint: string): string {
 }
 
 function parseImageSize(size: string): { width: number; height: number } {
-  const match = size.trim().match(/^(\d+)x(\d+)$/);
+  const match = size.trim().match(/^(\d+)\s*[xX]\s*(\d+)$/);
   if (!match) {
     throw new Error(`画像サイズの形式が不正です: "${size}"。例: 1024x1024`);
   }

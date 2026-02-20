@@ -368,6 +368,15 @@ async function handleImageCommand(
     return;
   }
 
+  if (!isValidImageSizeInput(imageSize)) {
+    await interaction.reply({
+      content:
+        "画像サイズは `幅x高さ` 形式で指定してください（例: `512x512`, `1024x1536`）。",
+      ephemeral: true,
+    });
+    return;
+  }
+
   await interaction.deferReply({ ephemeral: isPrivate });
 
   try {
@@ -801,4 +810,14 @@ function extensionFromMimeType(mimeType: string): string {
     return "webp";
   }
   return "bin";
+}
+
+function isValidImageSizeInput(size: string): boolean {
+  const match = size.trim().match(/^(\d+)\s*[xX]\s*(\d+)$/);
+  if (!match) return false;
+
+  const width = Number.parseInt(match[1], 10);
+  const height = Number.parseInt(match[2], 10);
+  if (!Number.isFinite(width) || !Number.isFinite(height)) return false;
+  return width > 0 && height > 0;
 }

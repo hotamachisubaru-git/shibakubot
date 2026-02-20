@@ -7,6 +7,7 @@ import { getRuntimeConfig } from "./config/runtime";
 import { SETTING_KEYS } from "./constants/settings";
 import { getSetting } from "./data";
 import { displayNameFrom, AnyInteraction } from "./utils/displayNameUtil";
+import { parseCsvValues } from "./utils/env";
 
 const runtimeConfig = getRuntimeConfig();
 
@@ -14,10 +15,11 @@ async function resolveLogChannel(
   interaction: AnyInteraction,
   guildId: string,
 ): Promise<TextChannel | null> {
+  const envLogChannelIds = parseCsvValues(runtimeConfig.discord.logChannelId);
   const channelCandidates = Array.from(
     new Set(
-      [getSetting(guildId, SETTING_KEYS.logChannelId), runtimeConfig.discord.logChannelId].filter(
-        (value): value is string => Boolean(value),
+      [getSetting(guildId, SETTING_KEYS.logChannelId), ...envLogChannelIds].filter((value): value is string =>
+        Boolean(value),
       ),
     ),
   );

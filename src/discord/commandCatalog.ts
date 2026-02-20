@@ -207,12 +207,8 @@ const commandDefinitions: readonly CommandDefinition[] = [
         .addStringOption((option) =>
           option
             .setName("size")
-            .setDescription("画像サイズ")
-            .addChoices(
-              { name: "1024x1024", value: "1024x1024" },
-              { name: "1536x1024", value: "1536x1024" },
-              { name: "1024x1536", value: "1024x1536" },
-            ),
+            .setDescription("画像サイズ（例: 512x512）")
+            .setMaxLength(20),
         )
         .addBooleanOption((option) =>
           option
