@@ -47,6 +47,8 @@ import {
   parseBigIntInput,
 } from "../utils/bigint";
 import { fetchGuildMembersSafe } from "../utils/memberFetch";
+import { hasAdminOrDevPermission } from "../utils/permissions";
+import { isBotOrSelfTarget, isOwnerTarget } from "../utils/targetGuards";
 
 type GuildScopedInteraction = ChatInputCommandInteraction | ButtonInteraction;
 type PanelMessage = Awaited<ReturnType<ButtonInteraction["fetchReply"]>>;
@@ -378,10 +380,7 @@ async function requireAdminOrDev(
   i: MessageComponentInteraction,
   message = "この操作は管理者/開発者のみ利用できます。",
 ): Promise<boolean> {
-  const isAdmin =
-    i.memberPermissions?.has(PermissionFlagsBits.Administrator) ?? false;
-  const isDev = OWNER_IDS.has(i.user.id);
-  if (!isAdmin && !isDev) {
+  if (!hasAdminOrDevPermission(i, OWNER_IDS)) {
     await i.reply({ content: `⚠️ ${message}`, ephemeral: true });
     return false;
   }
@@ -962,23 +961,23 @@ export async function handleMenu(
                 .catch(() => null);
               if (!targetUser) {
                 await i.reply({
-                  content: "対象ユーザーを取得できませんでした。",
+                  content: COMMON_MESSAGES.targetUserUnavailable,
                   ephemeral: true,
                 });
                 return;
               }
 
-              if (targetUser.bot || targetUser.id === i.client.user?.id) {
+              if (isBotOrSelfTarget(targetUser, i.client.user?.id)) {
                 await i.reply({
-                  content: "BOTは対象外です。",
+                  content: COMMON_MESSAGES.botTargetExcluded,
                   ephemeral: true,
                 });
                 return;
               }
 
-              if (OWNER_IDS.has(targetUserId)) {
+              if (isOwnerTarget(targetUserId, OWNER_IDS)) {
                 await i.reply({
-                  content: "開発者は対象外です。",
+                  content: COMMON_MESSAGES.ownerTargetExcluded,
                   ephemeral: true,
                 });
                 return;

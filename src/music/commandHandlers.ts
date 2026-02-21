@@ -2,7 +2,6 @@ import {
   EmbedBuilder,
   GuildMember,
   Message,
-  PermissionFlagsBits,
 } from "discord.js";
 import fs from "node:fs";
 import crypto from "node:crypto";
@@ -54,6 +53,7 @@ import {
   shouldPreferMetadataTitle,
   toDisplayTrackTitleFromFilename,
 } from "./uploadUtils";
+import { hasAdminGuildOwnerOrDevPermission } from "../utils/permissions";
 
 export type HandlePlayOptions = {
   titleFallback?: string;
@@ -99,11 +99,14 @@ async function saveResponseBodyToFile(
 }
 
 function canManageMusic(message: Message): boolean {
-  const isAdmin =
-    message.member?.permissions.has(PermissionFlagsBits.Administrator) ?? false;
-  const isOwner = message.guild?.ownerId === message.author.id;
-  const isDev = OWNER_IDS.has(message.author.id);
-  return isAdmin || isOwner || isDev;
+  return hasAdminGuildOwnerOrDevPermission(
+    {
+      memberPermissions: message.member?.permissions ?? null,
+      user: message.author,
+      guild: message.guild,
+    },
+    OWNER_IDS,
+  );
 }
 
 async function getOrCreatePlayer(

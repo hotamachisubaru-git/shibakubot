@@ -1,21 +1,14 @@
 // src/commands/reset.ts
 import {
   type ChatInputCommandInteraction,
-  PermissionFlagsBits,
 } from "discord.js";
 import { getRuntimeConfig } from "../config/runtime";
 import { COMMON_MESSAGES } from "../constants/messages";
 import { loadGuildStore, setCountGuild } from "../data";
+import { hasAdminOrDevPermission } from "../utils/permissions";
 
 const runtimeConfig = getRuntimeConfig();
-
-function canReset(interaction: ChatInputCommandInteraction): boolean {
-  const isAdmin =
-    interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) ??
-    false;
-  const isOwner = runtimeConfig.discord.ownerIds.has(interaction.user.id);
-  return isAdmin || isOwner;
-}
+const OWNER_IDS = runtimeConfig.discord.ownerIds;
 
 export async function handleReset(
   interaction: ChatInputCommandInteraction,
@@ -28,7 +21,7 @@ export async function handleReset(
     return;
   }
 
-  if (!canReset(interaction)) {
+  if (!hasAdminOrDevPermission(interaction, OWNER_IDS)) {
     await interaction.reply({
       content: "権限がありません（管理者/オーナーのみ）。",
       ephemeral: true,

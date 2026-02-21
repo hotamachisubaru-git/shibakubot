@@ -2,15 +2,16 @@
 import {
   type ChatInputCommandInteraction,
   EmbedBuilder,
-  PermissionFlagsBits,
 } from "discord.js";
 import { getRuntimeConfig } from "../config/runtime";
 import { EMBED_COLORS } from "../constants/embedColors";
 import { COMMON_MESSAGES } from "../constants/messages";
 import { loadGuildStore } from "../data";
 import { compareBigIntDesc } from "../utils/bigint";
+import { hasAdminOrDevPermission } from "../utils/permissions";
 
 const runtimeConfig = getRuntimeConfig();
+const OWNER_IDS = runtimeConfig.discord.ownerIds;
 
 function formatAverage(total: bigint, members: number): string {
   if (members <= 0) return "0";
@@ -19,14 +20,6 @@ function formatAverage(total: bigint, members: number): string {
   const integer = scaled / 100n;
   const fraction = (scaled % 100n).toString().padStart(2, "0");
   return `${integer}.${fraction}`;
-}
-
-function canViewStats(interaction: ChatInputCommandInteraction): boolean {
-  const isAdmin =
-    interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) ??
-    false;
-  const isOwner = runtimeConfig.discord.ownerIds.has(interaction.user.id);
-  return isAdmin || isOwner;
 }
 
 export async function handleStats(
@@ -40,7 +33,7 @@ export async function handleStats(
     return;
   }
 
-  if (!canViewStats(interaction)) {
+  if (!hasAdminOrDevPermission(interaction, OWNER_IDS)) {
     await interaction.reply({
       content: "権限がありません（管理者/開発者のみ）",
       ephemeral: true,
