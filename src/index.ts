@@ -244,6 +244,21 @@ async function handleControl(interaction: ChatInputCommandInteraction): Promise<
   }
 
   const target = interaction.options.getUser("user", true);
+  if (target.bot || target.id === interaction.client.user?.id) {
+    await interaction.reply({
+      content: "BOTは対象外です。",
+      ephemeral: true,
+    });
+    return;
+  }
+
+  if (OWNER_IDS.has(target.id)) {
+    await interaction.reply({
+      content: "開発者は対象外です。",
+      ephemeral: true,
+    });
+    return;
+  }
   const newCountRaw = interaction.options.getString("count", true);
   const nextCount = normalizeCountInput(newCountRaw);
   const after = setCountGuild(guildId, target.id, nextCount);

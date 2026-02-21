@@ -957,6 +957,33 @@ export async function handleMenu(
                 return;
               }
 
+              const targetUser = await i.client.users
+                .fetch(targetUserId)
+                .catch(() => null);
+              if (!targetUser) {
+                await i.reply({
+                  content: "対象ユーザーを取得できませんでした。",
+                  ephemeral: true,
+                });
+                return;
+              }
+
+              if (targetUser.bot || targetUser.id === i.client.user?.id) {
+                await i.reply({
+                  content: "BOTは対象外です。",
+                  ephemeral: true,
+                });
+                return;
+              }
+
+              if (OWNER_IDS.has(targetUserId)) {
+                await i.reply({
+                  content: "開発者は対象外です。",
+                  ephemeral: true,
+                });
+                return;
+              }
+
               const modal = new ModalBuilder()
                 .setCustomId("ctl_modal")
                 .setTitle("しばかれ回数を設定");
