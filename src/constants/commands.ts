@@ -6,6 +6,7 @@ export const SLASH_COMMAND = {
   suimin: "suimin",
   members: "members",
   help: "help",
+  monday: "monday",
   maintenance: "maintenance",
   maintenanceAlias: "mt",
   stats: "stats",

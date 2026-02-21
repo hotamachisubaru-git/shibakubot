@@ -72,6 +72,14 @@ const commandDefinitions: readonly CommandDefinition[] = [
         .setDescription("コマンド一覧を表示する"),
   },
   {
+    name: SLASH_COMMAND.monday,
+    description: "月曜日煽りを送信する",
+    createBuilder: () =>
+      new SlashCommandBuilder()
+        .setName(SLASH_COMMAND.monday)
+        .setDescription("月曜日煽りを送信する"),
+  },
+  {
     name: SLASH_COMMAND.suimin,
     description: "指定ユーザーをVCに移動",
     createBuilder: () =>

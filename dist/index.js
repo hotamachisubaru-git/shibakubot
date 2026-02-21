@@ -10,6 +10,7 @@ const immune_1 = require("./commands/immune");
 const maintenance_1 = require("./commands/maintenance");
 const members_1 = require("./commands/members");
 const menu_1 = require("./commands/menu");
+const monday_1 = require("./commands/monday");
 const ping_1 = require("./commands/ping");
 const reset_1 = require("./commands/reset");
 const sbk_1 = require("./commands/sbk");
@@ -38,6 +39,7 @@ const ROOT_SLASH_HANDLERS = {
     [commands_1.SLASH_COMMAND.suimin]: suiminbunihaire_1.handleSuimin,
     [commands_1.SLASH_COMMAND.members]: members_1.handleMembers,
     [commands_1.SLASH_COMMAND.help]: help_1.handleHelp,
+    [commands_1.SLASH_COMMAND.monday]: monday_1.handleMonday,
     [commands_1.SLASH_COMMAND.maintenance]: maintenance_1.handleMaintenance,
     [commands_1.SLASH_COMMAND.maintenanceAlias]: maintenance_1.handleMaintenance,
     [commands_1.SLASH_COMMAND.stats]: stats_1.handleStats,

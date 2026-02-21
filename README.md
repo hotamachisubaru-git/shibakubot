@@ -164,6 +164,7 @@ CLEAR_GLOBAL=true         # 任意：register 時にグローバルコマンド�
 - `/suimin user channel` VC移動
 - `/ping` 生存確認
 - `/help` ヘルプ
+- `/monday` 月曜日煽り
 - `/maintenance mode:on|off` (/`/mt mode:on|off`) メンテナンス切替（管理者）
 - `/chat message:<text> [new_session] [private]` AIと会話
 - `/reply message_id:<id> [instruction] [new_session] [private]` 指定メッセージ返信を生成

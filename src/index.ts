@@ -15,6 +15,7 @@ import { handleImmune } from "./commands/immune";
 import { handleMaintenance } from "./commands/maintenance";
 import { handleMembers } from "./commands/members";
 import { handleMenu } from "./commands/menu";
+import { handleMonday } from "./commands/monday";
 import { handlePing } from "./commands/ping";
 import { handleReset } from "./commands/reset";
 import { handleSbk } from "./commands/sbk";
@@ -51,6 +52,7 @@ const ROOT_SLASH_HANDLERS: Readonly<Record<string, SlashHandler>> = {
   [SLASH_COMMAND.suimin]: handleSuimin,
   [SLASH_COMMAND.members]: handleMembers,
   [SLASH_COMMAND.help]: handleHelp,
+  [SLASH_COMMAND.monday]: handleMonday,
   [SLASH_COMMAND.maintenance]: handleMaintenance,
   [SLASH_COMMAND.maintenanceAlias]: handleMaintenance,
   [SLASH_COMMAND.stats]: handleStats,
