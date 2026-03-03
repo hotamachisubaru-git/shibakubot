@@ -22,6 +22,7 @@ import { handleSbk } from "./commands/sbk";
 import { handleStats } from "./commands/stats";
 import { handleSuimin } from "./commands/suiminbunihaire";
 import { handleTop } from "./commands/top";
+import { handleVs } from "./commands/vs";
 import { getRuntimeConfig } from "./config/runtime";
 import { isMaintenanceCommand, SLASH_COMMAND } from "./constants/commands";
 import { getMaintenanceEnabled } from "./data";
@@ -58,6 +59,7 @@ const ROOT_SLASH_HANDLERS: Readonly<Record<string, SlashHandler>> = {
   [SLASH_COMMAND.stats]: handleStats,
   [SLASH_COMMAND.reset]: handleReset,
   [SLASH_COMMAND.top]: handleTop,
+  [SLASH_COMMAND.vs]: handleVs,
 };
 
 const client = initLavalink(
@@ -78,6 +80,28 @@ client.once(Events.ClientReady, async (readyClient) => {
   await client.lavalink.init({
     id: readyClient.user.id,
     username: runtimeConfig.lavalink.username,
+  });
+
+  client.lavalink.nodeManager.on("connect", (node) => {
+    console.log(`[lavalink] node connected: ${node.id}`);
+  });
+  client.lavalink.nodeManager.on("disconnect", (node, reason) => {
+    console.warn(`[lavalink] node disconnected: ${node.id}`, reason);
+  });
+  client.lavalink.nodeManager.on("error", (node, error, payload) => {
+    console.error(`[lavalink] node error: ${node.id}`, error, payload);
+  });
+  client.lavalink.on("trackError", (player, track, payload) => {
+    console.error(
+      `[music] track error guild=${player.guildId} title=${track?.info?.title ?? "unknown"}`,
+      payload?.exception?.message ?? payload,
+    );
+  });
+  client.lavalink.on("trackStuck", (player, track, payload) => {
+    console.error(
+      `[music] track stuck guild=${player.guildId} title=${track?.info?.title ?? "unknown"}`,
+      payload,
+    );
   });
 });
 

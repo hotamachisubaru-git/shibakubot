@@ -14,6 +14,7 @@ export const SLASH_COMMAND = {
   top: "top",
   control: "control",
   immune: "immune",
+  vs: "vs",
   chat: "chat",
   reply: "reply",
   regen: "regen",

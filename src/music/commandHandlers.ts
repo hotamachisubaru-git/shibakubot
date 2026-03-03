@@ -2,6 +2,7 @@ import {
   EmbedBuilder,
   GuildMember,
   Message,
+  PermissionFlagsBits,
 } from "discord.js";
 import fs from "node:fs";
 import crypto from "node:crypto";
@@ -132,12 +133,28 @@ async function getOrCreatePlayer(
     });
 
     await player.connect();
-  } else if (player.voiceChannelId !== voiceChannelId) {
-    await player.changeVoiceState({ voiceChannelId });
-    if (!player.connected) await player.connect();
+  } else {
+    if (player.voiceChannelId !== voiceChannelId) {
+      await player.changeVoiceState({ voiceChannelId });
+    }
+    if (!player.connected) {
+      await player.connect();
+    }
   }
 
   return player;
+}
+
+async function waitForVoiceConnection(
+  player: Player,
+  timeoutMs = 15_000,
+): Promise<boolean> {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    if (player.connected) return true;
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  return Boolean(player.connected);
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -261,6 +278,14 @@ export async function handlePlay(
   query: string,
   options?: HandlePlayOptions,
 ): Promise<void> {
+  const lavalink = getLavalink(message);
+  if (!lavalink?.useable) {
+    await message.reply(
+      "⚠️ Lavalinkに接続できていません。数秒待ってから再試行してください。",
+    );
+    return;
+  }
+
   const member = message.member as GuildMember | null;
   const voice = member?.voice?.channel;
   const guildId = message.guildId;
@@ -269,8 +294,38 @@ export async function handlePlay(
     return;
   }
   if (!guildId) return;
+  const botMember = message.guild?.members.me;
+  if (!botMember) {
+    await message.reply("⚠️ Botのメンバー情報を取得できません。");
+    return;
+  }
+
+  const botPerms = voice.permissionsFor(botMember);
+  if (!botPerms?.has(PermissionFlagsBits.Connect)) {
+    await message.reply("⚠️ このVCに接続する権限（Connect）がありません。");
+    return;
+  }
+  if (!botPerms.has(PermissionFlagsBits.Speak)) {
+    await message.reply("⚠️ このVCで発言する権限（Speak）がありません。");
+    return;
+  }
 
   const player = await getOrCreatePlayer(message, voice.id);
+  let connected = await waitForVoiceConnection(player);
+  if (!connected) {
+    try {
+      await player.connect();
+    } catch (error) {
+      console.warn("[music] reconnect error (play)", error);
+    }
+    connected = await waitForVoiceConnection(player, 5_000);
+  }
+  if (!connected) {
+    await message.reply(
+      "⚠️ VC接続に失敗しました。BotのVC権限（Connect/Speak）と、サーバー側ネットワーク/ファイアウォール設定を確認してください。",
+    );
+    return;
+  }
 
   try {
     await player.setVolume(FIXED_VOLUME);
@@ -313,7 +368,7 @@ export async function handlePlay(
         return `${index + 1}. ${title}${author}${durationText}`;
       });
       await message.reply(
-        `🔎 いくつか候補が見つかったよ。この中から選んでね。ない場合はURLで再生してみて。\n` +
+        `🔎 いくつか候補が見つかったよ。この中から選んでくれると嬉しいなって。この中にない場合はURLで再生してみてね。\n` +
           `${lines.join("\n")}\n` +
           `\n\`${PREFIX}${MUSIC_TEXT_COMMAND.play} 1\`〜\`${PREFIX}${MUSIC_TEXT_COMMAND.play} ${lines.length}\``,
       );
@@ -677,7 +732,14 @@ export async function handleUpload(
     } catch {
       // noop
     }
-    await message.reply("❌ アップロード処理に失敗しました。");
+    try {
+      await message.reply("❌ アップロード処理に失敗しました。");
+    } catch (replyError) {
+      console.warn("[music] upload error reply failed, fallback to send", replyError);
+      if ("send" in message.channel) {
+        await message.channel.send("❌ アップロード処理に失敗しました。");
+      }
+    }
   }
 }
 

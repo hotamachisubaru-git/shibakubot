@@ -302,6 +302,35 @@ const commandDefinitions: readonly CommandDefinition[] = [
         .setName(SLASH_COMMAND.chatReset)
         .setDescription("AI会話の履歴とプロンプトをリセットします"),
   },
+  {
+    name: SLASH_COMMAND.vs,
+    description: "2択の投票を作成する（対象サーバー限定）",
+    createBuilder: () =>
+      new SlashCommandBuilder()
+        .setName(SLASH_COMMAND.vs)
+        .setDescription("2択の投票を作成する（対象サーバー限定）")
+        .addStringOption((option) =>
+          option
+            .setName("question")
+            .setDescription("質問内容")
+            .setRequired(true)
+            .setMaxLength(100),
+        )
+        .addStringOption((option) =>
+          option
+            .setName("option1")
+            .setDescription("項目1")
+            .setRequired(true)
+            .setMaxLength(80),
+        )
+        .addStringOption((option) =>
+          option
+            .setName("option2")
+            .setDescription("項目2")
+            .setRequired(true)
+            .setMaxLength(80),
+        ),
+  },
 ];
 
 export function getSlashCommandJson(): Array<

@@ -17,6 +17,7 @@ const sbk_1 = require("./commands/sbk");
 const stats_1 = require("./commands/stats");
 const suiminbunihaire_1 = require("./commands/suiminbunihaire");
 const top_1 = require("./commands/top");
+const vs_1 = require("./commands/vs");
 const runtime_1 = require("./config/runtime");
 const commands_1 = require("./constants/commands");
 const data_1 = require("./data");
@@ -45,6 +46,7 @@ const ROOT_SLASH_HANDLERS = {
     [commands_1.SLASH_COMMAND.stats]: stats_1.handleStats,
     [commands_1.SLASH_COMMAND.reset]: reset_1.handleReset,
     [commands_1.SLASH_COMMAND.top]: top_1.handleTop,
+    [commands_1.SLASH_COMMAND.vs]: vs_1.handleVs,
 };
 const client = (0, lavalink_1.initLavalink)(new discord_js_1.Client({
     intents: [
@@ -60,6 +62,21 @@ client.once(discord_js_1.Events.ClientReady, async (readyClient) => {
     await client.lavalink.init({
         id: readyClient.user.id,
         username: runtimeConfig.lavalink.username,
+    });
+    client.lavalink.nodeManager.on("connect", (node) => {
+        console.log(`[lavalink] node connected: ${node.id}`);
+    });
+    client.lavalink.nodeManager.on("disconnect", (node, reason) => {
+        console.warn(`[lavalink] node disconnected: ${node.id}`, reason);
+    });
+    client.lavalink.nodeManager.on("error", (node, error, payload) => {
+        console.error(`[lavalink] node error: ${node.id}`, error, payload);
+    });
+    client.lavalink.on("trackError", (player, track, payload) => {
+        console.error(`[music] track error guild=${player.guildId} title=${track?.info?.title ?? "unknown"}`, payload?.exception?.message ?? payload);
+    });
+    client.lavalink.on("trackStuck", (player, track, payload) => {
+        console.error(`[music] track stuck guild=${player.guildId} title=${track?.info?.title ?? "unknown"}`, payload);
     });
 });
 client.on(discord_js_1.Events.InteractionCreate, async (interaction) => {
