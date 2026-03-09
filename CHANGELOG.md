@@ -1,26 +1,28 @@
-# Changelog
+# 変更履歴
 
-All notable changes to this project will be documented in this file.
+このファイルでは、このプロジェクトの主な変更点を記録します。
 
-## [1.2.4] - 2026-03-09
-### Added
-- Automatic GitHub Release publishing from `main` / `master` when `package.json` contains an unreleased version.
-- Lavalink startup readiness probing before Discord-side player initialization.
-- Shared AI text/Discord helper modules to simplify reply generation and history rendering.
+## [1.2.5] - 2026-03-09
+### 追加
+- `main` / `master` への push 時に、`package.json` の未リリース版を自動で GitHub Release 化する仕組みを追加。
+- Discord 側のプレイヤー初期化前に Lavalink の起動完了を待つ確認処理を追加。
+- AI 返信生成と履歴表示まわりの共通処理を `src/ai` 配下の補助モジュールへ分離。
+- `CHANGELOG.md` から対象バージョンの内容を抜き出して、GitHub Release 本文に流用するスクリプトを追加。
 
-### Changed
-- Refactored AI slash command routing to use definition-based dispatch instead of long conditional branches.
-- Refactored music message command routing to use command definitions with alias handling and centralized feature guards.
-- Expanded `/menu` page metadata so navigation and help content are generated from shared definitions.
-- Improved guild command deployment output with per-guild success/failure summaries.
+### 変更
+- AI のスラッシュコマンドルーティングを、長い条件分岐ではなく定義ベースのディスパッチへ整理。
+- 音楽メッセージコマンドルーティングを、エイリアス管理と機能有効判定を含む定義ベース構成へ整理。
+- `/menu` のページ情報を共有定義に寄せて、ページ移動とヘルプ表示の重複を削減。
+- ギルド単位のコマンド登録結果を、成功・失敗が分かる要約付きで表示するよう改善。
+- リリースワークフロー、配布バンドル説明、変更履歴の文面を日本語ベースに統一。
 
 ## [1.2.0] - 2026-02-17
-### Added
-- Release bundle generator (`npm run release:bundle`) that packages runtime files under `release/shibakubot-v1.2.0`.
-- Production command registration script (`npm run register:prod`) for compiled output.
-- GitHub Actions release workflow that builds and publishes a zip asset when a `v*` tag is pushed.
-- `LICENSE` file (MIT).
+### 追加
+- `release/shibakubot-v1.2.0` に実行用ファイル一式をまとめる `npm run release:bundle` を追加。
+- ビルド済み成果物向けのコマンド登録スクリプト `npm run register:prod` を追加。
+- GitHub Release 用ワークフローを追加。
+- `LICENSE`（MIT）を追加。
 
-### Changed
-- Version updated from `1.0.0` to `1.2.0`.
-- README now includes release/distribution procedure for source and tagged releases.
+### 変更
+- バージョンを `1.0.0` から `1.2.0` に更新。
+- README に配布・リリース手順を追記。

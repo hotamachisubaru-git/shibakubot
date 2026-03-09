@@ -1,4 +1,4 @@
-name: Release
+name: リリース
 
 on:
   push:
@@ -19,18 +19,18 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: チェックアウト
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Setup Node.js
+      - name: Node.js をセットアップ
         uses: actions/setup-node@v4
         with:
           node-version: "20"
           cache: npm
 
-      - name: Resolve release metadata
+      - name: リリース情報を解決
         id: release_meta
         uses: actions/github-script@v7
         with:
@@ -40,7 +40,7 @@ jobs:
             const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
             const version = String(pkg.version || "").trim();
             if (!version) {
-              core.setFailed("package.json version is missing.");
+              core.setFailed("package.json の version が未設定です。");
               return;
             }
 
@@ -56,7 +56,7 @@ jobs:
                 repo,
                 tag,
               });
-              core.info(`Release ${tag} already exists. Skipping.`);
+              core.info(`Release ${tag} は既に存在するためスキップします。`);
               core.setOutput("should_release", "false");
               return;
             } catch (error) {
@@ -71,7 +71,7 @@ jobs:
                 repo,
                 ref: `tags/${tag}`,
               });
-              core.info(`Tag ${tag} already exists. Reusing it.`);
+              core.info(`Tag ${tag} は既に存在するため再利用します。`);
             } catch (error) {
               if (error.status !== 404) {
                 throw error;
@@ -83,16 +83,16 @@ jobs:
                 ref: `refs/tags/${tag}`,
                 sha: context.sha,
               });
-              core.info(`Created tag ${tag} at ${context.sha}.`);
+              core.info(`Tag ${tag} を ${context.sha} に作成しました。`);
             }
 
             core.setOutput("should_release", "true");
 
-      - name: Install dependencies
+      - name: 依存関係をインストール
         if: steps.release_meta.outputs.should_release == 'true'
         run: npm ci
 
-      - name: Show release metadata
+      - name: リリース情報を表示
         if: steps.release_meta.outputs.should_release == 'true'
         run: |
           echo "Ref: ${GITHUB_REF}"
@@ -100,26 +100,32 @@ jobs:
           echo "Tag: ${{ steps.release_meta.outputs.tag }}"
           echo "Version: $(node -p "require('./package.json').version")"
 
-      - name: Build release bundle
+      - name: リリースノートを生成
+        if: steps.release_meta.outputs.should_release == 'true'
+        run: |
+          mkdir -p release
+          node scripts/extract-release-notes.mjs > release/release-notes.md
+
+      - name: リリースバンドルを作成
         if: steps.release_meta.outputs.should_release == 'true'
         run: npm run release:bundle
 
-      - name: Archive release bundle
+      - name: リリースバンドルを圧縮
         if: steps.release_meta.outputs.should_release == 'true'
         run: |
           cd release
           zip -r "${{ steps.release_meta.outputs.tag }}.zip" "${{ steps.release_meta.outputs.bundle_dir }}"
 
-      - name: Publish GitHub Release
+      - name: GitHub Release を公開
         if: steps.release_meta.outputs.should_release == 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.release_meta.outputs.tag }}
           target_commitish: ${{ github.sha }}
           name: ${{ steps.release_meta.outputs.tag }}
-          generate_release_notes: true
+          body_path: release/release-notes.md
           files: release/${{ steps.release_meta.outputs.tag }}.zip
 
-      - name: Skip duplicate release
+      - name: 重複リリースをスキップ
         if: steps.release_meta.outputs.should_release != 'true'
-        run: echo "Release already exists for package.json version. Nothing to publish."
+        run: echo "package.json の version に対応する Release は既に存在するため、公開をスキップします。"
