@@ -1,5 +1,5 @@
 import type { ChatInputCommandInteraction } from "discord.js";
-import { handleAiSlashCommand, isAiSlashCommand } from "../ai/handlers";
+import { getAiSlashHandler } from "../ai/handlers";
 import { isMaintenanceCommand } from "../constants/commands";
 import { getMaintenanceEnabled } from "../data";
 import { ROOT_SLASH_HANDLERS } from "./slashHandlers";
@@ -20,12 +20,8 @@ export async function handleChatInputInteraction(
     return;
   }
 
-  if (isAiSlashCommand(commandName)) {
-    await handleAiSlashCommand(interaction);
-    return;
-  }
-
-  const handler = ROOT_SLASH_HANDLERS[commandName];
+  const handler =
+    getAiSlashHandler(commandName) ?? ROOT_SLASH_HANDLERS[commandName];
   if (!handler) {
     return;
   }

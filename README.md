@@ -178,5 +178,9 @@ CLEAR_GLOBAL=true
 - `npm run migrate` 旧データ移行
 - `npm run release:bundle` 配布バンドル作成
 
+## リリース
+- `main` / `master` に push されたとき、`package.json` の `version` が未リリースなら GitHub Release を自動作成
+- リリースしたい変更では先に `package.json` の `version` を更新してから push
+
 ## ライセンス
 MIT License

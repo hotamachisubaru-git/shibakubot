@@ -36,6 +36,163 @@ export const LOG_CHANNEL_KEY = SETTING_KEYS.logChannelId;
 export const EMBED_DESC_LIMIT = 4096; // ← ここは自由に変更OK
 export const UNKNOWN_GUILD_MESSAGE = `⚠️ ${COMMON_MESSAGES.guildUnavailable}`;
 
+type MenuActionDefinition = Readonly<{
+  customId: string;
+  label: string;
+  style: ButtonStyle;
+  summary: string;
+}>;
+
+export type MenuPageDefinition = Readonly<{
+  page: number;
+  navCustomId: string;
+  navLabel: string;
+  title: string;
+  summary: string;
+  permissionNote: string;
+  actions: readonly MenuActionDefinition[];
+}>;
+
+export const MENU_PAGE_DEFINITIONS: readonly MenuPageDefinition[] = [
+  {
+    page: 1,
+    navCustomId: "menu_page_basic",
+    navLabel: "基本",
+    title: "基本メニュー",
+    summary: "ランキング確認やサーバー状況の確認に使います。",
+    permissionNote: "誰でも利用できます。",
+    actions: [
+      {
+        customId: "menu_top",
+        label: "ランキング",
+        style: ButtonStyle.Primary,
+        summary: "しばかれ回数の上位を確認します。",
+      },
+      {
+        customId: "menu_members",
+        label: "メンバー一覧",
+        style: ButtonStyle.Secondary,
+        summary: "対象メンバーと回数をまとめて確認します。",
+      },
+      {
+        customId: "menu_stats",
+        label: "サーバー統計",
+        style: ButtonStyle.Secondary,
+        summary: "総回数や対象人数を確認します。",
+      },
+      {
+        customId: "menu_help",
+        label: "使い方",
+        style: ButtonStyle.Secondary,
+        summary: "カテゴリ別の使い分けを確認します。",
+      },
+    ],
+  },
+  {
+    page: 2,
+    navCustomId: "menu_page_vc",
+    navLabel: "VC操作",
+    title: "VC操作",
+    summary: "ボイスチャンネル参加者を一括で操作します。",
+    permissionNote:
+      "管理者 / VC権限保持者 / 開発者が利用できます。",
+    actions: [
+      {
+        customId: "menu_movevc",
+        label: "VC移動",
+        style: ButtonStyle.Primary,
+        summary: "選択したメンバーを別のVCへ移動します。",
+      },
+      {
+        customId: "menu_vcdisconnect",
+        label: "VC切断",
+        style: ButtonStyle.Danger,
+        summary: "選択したメンバーをVCから切断します。",
+      },
+      {
+        customId: "menu_vcmute",
+        label: "VCミュート",
+        style: ButtonStyle.Secondary,
+        summary: "選択したメンバーをサーバーミュートします。",
+      },
+      {
+        customId: "menu_vcunmute",
+        label: "ミュート解除",
+        style: ButtonStyle.Secondary,
+        summary: "サーバーミュートを解除します。",
+      },
+    ],
+  },
+  {
+    page: 3,
+    navCustomId: "menu_page_admin",
+    navLabel: "管理設定",
+    title: "管理設定",
+    summary: "しばき回数のルールと対象者を管理します。",
+    permissionNote: "管理者 / 開発者が利用できます。",
+    actions: [
+      {
+        customId: "menu_limit",
+        label: "回数レンジ",
+        style: ButtonStyle.Secondary,
+        summary: "ランダム回数の最小値と最大値を設定します。",
+      },
+      {
+        customId: "menu_immune",
+        label: "免除管理",
+        style: ButtonStyle.Secondary,
+        summary: "免除ユーザーの追加・削除・一覧確認を行います。",
+      },
+      {
+        customId: "menu_control",
+        label: "回数を設定",
+        style: ButtonStyle.Secondary,
+        summary: "特定ユーザーの回数を直接変更します。",
+      },
+    ],
+  },
+  {
+    page: 4,
+    navCustomId: "menu_page_admin2",
+    navLabel: "ログ/保守",
+    title: "ログと保守",
+    summary: "監査、設定、バックアップなどの運用作業を行います。",
+    permissionNote:
+      "監査ログ / ログ設定 / システム統計 / バックアップは管理者または開発者、開発者ツールは開発者のみ利用できます。",
+    actions: [
+      {
+        customId: "menu_audit",
+        label: "監査ログ",
+        style: ButtonStyle.Secondary,
+        summary: "最近のしばき操作履歴を確認します。",
+      },
+      {
+        customId: "menu_settings",
+        label: "ログ設定",
+        style: ButtonStyle.Secondary,
+        summary: "ログ送信チャンネルを設定します。",
+      },
+      {
+        customId: "menu_devtools",
+        label: "開発者専用",
+        style: ButtonStyle.Secondary,
+        summary: "DBチェックや最適化を実行します。",
+      },
+      {
+        customId: "menu_sysstats",
+        label: "システム統計",
+        style: ButtonStyle.Secondary,
+        summary: "Bot稼働状況とサーバー負荷を確認します。",
+      },
+      {
+        customId: "menu_backup",
+        label: "バックアップ",
+        style: ButtonStyle.Secondary,
+        summary: "ギルドDBの保存と一覧確認を行います。",
+      },
+    ],
+  },
+] as const;
 
 export function joinLinesWithLimitOrNull(
   lines: string[],
@@ -391,136 +548,108 @@ export function bindPanelCleanup(
 }
 
 /* ===== メニューUI ===== */
+export function getMenuPageDefinition(page: number): MenuPageDefinition {
+  return (
+    MENU_PAGE_DEFINITIONS.find((definition) => definition.page === page) ??
+    MENU_PAGE_DEFINITIONS[0]
+  );
+}
+
+export function getMenuPageByNavCustomId(
+  customId: string,
+): MenuPageDefinition | null {
+  return (
+    MENU_PAGE_DEFINITIONS.find(
+      (definition) => definition.navCustomId === customId,
+    ) ?? null
+  );
+}
+
+function buildActionSummary(pageDefinition: MenuPageDefinition): string {
+  return pageDefinition.actions
+    .map((action, index) => `${index + 1}. **${action.label}**: ${action.summary}`)
+    .join("\n");
+}
+
+function buildActionRow(pageDefinition: MenuPageDefinition) {
+  return new ActionRowBuilder<ButtonBuilder>().addComponents(
+    ...pageDefinition.actions.map((action) =>
+      new ButtonBuilder()
+        .setCustomId(action.customId)
+        .setLabel(action.label)
+        .setStyle(action.style),
+    ),
+  );
+}
+
+export function buildMenuHelpEmbed(min: number, max: number): EmbedBuilder {
+  const maxPage = MENU_PAGE_DEFINITIONS.length;
+  const embed = new EmbedBuilder()
+    .setTitle("メニューガイド")
+    .setDescription(
+      [
+        "コマンドが多いので、`/menu` は用途ごとにページを分けています。",
+        "迷ったらまず `基本` を開き、必要に応じて `VC操作` や `管理設定` に移動してください。",
+        `現在のしばく回数レンジ: **${safeCount(BigInt(min))}〜${safeCount(BigInt(max))}回**`,
+      ].join("\n"),
+    )
+    .setFooter({ text: "全スラッシュコマンドの一覧は /help で確認できます。" });
+
+  embed.addFields(
+    ...MENU_PAGE_DEFINITIONS.map((pageDefinition) => ({
+      name: `${pageDefinition.navLabel} (${pageDefinition.page}/${maxPage})`,
+      value: [
+        pageDefinition.summary,
+        buildActionSummary(pageDefinition),
+        `権限: ${pageDefinition.permissionNote}`,
+      ].join("\n"),
+    })),
+  );
+
+  return embed;
+}
+
 export function buildMenu(min: number, max: number, page: number = 1) {
-  const maxPage = 4;
-  const pageName =
-    page === 1
-      ? "基本"
-      : page === 2
-        ? "VC"
-        : page === 3
-          ? "管理者"
-          : "管理者（2）";
+  const currentPage = getMenuPageDefinition(page);
+  const maxPage = MENU_PAGE_DEFINITIONS.length;
 
   const embed = new EmbedBuilder()
-    .setTitle("しばくbot メニュー")
+    .setTitle(`しばくbot メニュー | ${currentPage.title}`)
     .setDescription(
-      `下のボタンから素早く操作できます（この表示は**あなたにだけ**見えます）。\n` +
-        `現在のしばく回数: **${safeCount(BigInt(min))}〜${safeCount(BigInt(max))}回**\n` +
-        `表示カテゴリ: **${pageName} (${page}/${maxPage})**`,
+      [
+        "用途ごとにページを分けています（この表示は**あなたにだけ**見えます）。",
+        currentPage.summary,
+        `現在のしばく回数: **${safeCount(BigInt(min))}〜${safeCount(BigInt(max))}回**`,
+        `表示カテゴリ: **${currentPage.navLabel} (${currentPage.page}/${maxPage})**`,
+      ].join("\n"),
+    )
+    .addFields(
+      {
+        name: "このページでできること",
+        value: buildActionSummary(currentPage),
+      },
+      {
+        name: "利用権限",
+        value: currentPage.permissionNote,
+      },
     );
-
-  // 基本操作
-  const row1 = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder()
-      .setCustomId("menu_top")
-      .setLabel("ランキング")
-      .setStyle(ButtonStyle.Primary),
-    new ButtonBuilder()
-      .setCustomId("menu_members")
-      .setLabel("メンバー一覧")
-      .setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder()
-      .setCustomId("menu_stats")
-      .setLabel("統計")
-      .setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder()
-      .setCustomId("menu_help")
-      .setLabel("ヘルプ")
-      .setStyle(ButtonStyle.Secondary),
-  );
-
-  // 管理者（設定系）
-  const row2 = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder()
-      .setCustomId("menu_limit")
-      .setLabel("上限設定")
-      .setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder()
-      .setCustomId("menu_immune")
-      .setLabel("免除管理")
-      .setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder()
-      .setCustomId("menu_control")
-      .setLabel("値を直接設定")
-      .setStyle(ButtonStyle.Secondary),
-  );
-
-  // VC 関連
-  const row4 = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder()
-      .setCustomId("menu_movevc")
-      .setLabel("VC移動")
-      .setStyle(ButtonStyle.Primary),
-    new ButtonBuilder()
-      .setCustomId("menu_vcdisconnect")
-      .setLabel("VC切断")
-      .setStyle(ButtonStyle.Danger),
-    new ButtonBuilder()
-      .setCustomId("menu_vcmute")
-      .setLabel("VCミュート")
-      .setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder()
-      .setCustomId("menu_vcunmute")
-      .setLabel("VCアンミュート")
-      .setStyle(ButtonStyle.Secondary),
-  );
-
-  // 管理者（2）向け（監査ログなど）
-  const row5 = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder()
-      .setCustomId("menu_audit")
-      .setLabel("監査ログ")
-      .setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder()
-      .setCustomId("menu_settings")
-      .setLabel("サーバー設定")
-      .setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder()
-      .setCustomId("menu_devtools")
-      .setLabel("開発者ツール")
-      .setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder()
-      .setCustomId("menu_sysstats")
-      .setLabel("システム統計")
-      .setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder()
-      .setCustomId("menu_backup")
-      .setLabel("バックアップ作業")
-      .setStyle(ButtonStyle.Secondary),
-  );
 
   // ページごとに出す行を切り替える
   const rows: ActionRowBuilder<ButtonBuilder>[] = [];
-
-  if (page === 1) {
-    rows.push(row1); // 基本
-  } else if (page === 2) {
-    rows.push(row4); // VC
-  } else if (page === 3) {
-    rows.push(row2); // 管理者
-  } else if (page === 4) {
-    rows.push(row5); // 管理者（2）
-  }
+  rows.push(buildActionRow(currentPage));
 
   // 下部ページナビ
   const navRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder()
-      .setCustomId("menu_page_basic")
-      .setLabel("基本")
-      .setStyle(page === 1 ? ButtonStyle.Primary : ButtonStyle.Secondary),
-    new ButtonBuilder()
-      .setCustomId("menu_page_vc")
-      .setLabel("VC")
-      .setStyle(page === 2 ? ButtonStyle.Primary : ButtonStyle.Secondary),
-    new ButtonBuilder()
-      .setCustomId("menu_page_admin")
-      .setLabel("管理者")
-      .setStyle(page === 3 ? ButtonStyle.Primary : ButtonStyle.Secondary),
-    new ButtonBuilder()
-      .setCustomId("menu_page_admin2")
-      .setLabel("管理者（2）")
-      .setStyle(page === 4 ? ButtonStyle.Primary : ButtonStyle.Secondary),
+    ...MENU_PAGE_DEFINITIONS.map((pageDefinition) =>
+      new ButtonBuilder()
+        .setCustomId(pageDefinition.navCustomId)
+        .setLabel(pageDefinition.navLabel)
+        .setStyle(
+          currentPage.page === pageDefinition.page
+            ? ButtonStyle.Primary
+            : ButtonStyle.Secondary,
+        ),
+    ),
     new ButtonBuilder()
       .setCustomId("menu_close")
       .setLabel("閉じる")

@@ -48,6 +48,7 @@ import {
   OWNER_IDS,
   UNKNOWN_GUILD_MESSAGE,
   bindPanelCleanup,
+  buildMenuHelpEmbed,
   buildMenu,
   clearPanelComponents,
   copyDbWithWal,
@@ -66,6 +67,7 @@ import {
   requireAdminOrDev,
   safeCount,
   safeSignedBigInt,
+  getMenuPageByNavCustomId,
   showModalAndAwait,
 } from "./menu/common";
 
@@ -270,11 +272,12 @@ export async function handleMenu(
         case "menu_page_admin":
         case "menu_page_admin2": {
           await btn.deferUpdate();
+          const nextPage = getMenuPageByNavCustomId(btn.customId);
+          if (!nextPage) {
+            break;
+          }
 
-          if (btn.customId === "menu_page_basic") currentPage = 1;
-          if (btn.customId === "menu_page_vc") currentPage = 2;
-          if (btn.customId === "menu_page_admin") currentPage = 3;
-          if (btn.customId === "menu_page_admin2") currentPage = 4;
+          currentPage = nextPage.page;
 
           const rebuilt = buildMenu(sbkMin, sbkMax, currentPage);
           built = rebuilt;
@@ -899,20 +902,7 @@ export async function handleMenu(
         case "menu_help": {
           await btn.deferUpdate();
           await btn.followUp({
-            embeds: [
-              new EmbedBuilder()
-                .setTitle("ヘルプ")
-                .setDescription(
-                  [
-                    "このメニューから、ランキング/メンバー/統計/VC移動/VC切断/VCミュート/VCミュート解除 が使えます。",
-                    "管理者ページから、上限設定/免除管理/値の直接設定 が利用できます。",
-                    "管理者（2）ページから、監査ログ/サーバー設定/開発者ツール/システム統計/バックアップ作業 が利用できます。",
-                    "※ 上限設定・免除管理・値の直接設定・VC移動・VC切断・VCミュート・ミュート解除は 管理者 or OWNER_IDS で利用可。",
-                    "※ 開発者ツールは OWNER_IDS のみ利用可。",
-                    `現在の回数レンジ: **${safeCount(BigInt(sbkMin))}〜${safeCount(BigInt(sbkMax))}回**`,
-                  ].join("\n"),
-                ),
-            ],
+            embeds: [buildMenuHelpEmbed(sbkMin, sbkMax)],
             ephemeral: true,
           });
           break;

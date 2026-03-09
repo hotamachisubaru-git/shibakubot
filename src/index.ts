@@ -9,7 +9,7 @@ import { getRuntimeConfig } from "./config/runtime";
 import { handleChatInputInteraction } from "./discord/interactionRouter";
 import { getMaintenanceEnabled } from "./data";
 import { startFileServer } from "./fileserver/fileServer";
-import { initLavalink } from "./lavalink";
+import { initLavalink, waitForLavalinkReady } from "./lavalink";
 import { handleMusicMessage } from "./music";
 
 const runtimeConfig = getRuntimeConfig();
@@ -36,11 +36,6 @@ const client = initLavalink(
 client.once(Events.ClientReady, async (readyClient) => {
   console.log(`✅ ログイン完了: ${readyClient.user.tag}`);
 
-  await client.lavalink.init({
-    id: readyClient.user.id,
-    username: runtimeConfig.lavalink.username,
-  });
-
   client.lavalink.nodeManager.on("connect", (node) => {
     console.log(`[lavalink] node connected: ${node.id}`);
   });
@@ -61,6 +56,13 @@ client.once(Events.ClientReady, async (readyClient) => {
       `[music] track stuck guild=${player.guildId} title=${track?.info?.title ?? "unknown"}`,
       payload,
     );
+  });
+
+  await waitForLavalinkReady();
+
+  await client.lavalink.init({
+    id: readyClient.user.id,
+    username: runtimeConfig.lavalink.username,
   });
 });
 

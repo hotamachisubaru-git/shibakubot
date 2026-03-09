@@ -25,10 +25,6 @@ const client = (0, lavalink_1.initLavalink)(new discord_js_1.Client({
 }));
 client.once(discord_js_1.Events.ClientReady, async (readyClient) => {
     console.log(`✅ ログイン完了: ${readyClient.user.tag}`);
-    await client.lavalink.init({
-        id: readyClient.user.id,
-        username: runtimeConfig.lavalink.username,
-    });
     client.lavalink.nodeManager.on("connect", (node) => {
         console.log(`[lavalink] node connected: ${node.id}`);
     });
@@ -43,6 +39,11 @@ client.once(discord_js_1.Events.ClientReady, async (readyClient) => {
     });
     client.lavalink.on("trackStuck", (player, track, payload) => {
         console.error(`[music] track stuck guild=${player.guildId} title=${track?.info?.title ?? "unknown"}`, payload);
+    });
+    await (0, lavalink_1.waitForLavalinkReady)();
+    await client.lavalink.init({
+        id: readyClient.user.id,
+        username: runtimeConfig.lavalink.username,
     });
 });
 client.on(discord_js_1.Events.InteractionCreate, async (interaction) => {

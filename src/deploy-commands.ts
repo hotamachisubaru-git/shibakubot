@@ -10,6 +10,21 @@ type DeployConfig = Readonly<{
   guildIds: readonly string[];
 }>;
 
+type RestLikeError = Readonly<{
+  code?: number;
+  status?: number;
+  message?: string;
+  rawError?: {
+    code?: number;
+    message?: string;
+  };
+}>;
+
+type GuildDeployFailure = Readonly<{
+  guildId: string;
+  error: RestLikeError;
+}>;
+
 function resolveDeployConfig(): DeployConfig {
   const runtimeConfig = getRuntimeConfig();
   return {
@@ -25,6 +40,40 @@ function arrayCount(value: unknown): number {
 
 function hasRawError(value: unknown): value is { rawError: unknown } {
   return typeof value === "object" && value !== null && "rawError" in value;
+}
+
+function isRestLikeError(value: unknown): value is RestLikeError {
+  return typeof value === "object" && value !== null;
+}
+
+function formatDeployError(error: RestLikeError): string {
+  const code = error.code ?? error.rawError?.code;
+  const message = error.rawError?.message ?? error.message ?? "Unknown Error";
+
+  if (code === 50001) {
+    return `${message} (bot が対象 guild にいない、またはアクセス権がありません)`;
+  }
+
+  return code ? `${message} (code=${code})` : message;
+}
+
+function printDeploySummary(
+  succeededGuildIds: readonly string[],
+  failedGuilds: readonly GuildDeployFailure[],
+): void {
+  console.log("");
+  console.log("📋 登録結果");
+  console.log(`   成功: ${succeededGuildIds.length} guild`);
+  if (succeededGuildIds.length > 0) {
+    console.log(`   guild=${succeededGuildIds.join(", ")}`);
+  }
+
+  console.log(`   失敗: ${failedGuilds.length} guild`);
+  for (const failed of failedGuilds) {
+    console.log(
+      `   guild=${failed.guildId} -> ${formatDeployError(failed.error)}`,
+    );
+  }
 }
 
 const deployConfig = resolveDeployConfig();
@@ -50,6 +99,8 @@ const rest = new REST({ version: "10" }).setToken(deployConfig.token);
   console.log("⏫ コマンド登録中...");
   console.log(`   CLIENT_ID=${deployConfig.clientId}`);
   console.log(`   GUILD_IDS=${deployConfig.guildIds.join(", ")}`);
+  const succeededGuildIds: string[] = [];
+  const failedGuilds: GuildDeployFailure[] = [];
 
   try {
     // --- 任意: グローバルコマンドを全削除（残っていると古い表示が混在しがち） ---
@@ -69,13 +120,31 @@ const rest = new REST({ version: "10" }).setToken(deployConfig.token);
     // --- ギルド単位で順次（直列）登録：レート制限を避け、失敗点を特定しやすくする ---
     for (const guildId of deployConfig.guildIds) {
       console.log(`📝 ギルド(${guildId}) に置換登録中...`);
-      const registered = await rest.put(
-        Routes.applicationGuildCommands(deployConfig.clientId, guildId),
-        { body: commands },
+      try {
+        const registered = await rest.put(
+          Routes.applicationGuildCommands(deployConfig.clientId, guildId),
+          { body: commands },
+        );
+        succeededGuildIds.push(guildId);
+        console.log(
+          `   ✔ 登録完了: guild=${guildId} / count=${arrayCount(registered)}`,
+        );
+      } catch (err: unknown) {
+        const error = isRestLikeError(err) ? err : { message: String(err) };
+        failedGuilds.push({ guildId, error });
+        console.error(
+          `   ✖ 登録失敗: guild=${guildId} / ${formatDeployError(error)}`,
+        );
+      }
+    }
+
+    printDeploySummary(succeededGuildIds, failedGuilds);
+
+    if (failedGuilds.length > 0) {
+      console.error(
+        "⚠️ 一部の guild で登録に失敗しました。不要な GUILD_ID の削除、または bot の招待状態を確認してください。",
       );
-      console.log(
-        `   ✔ 登録完了: guild=${guildId} / count=${arrayCount(registered)}`,
-      );
+      process.exit(1);
     }
 
     console.log("✅ すべての登録処理が完了しました。");
