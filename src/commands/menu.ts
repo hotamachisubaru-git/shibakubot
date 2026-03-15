@@ -12,6 +12,7 @@ import {
   ComponentType,
   EmbedBuilder,
   GuildMember,
+  MessageComponentInteraction,
   MessageFlags,
   ModalBuilder,
   PermissionFlagsBits,
@@ -21,10 +22,12 @@ import {
   UserSelectMenuBuilder,
 } from "discord.js";
 import { LOG_CHANNEL_ID } from "../config";
+import { getRuntimeConfig } from "../config/runtime";
 import { BACKUP_ROOT, GUILD_DB_ROOT } from "../constants/paths";
 import { COMMON_MESSAGES } from "../constants/messages";
 import {
   addImmuneId,
+  getMaintenanceEnabled,
   getImmuneList,
   getLogCount,
   getRecentLogs,
@@ -34,11 +37,21 @@ import {
   openDb,
   removeImmuneId,
   setCountGuild,
+  setMaintenanceEnabled,
   setSbkRange,
   setSetting,
 } from "../data";
+import {
+  SKY_DREAM_TYPE_A_BETS,
+  describeSkyDreamResult,
+  describeSkyDreamStep,
+  getMedalAccountSnapshot,
+  playSkyDreamTypeA,
+  type SkyDreamPlayResult,
+} from "../medals";
 import { displayNameFrom } from "../utils/displayNameUtil";
 import { parseBigIntInput } from "../utils/bigint";
+import { hasAdminGuildOwnerOrDevPermission } from "../utils/permissions";
 import { isBotOrSelfTarget, isOwnerTarget } from "../utils/targetGuards";
 import {
   AUDIT_LIMIT,
@@ -63,6 +76,7 @@ import {
   joinLinesWithLimitOrNull,
   listBackupFiles,
   looksLikeSnowflake,
+  type PanelMessage,
   pickUnionValue,
   requireAdminOrDev,
   safeCount,
@@ -70,6 +84,23 @@ import {
   getMenuPageByNavCustomId,
   showModalAndAwait,
 } from "./menu/common";
+
+const runtimeConfig = getRuntimeConfig();
+const TARGET_GUILD_ID = runtimeConfig.discord.guildIds[0] ?? null;
+const NOT_SUNDAY_MESSAGE =
+  "おまえら～ｗｗｗ曜日感覚大丈夫～～～？？？ｗｗｗ";
+const MONDAY_TAUNT_MESSAGE = [
+  "# 明日は月曜日♪",
+  "# 月曜日♪",
+  "# ルンルンルンルン月曜日♪",
+  "# やったね！",
+  "# 月曜日だ！",
+  "# みんな元気に月曜日やっていこうね！",
+  "# ムカムカしてもしょうがないよ！",
+  "# だって明日は月曜日だもん！",
+  "# ヤッター！",
+  "# やったね！",
+].join("\n");
 
 type VoiceBatchActionConfig = Readonly<{
   actionPrefix: string;
@@ -209,6 +240,319 @@ async function handleVoiceBatchAction(
   bindPanelCleanup(sub, panel);
 }
 
+async function requireAdminGuildOwnerOrDev(
+  interaction: MessageComponentInteraction,
+  message = "この操作は管理者 / サーバーオーナー / 開発者のみ利用できます。",
+): Promise<boolean> {
+  if (!hasAdminGuildOwnerOrDevPermission(interaction, OWNER_IDS)) {
+    await interaction.reply({
+      content: `⚠️ ${message}`,
+      ephemeral: true,
+    });
+    return false;
+  }
+  return true;
+}
+
+function isSundayInJst(date: Date = new Date()): boolean {
+  const weekday = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Tokyo",
+    weekday: "short",
+  }).format(date);
+  return weekday === "Sun";
+}
+
+function formatMedalCount(value: bigint): string {
+  return `${value.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",")}枚`;
+}
+
+function formatMedalDelta(value: bigint): string {
+  const sign = value < 0n ? "-" : "+";
+  const abs = value < 0n ? -value : value;
+  return `${sign}${formatMedalCount(abs)}`;
+}
+
+async function buildSkyDreamAnnouncementMessage(
+  interaction: ButtonInteraction,
+  play: SkyDreamPlayResult,
+): Promise<string | null> {
+  const displayName = await displayNameFrom(interaction, interaction.user.id);
+
+  if (play.resultType === "multiplier" && (play.multiplier ?? 0) >= 50) {
+    return `${displayName}さんが${play.multiplier}倍を獲得しました！おめでとうございます！`;
+  }
+  if (play.resultType === "dream_jp") {
+    return `${displayName}さんがDream JPを獲得しました！おめでとうございます！`;
+  }
+  if (play.resultType === "sky_jp") {
+    return `${displayName}さんがSky JPを獲得しました！おめでとうございます！`;
+  }
+
+  return null;
+}
+
+function buildMedalCornerPanel(gid: string, userId: string) {
+  const snapshot = getMedalAccountSnapshot(gid, userId);
+  const jackpotLines = snapshot.jackpots.map(
+    ({ bet, dream, sky }) =>
+      `- ${bet}BET | Dream JP ${formatMedalCount(dream)} / Sky JP ${formatMedalCount(sky)}`,
+  );
+
+  const rowPrimary = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    ...SKY_DREAM_TYPE_A_BETS.slice(0, 5).map((bet) =>
+      new ButtonBuilder()
+        .setCustomId(`medal_bet_${bet}`)
+        .setLabel(`${bet}BET`)
+        .setStyle(ButtonStyle.Primary)
+        .setDisabled(snapshot.balance < BigInt(bet)),
+    ),
+  );
+
+  const rowSecondary = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId("medal_bet_500")
+      .setLabel("500BET")
+      .setStyle(ButtonStyle.Primary)
+      .setDisabled(snapshot.balance < 500n),
+    new ButtonBuilder()
+      .setCustomId("medal_refresh")
+      .setLabel("更新")
+      .setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId("medal_close")
+      .setLabel("閉じる")
+      .setStyle(ButtonStyle.Danger),
+  );
+
+  const embed = new EmbedBuilder()
+    .setTitle("メダルコーナー | SkyDream Type-A")
+    .setDescription(
+      [
+        "内部抽選で進行する完全ランダム仕様です。",
+        `所持メダル: **${formatMedalCount(snapshot.balance)}**`,
+        "JPC到達: 6段目 / JP到達: 12段目",
+        "",
+        "現在のJP",
+        ...jackpotLines,
+      ].join("\n"),
+    );
+
+  return {
+    embed,
+    rows: [rowPrimary, rowSecondary],
+    balance: snapshot.balance,
+  };
+}
+
+function buildMedalResultRows() {
+  return [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId("medal_result_continue")
+        .setLabel("続ける")
+        .setStyle(ButtonStyle.Success),
+      new ButtonBuilder()
+        .setCustomId("medal_result_end")
+        .setLabel("終わる")
+        .setStyle(ButtonStyle.Danger),
+    ),
+  ];
+}
+
+async function buildSkyDreamResultEmbed(
+  interaction: ButtonInteraction,
+  play: SkyDreamPlayResult,
+  currentSessionNet: bigint,
+): Promise<EmbedBuilder> {
+  const displayName = await displayNameFrom(interaction, interaction.user.id);
+  const outcome = describeSkyDreamResult(play);
+  const progress = play.steps.map(describeSkyDreamStep).join("\n");
+  const color =
+    play.resultType === "dream_jp"
+      ? 0xf1c40f
+      : play.resultType === "sky_jp"
+        ? 0x5dade2
+        : play.payout === 0n
+          ? 0xe74c3c
+          : play.net >= 0n
+            ? 0x2ecc71
+            : 0x3498db;
+
+  return new EmbedBuilder()
+    .setColor(color)
+    .setTitle("SkyDream Type-A")
+    .setDescription(
+      `${displayName} が **${play.bet}BET** でメダル抽選に挑戦しました。`,
+    )
+    .addFields(
+      { name: "結果", value: outcome, inline: true },
+      { name: "獲得", value: formatMedalCount(play.payout), inline: true },
+      {
+        name: "現在の収支",
+        value: formatMedalDelta(currentSessionNet),
+        inline: true,
+      },
+      {
+        name: "所持メダル",
+        value: `${formatMedalCount(play.balanceBefore)} -> ${formatMedalCount(play.balanceAfter)}`,
+      },
+      {
+        name: "進行ログ",
+        value: progress,
+      },
+      {
+        name: "現在のJP",
+        value: `Dream JP ${formatMedalCount(play.dreamJackpotAfter)} / Sky JP ${formatMedalCount(play.skyJackpotAfter)}`,
+      },
+    );
+}
+
+function bindPanelCleanupUnless(
+  collector: ReturnType<typeof createPanelCollector>,
+  panel: PanelMessage,
+  skippedReasons: readonly string[],
+): void {
+  collector.on("end", async (_, reason) => {
+    if (skippedReasons.includes(reason)) {
+      return;
+    }
+    await clearPanelComponents(panel);
+  });
+}
+
+function startMedalResultSession(
+  interaction: ButtonInteraction,
+  panel: PanelMessage,
+  gid: string,
+  sessionStartBalance: bigint,
+  returnToMenuTop: () => Promise<void>,
+): void {
+  const sub = createPanelCollector(interaction, panel, 300_000);
+
+  sub.on("collect", async (i) => {
+    if (!i.isButton()) return;
+
+    if (i.customId === "medal_result_continue") {
+      const nextPanel = buildMedalCornerPanel(gid, i.user.id);
+      await i.update({
+        embeds: [nextPanel.embed],
+        components: nextPanel.rows,
+      });
+      sub.stop("continue");
+      startMedalPanelSession(i, panel, gid, sessionStartBalance, returnToMenuTop);
+      return;
+    }
+
+    if (i.customId === "medal_result_end") {
+      await returnToMenuTop().catch(() => {});
+      await i.update({
+        content: "\u200b",
+        embeds: [],
+        components: [],
+      });
+      sub.stop("end");
+    }
+  });
+
+  bindPanelCleanupUnless(sub, panel, ["continue", "end"]);
+}
+
+function startMedalPanelSession(
+  interaction: ButtonInteraction,
+  panel: PanelMessage,
+  gid: string,
+  sessionStartBalance: bigint,
+  returnToMenuTop: () => Promise<void>,
+): void {
+  const sub = createPanelCollector(interaction, panel, 300_000);
+
+  sub.on("collect", async (i) => {
+    if (!i.isButton()) return;
+
+    if (i.customId === "medal_refresh") {
+      const refreshed = buildMedalCornerPanel(gid, i.user.id);
+      await i.update({
+        embeds: [refreshed.embed],
+        components: refreshed.rows,
+      });
+      return;
+    }
+
+    if (i.customId === "medal_close") {
+      await i.update({
+        content: "メダルコーナーを閉じました。",
+        embeds: [],
+        components: [],
+      });
+      sub.stop("close");
+      return;
+    }
+
+    if (!i.customId.startsWith("medal_bet_")) {
+      return;
+    }
+
+    const bet = Number(i.customId.replace("medal_bet_", ""));
+    const attempt = playSkyDreamTypeA(gid, i.user.id, bet);
+
+    if (!attempt.ok) {
+      const refreshed = buildMedalCornerPanel(gid, i.user.id);
+      try {
+        await panel.edit({
+          embeds: [refreshed.embed],
+          components: refreshed.rows,
+        });
+      } catch {
+        // noop
+      }
+
+      await i.reply({
+        content:
+          attempt.reason === "insufficient_medals"
+            ? `メダルが足りません。現在 **${formatMedalCount(attempt.balance)}** です。`
+            : "BET値が不正です。",
+        ephemeral: true,
+      });
+      return;
+    }
+
+    await i.deferReply({
+      flags: MessageFlags.Ephemeral,
+    });
+    sub.stop("played");
+    await clearPanelComponents(panel);
+
+    const resultEmbed = await buildSkyDreamResultEmbed(
+      i,
+      attempt.play,
+      attempt.play.balanceAfter - sessionStartBalance,
+    );
+    await i.editReply({
+      embeds: [resultEmbed],
+      components: buildMedalResultRows(),
+    });
+
+    const resultPanel = await i.fetchReply();
+    startMedalResultSession(
+      i,
+      resultPanel,
+      gid,
+      sessionStartBalance,
+      returnToMenuTop,
+    );
+
+    const announcement = await buildSkyDreamAnnouncementMessage(i, attempt.play);
+    if (announcement && i.channel && "send" in i.channel) {
+      await i.channel.send({
+        content: announcement,
+        allowedMentions: { parse: [] },
+      });
+    }
+  });
+
+  bindPanelCleanupUnless(sub, panel, ["close", "played"]);
+}
+
 export async function handleMenu(
   interaction: ChatInputCommandInteraction,
 ): Promise<void> {
@@ -258,7 +602,7 @@ export async function handleMenu(
 
   const collector = channel.createMessageComponentCollector({
     componentType: ComponentType.Button,
-    time: 120_000,
+    time: 300_000,
     filter: (i) =>
       i.user.id === interaction.user.id && i.message.id === msg.id,
   });
@@ -270,7 +614,8 @@ export async function handleMenu(
         case "menu_page_basic":
         case "menu_page_vc":
         case "menu_page_admin":
-        case "menu_page_admin2": {
+        case "menu_page_admin2":
+        case "menu_page_tools": {
           await btn.deferUpdate();
           const nextPage = getMenuPageByNavCustomId(btn.customId);
           if (!nextPage) {
@@ -898,6 +1243,344 @@ export async function handleMenu(
           break;
         }
 
+        /* --- 回数確認 --- */
+        case "menu_check": {
+          const rowUser =
+            new ActionRowBuilder<UserSelectMenuBuilder>().addComponents(
+              new UserSelectMenuBuilder()
+                .setCustomId("check_user")
+                .setPlaceholder("回数を確認するユーザー")
+                .setMaxValues(1),
+            );
+          const rowExec = new ActionRowBuilder<ButtonBuilder>().addComponents(
+            new ButtonBuilder()
+              .setCustomId("check_exec")
+              .setLabel("確認")
+              .setStyle(ButtonStyle.Primary),
+            new ButtonBuilder()
+              .setCustomId("check_cancel")
+              .setLabel("キャンセル")
+              .setStyle(ButtonStyle.Secondary),
+          );
+
+          await btn.reply({
+            content: "回数を確認するユーザーを選んでください。",
+            components: [rowUser, rowExec],
+            ephemeral: true,
+          });
+
+          const panel = await btn.fetchReply();
+          let targetUserId: string | null = null;
+          const sub = createPanelCollector(btn, panel);
+
+          sub.on("collect", async (i) => {
+            if (i.isUserSelectMenu() && i.customId === "check_user") {
+              targetUserId = i.values[0] ?? null;
+              await i.deferUpdate();
+              return;
+            }
+
+            if (i.isButton() && i.customId === "check_cancel") {
+              await i.update({
+                content: "キャンセルしました。",
+                components: [],
+              });
+              sub.stop("cancel");
+              return;
+            }
+
+            if (i.isButton() && i.customId === "check_exec") {
+              if (!targetUserId) {
+                await i.reply({
+                  content: "対象ユーザーを選んでください。",
+                  ephemeral: true,
+                });
+                return;
+              }
+
+              const store = loadGuildStore(gid);
+              const count = store.counts[targetUserId] ?? 0n;
+              const displayName = await displayNameFrom(i, targetUserId);
+              await i.update({
+                content: `**${displayName}** は今までに ${formatCountWithReading(count)} しばかれました。`,
+                components: [],
+                allowedMentions: { parse: [] },
+              });
+              sub.stop("done");
+            }
+          });
+
+          bindPanelCleanup(sub, panel);
+          break;
+        }
+
+        /* --- 月曜煽り --- */
+        case "menu_monday": {
+          await btn.deferUpdate();
+          await btn.followUp({
+            content: isSundayInJst()
+              ? MONDAY_TAUNT_MESSAGE
+              : NOT_SUNDAY_MESSAGE,
+          });
+          break;
+        }
+
+        /* --- リセット --- */
+        case "menu_reset": {
+          if (!(await requireAdminOrDev(btn, "リセットは管理者/開発者のみ。")))
+            break;
+
+          const rowUser =
+            new ActionRowBuilder<UserSelectMenuBuilder>().addComponents(
+              new UserSelectMenuBuilder()
+                .setCustomId("reset_user")
+                .setPlaceholder("個別リセットするユーザー")
+                .setMaxValues(1),
+            );
+          const rowExec = new ActionRowBuilder<ButtonBuilder>().addComponents(
+            new ButtonBuilder()
+              .setCustomId("reset_exec_one")
+              .setLabel("選択ユーザーを0にする")
+              .setStyle(ButtonStyle.Primary),
+            new ButtonBuilder()
+              .setCustomId("reset_exec_all")
+              .setLabel("全員を0にする")
+              .setStyle(ButtonStyle.Danger),
+            new ButtonBuilder()
+              .setCustomId("reset_cancel")
+              .setLabel("キャンセル")
+              .setStyle(ButtonStyle.Secondary),
+          );
+
+          await btn.reply({
+            content: "個別リセットか全員リセットを選んでください。",
+            components: [rowUser, rowExec],
+            ephemeral: true,
+          });
+
+          const panel = await btn.fetchReply();
+          let resetTargetUserId: string | null = null;
+          const sub = createPanelCollector(btn, panel);
+
+          sub.on("collect", async (i) => {
+            if (i.isUserSelectMenu() && i.customId === "reset_user") {
+              resetTargetUserId = i.values[0] ?? null;
+              await i.deferUpdate();
+              return;
+            }
+
+            if (i.isButton() && i.customId === "reset_cancel") {
+              await i.update({
+                content: "キャンセルしました。",
+                components: [],
+              });
+              sub.stop("cancel");
+              return;
+            }
+
+            if (i.isButton() && i.customId === "reset_exec_all") {
+              const store = loadGuildStore(gid);
+              for (const userId of Object.keys(store.counts)) {
+                setCountGuild(gid, userId, 0n);
+              }
+              await i.update({
+                content: "全員のしばき回数を0にリセットしました。",
+                components: [],
+              });
+              sub.stop("done");
+              return;
+            }
+
+            if (i.isButton() && i.customId === "reset_exec_one") {
+              if (!resetTargetUserId) {
+                await i.reply({
+                  content: "対象ユーザーを選んでください。",
+                  ephemeral: true,
+                });
+                return;
+              }
+
+              setCountGuild(gid, resetTargetUserId, 0n);
+              const displayName = await displayNameFrom(i, resetTargetUserId);
+              await i.update({
+                content: `**${displayName}** のしばき回数を0にリセットしました。`,
+                components: [],
+                allowedMentions: { parse: [] },
+              });
+              sub.stop("done");
+            }
+          });
+
+          bindPanelCleanup(sub, panel);
+          break;
+        }
+
+        /* --- メンテ切替 --- */
+        case "menu_maintenance": {
+          if (
+            !(await requireAdminGuildOwnerOrDev(
+              btn,
+              "メンテナンス切替は管理者 / サーバーオーナー / 開発者のみ利用できます。",
+            ))
+          )
+            break;
+
+          const enabled = getMaintenanceEnabled(gid);
+          const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+            new ButtonBuilder()
+              .setCustomId("maintenance_on")
+              .setLabel("ON")
+              .setStyle(ButtonStyle.Danger)
+              .setDisabled(enabled),
+            new ButtonBuilder()
+              .setCustomId("maintenance_off")
+              .setLabel("OFF")
+              .setStyle(ButtonStyle.Success)
+              .setDisabled(!enabled),
+            new ButtonBuilder()
+              .setCustomId("maintenance_cancel")
+              .setLabel("キャンセル")
+              .setStyle(ButtonStyle.Secondary),
+          );
+
+          await btn.reply({
+            content: `現在のメンテナンスモード: **${enabled ? "ON" : "OFF"}**`,
+            components: [row],
+            ephemeral: true,
+          });
+
+          const panel = await btn.fetchReply();
+          const sub = createPanelCollector(btn, panel);
+
+          sub.on("collect", async (i) => {
+            if (!i.isButton()) return;
+
+            if (i.customId === "maintenance_cancel") {
+              await i.update({
+                content: "キャンセルしました。",
+                components: [],
+              });
+              sub.stop("cancel");
+              return;
+            }
+
+            if (
+              i.customId !== "maintenance_on" &&
+              i.customId !== "maintenance_off"
+            ) {
+              return;
+            }
+
+            const nextEnabled = i.customId === "maintenance_on";
+            setMaintenanceEnabled(gid, nextEnabled);
+            await i.update({
+              content: nextEnabled
+                ? "✅ メンテナンスモードを有効化しました。"
+                : "✅ メンテナンスモードを無効化しました。",
+              components: [],
+            });
+            sub.stop("done");
+          });
+
+          bindPanelCleanup(sub, panel);
+          break;
+        }
+
+        /* --- 投票 --- */
+        case "menu_vs": {
+          if (!TARGET_GUILD_ID || gid !== TARGET_GUILD_ID) {
+            await btn.reply({
+              content: "この機能は対象サーバーでのみ利用できます。",
+              ephemeral: true,
+            });
+            break;
+          }
+
+          const modal = new ModalBuilder()
+            .setCustomId("vs_modal")
+            .setTitle("2択投票を作成");
+          modal.addComponents(
+            new ActionRowBuilder<TextInputBuilder>().addComponents(
+              new TextInputBuilder()
+                .setCustomId("question")
+                .setLabel("質問")
+                .setStyle(TextInputStyle.Short)
+                .setRequired(true)
+                .setMaxLength(100),
+            ),
+            new ActionRowBuilder<TextInputBuilder>().addComponents(
+              new TextInputBuilder()
+                .setCustomId("option1")
+                .setLabel("項目1")
+                .setStyle(TextInputStyle.Short)
+                .setRequired(true)
+                .setMaxLength(80),
+            ),
+            new ActionRowBuilder<TextInputBuilder>().addComponents(
+              new TextInputBuilder()
+                .setCustomId("option2")
+                .setLabel("項目2")
+                .setStyle(TextInputStyle.Short)
+                .setRequired(true)
+                .setMaxLength(80),
+            ),
+          );
+
+          const submitted = await showModalAndAwait(btn, modal);
+          if (!submitted) break;
+
+          const question = submitted.fields
+            .getTextInputValue("question")
+            .trim();
+          const option1 = submitted.fields.getTextInputValue("option1").trim();
+          const option2 = submitted.fields.getTextInputValue("option2").trim();
+
+          if (option1 === option2) {
+            await submitted.reply({
+              content: "項目1と項目2は別の内容を指定してください。",
+              ephemeral: true,
+            });
+            break;
+          }
+
+          const channelForPoll = submitted.channel;
+          if (!channelForPoll || !("send" in channelForPoll)) {
+            await submitted.reply({
+              content: "投票の送信先チャンネルを取得できませんでした。",
+              ephemeral: true,
+            });
+            break;
+          }
+
+          const pollEmbed = new EmbedBuilder()
+            .setTitle(`🗳️ ${question}`)
+            .setDescription(`1️⃣ ${option1}\n2️⃣ ${option2}`)
+            .setFooter({ text: `作成者: ${submitted.user.tag}` });
+
+          const pollMessage = await channelForPoll.send({
+            embeds: [pollEmbed],
+            allowedMentions: { parse: [] },
+          });
+
+          try {
+            await pollMessage.react("1️⃣");
+            await pollMessage.react("2️⃣");
+          } catch {
+            await submitted.reply({
+              content:
+                "⚠️ 投票は作成しましたが、リアクション追加に失敗しました。権限を確認してください。",
+              ephemeral: true,
+            });
+            break;
+          }
+
+          await submitted.reply({
+            content: "✅ 投票を作成しました。",
+            ephemeral: true,
+          });
+          break;
+        }
+
         /* --- ヘルプ --- */
         case "menu_help": {
           await btn.deferUpdate();
@@ -905,6 +1588,34 @@ export async function handleMenu(
             embeds: [buildMenuHelpEmbed(sbkMin, sbkMax)],
             ephemeral: true,
           });
+          break;
+        }
+
+        /* --- メダルコーナー --- */
+        case "menu_medals": {
+          const panelState = buildMedalCornerPanel(gid, btn.user.id);
+          const returnToMenuTop = async () => {
+            currentPage = 1;
+            built = buildMenu(sbkMin, sbkMax, currentPage);
+            await interaction.editReply({
+              embeds: [built.embed],
+              components: built.rows,
+            });
+          };
+          await btn.reply({
+            embeds: [panelState.embed],
+            components: panelState.rows,
+            ephemeral: true,
+          });
+
+          const panel = await btn.fetchReply();
+          startMedalPanelSession(
+            btn,
+            panel,
+            gid,
+            panelState.balance,
+            returnToMenuTop,
+          );
           break;
         }
 

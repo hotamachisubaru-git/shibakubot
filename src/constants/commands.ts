@@ -1,35 +1,17 @@
 export const SLASH_COMMAND = {
-  ping: "ping",
-  sbk: "sbk",
-  check: "check",
-  menu: "menu",
-  suimin: "suimin",
-  members: "members",
-  help: "help",
-  monday: "monday",
-  maintenance: "maintenance",
-  maintenanceAlias: "mt",
-  stats: "stats",
-  reset: "reset",
-  top: "top",
-  control: "control",
-  immune: "immune",
-  vs: "vs",
-  chat: "chat",
-  reply: "reply",
-  regen: "regen",
-  image: "image",
-  history: "history",
-  setPrompt: "setprompt",
-  setCharacter: "setcharacter",
-  chatReset: "chatreset",
+  ping: "ping", //ping
+  sbk: "sbk", //しばく
+  menu: "menu", //メニュー
+  help: "help", //ヘルプ
+  chat: "chat", //AIチャット
+  reply: "reply", // AIチャット返信
+  regen: "regen", // AIチャット再生成
+  image: "image", //  AI画像生成
+  history: "history", // チャット履歴
+  setPrompt: "setprompt", //  プロンプト設定
+  setCharacter: "setcharacter", // キャラクター設定
+  chatReset: "chatreset", // チャット履歴リセット
 } as const;
-
-export function isMaintenanceCommand(name: string): boolean {
-  return (
-    name === SLASH_COMMAND.maintenance || name === SLASH_COMMAND.maintenanceAlias
-  );
-}
 
 export const MUSIC_TEXT_COMMAND = {
   play: "play",

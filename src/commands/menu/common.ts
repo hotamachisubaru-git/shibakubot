@@ -86,6 +86,12 @@ export const MENU_PAGE_DEFINITIONS: readonly MenuPageDefinition[] = [
         style: ButtonStyle.Secondary,
         summary: "カテゴリ別の使い分けを確認します。",
       },
+      {
+        customId: "menu_medals",
+        label: "メダルコーナー",
+        style: ButtonStyle.Success,
+        summary: "SkyDream Type-A でメダル抽選に挑戦します。",
+      },
     ],
   },
   {
@@ -189,6 +195,47 @@ export const MENU_PAGE_DEFINITIONS: readonly MenuPageDefinition[] = [
         label: "バックアップ",
         style: ButtonStyle.Secondary,
         summary: "ギルドDBの保存と一覧確認を行います。",
+      },
+    ],
+  },
+  {
+    page: 5,
+    navCustomId: "menu_page_tools",
+    navLabel: "便利",
+    title: "便利機能",
+    summary: "確認、投票、運用補助などをまとめています。",
+    permissionNote:
+      "回数確認 / 月曜煽り / 投票は誰でも利用できます。メンテナンス切替は管理者 / サーバーオーナー / 開発者、リセットは管理者 / 開発者のみ利用できます。",
+    actions: [
+      {
+        customId: "menu_check",
+        label: "回数確認",
+        style: ButtonStyle.Secondary,
+        summary: "指定ユーザーのしばかれ回数を確認します。",
+      },
+      {
+        customId: "menu_monday",
+        label: "月曜煽り",
+        style: ButtonStyle.Secondary,
+        summary: "日曜なら月曜日煽りを送信します。",
+      },
+      {
+        customId: "menu_reset",
+        label: "リセット",
+        style: ButtonStyle.Secondary,
+        summary: "対象または全員のしばき回数を0に戻します。",
+      },
+      {
+        customId: "menu_maintenance",
+        label: "メンテ切替",
+        style: ButtonStyle.Secondary,
+        summary: "メンテナンスモードを切り替えます。",
+      },
+      {
+        customId: "menu_vs",
+        label: "投票",
+        style: ButtonStyle.Primary,
+        summary: "2択投票を作成します。",
       },
     ],
   },
@@ -639,7 +686,7 @@ export function buildMenu(min: number, max: number, page: number = 1) {
   rows.push(buildActionRow(currentPage));
 
   // 下部ページナビ
-  const navRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+  const navButtons = [
     ...MENU_PAGE_DEFINITIONS.map((pageDefinition) =>
       new ButtonBuilder()
         .setCustomId(pageDefinition.navCustomId)
@@ -654,8 +701,15 @@ export function buildMenu(min: number, max: number, page: number = 1) {
       .setCustomId("menu_close")
       .setLabel("閉じる")
       .setStyle(ButtonStyle.Danger),
-  );
-  rows.push(navRow);
+  ];
+
+  for (let index = 0; index < navButtons.length; index += 5) {
+    rows.push(
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        ...navButtons.slice(index, index + 5),
+      ),
+    );
+  }
 
   return { embed, rows };
 }

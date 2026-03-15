@@ -1,4 +1,4 @@
-import { ChannelType, SlashCommandBuilder } from "discord.js";
+import { SlashCommandBuilder } from "discord.js";
 import { listMainCharacterChoices } from "../ai/character-presets";
 import { SLASH_COMMAND } from "../constants/commands";
 
@@ -14,10 +14,6 @@ type CommandDefinition = Readonly<{
   visibleInHelp?: boolean;
 }>;
 
-const MAINTENANCE_MODE_CHOICES = [
-  { name: "on", value: "on" },
-  { name: "off", value: "off" },
-] as const;
 const CHARACTER_CHOICES = listMainCharacterChoices();
 
 function defineCommand(
@@ -65,49 +61,6 @@ const baseCommandDefinitions: readonly CommandDefinition[] = [
   }),
   defineCommand(SLASH_COMMAND.menu, "しばくbot メニューを表示する"),
   defineCommand(SLASH_COMMAND.help, "コマンド一覧を表示する"),
-  defineCommand(SLASH_COMMAND.monday, "月曜日煽りを送信する"),
-  defineCommand(SLASH_COMMAND.suimin, "指定ユーザーをVCに移動", (builder) => {
-    builder
-      .addUserOption((opt) =>
-        opt
-          .setName("user")
-          .setDescription("移動するユーザー")
-          .setRequired(true),
-      )
-      .addChannelOption((opt) =>
-        opt
-          .setName("channel")
-          .setDescription("移動先のボイスチャンネル")
-          .addChannelTypes(ChannelType.GuildVoice, ChannelType.GuildStageVoice)
-          .setRequired(true),
-      );
-  }),
-  defineCommand(
-    SLASH_COMMAND.maintenance,
-    "メンテナンスモードを切り替える（管理者のみ）",
-    (builder) => {
-      builder.addStringOption((opt) =>
-        opt
-          .setName("mode")
-          .setDescription("on / off を指定")
-          .setRequired(true)
-          .addChoices(...MAINTENANCE_MODE_CHOICES),
-      );
-    },
-  ),
-  defineCommand(
-    SLASH_COMMAND.maintenanceAlias,
-    "メンテナンスモードを切り替える（短縮コマンド）",
-    (builder) => {
-      builder.addStringOption((opt) =>
-        opt
-          .setName("mode")
-          .setDescription("on / off を指定")
-          .setRequired(true)
-          .addChoices(...MAINTENANCE_MODE_CHOICES),
-      );
-    },
-  ),
 ];
 
 const aiCommandDefinitions: readonly CommandDefinition[] = [
@@ -257,36 +210,7 @@ const aiCommandDefinitions: readonly CommandDefinition[] = [
   ),
 ];
 
-const miscCommandDefinitions: readonly CommandDefinition[] = [
-  defineCommand(
-    SLASH_COMMAND.vs,
-    "2択の投票を作成する（対象サーバー限定）",
-    (builder) => {
-      builder
-        .addStringOption((option) =>
-          option
-            .setName("question")
-            .setDescription("質問内容")
-            .setRequired(true)
-            .setMaxLength(100),
-        )
-        .addStringOption((option) =>
-          option
-            .setName("option1")
-            .setDescription("項目1")
-            .setRequired(true)
-            .setMaxLength(80),
-        )
-        .addStringOption((option) =>
-          option
-            .setName("option2")
-            .setDescription("項目2")
-            .setRequired(true)
-            .setMaxLength(80),
-        );
-    },
-  ),
-];
+const miscCommandDefinitions: readonly CommandDefinition[] = [];
 
 const commandDefinitions: readonly CommandDefinition[] = [
   ...baseCommandDefinitions,

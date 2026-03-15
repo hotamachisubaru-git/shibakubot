@@ -1,8 +1,13 @@
 import type { ChatInputCommandInteraction } from "discord.js";
 import { getAiSlashHandler } from "../ai/handlers";
-import { isMaintenanceCommand } from "../constants/commands";
+import { getRuntimeConfig } from "../config/runtime";
+import { SLASH_COMMAND } from "../constants/commands";
 import { getMaintenanceEnabled } from "../data";
+import { hasAdminGuildOwnerOrDevPermission } from "../utils/permissions";
 import { ROOT_SLASH_HANDLERS } from "./slashHandlers";
+
+const runtimeConfig = getRuntimeConfig();
+const OWNER_IDS = runtimeConfig.discord.ownerIds;
 
 export async function handleChatInputInteraction(
   interaction: ChatInputCommandInteraction,
@@ -11,7 +16,10 @@ export async function handleChatInputInteraction(
   if (
     interaction.guildId &&
     getMaintenanceEnabled(interaction.guildId) &&
-    !isMaintenanceCommand(commandName)
+    !(
+      commandName === SLASH_COMMAND.menu &&
+      hasAdminGuildOwnerOrDevPermission(interaction, OWNER_IDS)
+    )
   ) {
     await interaction.reply({
       content: "⚠️ 現在メンテナンス中です。しばらくお待ちください。",
