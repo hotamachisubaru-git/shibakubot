@@ -5,19 +5,23 @@ function formatMillis(value: number): string {
   return `${Math.max(0, Math.round(value))}ms`;
 }
 
-export async function handlePing(
+async function waitForWsPing(
   interaction: ChatInputCommandInteraction,
-): Promise<void> {
-  const startedAt = Date.now();
-  await interaction.reply({ content: "計測中...", ephemeral: true });
-  const apiPing = Date.now() - startedAt;
-
+): Promise<number> {
   let wsPing = interaction.client.ws?.ping ?? -1;
   for (let waited = 0; wsPing < 0 && waited < 5000; waited += 200) {
     await new Promise((resolve) => setTimeout(resolve, 200));
     wsPing = interaction.client.ws?.ping ?? -1;
   }
+  return wsPing;
+}
 
+export async function handlePing(
+  interaction: ChatInputCommandInteraction,
+): Promise<void> {
+  const apiPing = Date.now() - interaction.createdTimestamp;
+  await interaction.deferReply({ ephemeral: true });
+  const wsPing = await waitForWsPing(interaction);
   const wsText = wsPing >= 0 ? formatMillis(wsPing) : "取得できませんでした";
 
   const embed = new EmbedBuilder()
