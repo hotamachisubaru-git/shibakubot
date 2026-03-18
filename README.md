@@ -1,16 +1,13 @@
 # しばくbot / ShibakuBot
 
 Discordサーバー向けの多機能Botです。  
-しばきカウント、メニューUI、VC操作、音楽再生（Lavalink）、AIチャット/画像生成に対応しています。
+この `release` ブランチは、**音楽機能** と **AI機能** を中心に配布する構成です。
 
 ## 主な機能
-- しばき回数の記録・ランキング・統計
-- `/menu` からの管理操作（回数設定、免除管理、ログ/バックアップ等）
-- VC操作（移動/切断/ミュート/解除）
 - 音楽再生（`s!` プレフィックス、アップロード再生、Spotify URL/URI、外部URL取り込み、NGワード管理）
 - AIチャット（Ollama/OpenAI互換API）
 - AI画像生成（Stable Diffusion WebUI API）
-- 2択投票（`/menu` から作成）
+- 補助コマンド（`/ping`, `/help`）
 
 ## 前提
 - Node.js `>= 20`
@@ -129,10 +126,8 @@ CLEAR_GLOBAL=true
 - `Mute Members`
 
 ## スラッシュコマンド
-- 登録されるトップレベルコマンドは `/ping` `/sbk` `/menu` `/help` `/ai` の5個です
+- 登録されるトップレベルコマンドは `/ping` `/help` `/ai` の3個です
 - `/ping` 生存確認
-- `/sbk user count? reason?` しばく
-- `/menu` メニュー表示
 - `/help` コマンド一覧
 - `/ai chat message new_session? private?` AI会話
 - `/ai reply message_id instruction? new_session? private?` 指定メッセージ返信生成
@@ -142,7 +137,6 @@ CLEAR_GLOBAL=true
 - `/ai setprompt content private? reset_history?` システムプロンプト更新
 - `/ai setcharacter character private? reset_history?` 口調プリセット適用
 - `/ai chatreset` AI会話履歴とプロンプトをリセット
-- ランキング、VC操作、ログ設定、免除管理、投票などの運用系機能は `/menu` から利用
 
 ## 音楽コマンド（メッセージ）
 プレフィックスは既定で `s!` です。

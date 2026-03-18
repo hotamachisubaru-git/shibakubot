@@ -44,28 +44,6 @@ function defineCommand(
 
 const baseCommandDefinitions: readonly CommandDefinition[] = [
   defineCommand(SLASH_COMMAND.ping, "BOTが生きているか確認する"),
-  defineCommand(SLASH_COMMAND.sbk, "ユーザーをしばく", (builder) => {
-    builder
-      .addUserOption((opt) =>
-        opt
-          .setName("user")
-          .setDescription("しばく対象")
-          .setRequired(true),
-      )
-      .addStringOption((opt) =>
-        opt
-          .setName("count")
-          .setDescription("しばく回数（省略可・ランダム）")
-          .setRequired(false),
-      )
-      .addStringOption((opt) =>
-        opt
-          .setName("reason")
-          .setDescription("理由（省略可・ランダム）")
-          .setRequired(false),
-      );
-  }),
-  defineCommand(SLASH_COMMAND.menu, "しばくbot メニューを表示する"),
   defineCommand(SLASH_COMMAND.help, "コマンド一覧を表示する"),
 ];
 

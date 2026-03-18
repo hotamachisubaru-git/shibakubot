@@ -7,9 +7,10 @@ const HELP_FOOTER = "しばくbot - コマンドヘルプ";
 const HELP_COLOR = EMBED_COLORS.info;
 
 function renderHelpLines(commands: readonly HelpCommand[]): string {
-  return commands
+  const slashLines = commands
     .map(({ name, description }) => `• **${name}** — ${description}`)
     .join("\n");
+  return `${slashLines}\n\n• **s!help** — 音楽コマンド一覧を表示します`;
 }
 
 export async function handleHelp(
