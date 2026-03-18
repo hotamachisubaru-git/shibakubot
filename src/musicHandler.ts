@@ -44,7 +44,9 @@ async function handlePlayMessageCommand(
 ): Promise<void> {
   const query = args.join(" ").trim();
   if (!query) {
-    await message.reply("🎵 再生したい曲の URL か キーワード を入力してください。");
+    await message.reply(
+      "🎵 再生したい曲の URL / Spotify URI / キーワード を入力してください。",
+    );
     return;
   }
 
@@ -194,12 +196,13 @@ async function ensureMusicFeatureEnabled(
 function buildMusicHelpMessage(): string {
   return (
     "🎵 音楽コマンド一覧:\n" +
-    `\`${PREFIX}${MUSIC_TEXT_COMMAND.play} <URL or キーワード>\` - 曲を再生・キューに追加\n` +
+    `\`${PREFIX}${MUSIC_TEXT_COMMAND.play} <URL / Spotify URI / キーワード>\` - 曲を再生・キューに追加\n` +
     `\`${PREFIX}${MUSIC_TEXT_COMMAND.np}\` - 現在再生中の曲を表示\n` +
     `\`${PREFIX}${MUSIC_TEXT_COMMAND.skip}\` (${PREFIX}${MUSIC_TEXT_COMMAND.skipAlias}) - 曲をスキップ\n` +
     `\`${PREFIX}${MUSIC_TEXT_COMMAND.stop}\` - 再生を停止し、VCから退出\n` +
     `\`${PREFIX}${MUSIC_TEXT_COMMAND.queue}\` - 再生中・キュー中の曲一覧を表示\n` +
     `\`${PREFIX}${MUSIC_TEXT_COMMAND.upload} [表示名]\` - 音楽ファイルをアップロードして再生（対応形式: ${ALLOWED_EXTENSIONS_LABEL}）\n` +
+    `Spotify の公開 track / album / playlist URL と \`spotify:track:...\` 形式に対応\n` +
     `\`${PREFIX}${MUSIC_TEXT_COMMAND.ng} <サブコマンド>\` - 音楽NGワード管理コマンド（管理者のみ）\n` +
     `（例: \`${PREFIX}${MUSIC_TEXT_COMMAND.ng} add <ワード>\` / \`${PREFIX}${MUSIC_TEXT_COMMAND.ng} remove <ワード>\` / \`${PREFIX}${MUSIC_TEXT_COMMAND.ng} list\` / \`${PREFIX}${MUSIC_TEXT_COMMAND.ng} clear\`）\n` +
     `\`${PREFIX}${MUSIC_TEXT_COMMAND.disable}\` (${PREFIX}${MUSIC_TEXT_COMMAND.disableAlias}) - 音楽機能を無効化（管理者のみ）\n` +

@@ -70,7 +70,7 @@ type AiSlashHandler = (
   interaction: ChatInputCommandInteraction,
 ) => Promise<void>;
 
-const AI_SLASH_HANDLERS: Readonly<Record<string, AiSlashHandler>> = {
+const AI_SUBCOMMAND_HANDLERS: Readonly<Record<string, AiSlashHandler>> = {
   [SLASH_COMMAND.chat]: handleChatCommand,
   [SLASH_COMMAND.reply]: handleReplyCommand,
   [SLASH_COMMAND.regen]: handleRegenCommand,
@@ -79,6 +79,10 @@ const AI_SLASH_HANDLERS: Readonly<Record<string, AiSlashHandler>> = {
   [SLASH_COMMAND.setPrompt]: handleSetPromptCommand,
   [SLASH_COMMAND.setCharacter]: handleSetCharacterCommand,
   [SLASH_COMMAND.chatReset]: handleChatResetCommand,
+};
+
+const AI_SLASH_HANDLERS: Readonly<Record<string, AiSlashHandler>> = {
+  [SLASH_COMMAND.ai]: handleAiCommand,
 };
 
 export function isAiSlashCommand(name: string): boolean {
@@ -96,6 +100,33 @@ export async function handleAiSlashCommand(
   if (handler) {
     await handler(interaction);
   }
+}
+
+async function handleAiCommand(
+  interaction: ChatInputCommandInteraction,
+): Promise<void> {
+  let subcommand: string;
+
+  try {
+    subcommand = interaction.options.getSubcommand();
+  } catch {
+    await interaction.reply({
+      content: "使用するAI機能を選んでください。`/ai chat` などを使えます。",
+      ephemeral: true,
+    });
+    return;
+  }
+
+  const handler = AI_SUBCOMMAND_HANDLERS[subcommand];
+  if (!handler) {
+    await interaction.reply({
+      content: `未対応のAIサブコマンドです: \`${subcommand}\``,
+      ephemeral: true,
+    });
+    return;
+  }
+
+  await handler(interaction);
 }
 
 async function handleChatCommand(
@@ -161,7 +192,7 @@ async function handleReplyCommand(
   const channel = interaction.channel;
   if (!channel || !channel.isTextBased() || !("messages" in channel)) {
     await interaction.reply({
-      content: "このチャンネルでは `/reply` を使用できません。",
+      content: "このチャンネルでは `/ai reply` を使用できません。",
       ephemeral: true,
     });
     return;
@@ -234,7 +265,7 @@ async function handleRegenCommand(
   const savedState = replyStateStore.getState(conversationKey);
   if (!savedState) {
     await interaction.reply({
-      content: "再生成できる返信がありません。先に `/reply` を実行してください。",
+      content: "再生成できる返信がありません。先に `/ai reply` を実行してください。",
       ephemeral: true,
     });
     return;
@@ -243,7 +274,7 @@ async function handleRegenCommand(
   const channel = interaction.channel;
   if (!channel || !channel.isTextBased() || !("messages" in channel)) {
     await interaction.reply({
-      content: "このチャンネルでは `/regen` を使用できません。",
+      content: "このチャンネルでは `/ai regen` を使用できません。",
       ephemeral: true,
     });
     return;
@@ -259,7 +290,7 @@ async function handleRegenCommand(
     console.error("[regen] メッセージ取得失敗:", error);
     replyStateStore.clear(conversationKey);
     await interaction.editReply(
-      "前回の返信先メッセージを取得できませんでした。もう一度 `/reply` を実行してください。",
+      "前回の返信先メッセージを取得できませんでした。もう一度 `/ai reply` を実行してください。",
     );
     return;
   }
@@ -311,7 +342,7 @@ async function handleRegenCommand(
   } catch (error) {
     if (isStaleReplyStateError(error)) {
       await interaction.editReply(
-        "前回の `/reply` 以降に会話が進んだため再生成できません。返信対象を指定して `/reply` をやり直してください。",
+        "前回の `/ai reply` 以降に会話が進んだため再生成できません。返信対象を指定して `/ai reply` をやり直してください。",
       );
       return;
     }
@@ -419,7 +450,7 @@ async function handleHistoryCommand(
   );
   if (history.length === 0) {
     await interaction.editReply(
-      "表示できる会話履歴がありません。`/chat` を使って会話を開始してください。",
+      "表示できる会話履歴がありません。`/ai chat` を使って会話を開始してください。",
     );
     return;
   }
@@ -464,7 +495,7 @@ async function handleSetPromptCommand(
   appendHistoryCarryOverWarning(
     summaryLines,
     !resetHistory && hadHistory,
-    "キャラを切り替える時は `/setprompt reset_history:true` または `/chat new_session:true` を推奨します。",
+    "キャラを切り替える時は `/ai setprompt reset_history:true` または `/ai chat new_session:true` を推奨します。",
   );
 
   await replyInChunks(interaction, summaryLines.join("\n"), isPrivate);
@@ -506,7 +537,7 @@ async function handleSetCharacterCommand(
   appendHistoryCarryOverWarning(
     summaryLines,
     !resetHistory && hadHistory,
-    "キャラを切り替える時は `/setcharacter reset_history:true` を推奨します。",
+    "キャラを切り替える時は `/ai setcharacter reset_history:true` を推奨します。",
   );
 
   await replyInChunks(interaction, summaryLines.join("\n"), isPrivate);

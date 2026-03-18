@@ -7,10 +7,10 @@ Discordサーバー向けの多機能Botです。
 - しばき回数の記録・ランキング・統計
 - `/menu` からの管理操作（回数設定、免除管理、ログ/バックアップ等）
 - VC操作（移動/切断/ミュート/解除）
-- 音楽再生（`s!` プレフィックス、アップロード再生、NGワード管理）
+- 音楽再生（`s!` プレフィックス、アップロード再生、Spotify URL/URI、NGワード管理）
 - AIチャット（Ollama/OpenAI互換API）
 - AI画像生成（Stable Diffusion WebUI API）
-- 2択投票コマンド `/vs`（対象サーバー限定）
+- 2択投票（`/menu` から作成）
 
 ## 前提
 - Node.js `>= 20`
@@ -97,7 +97,7 @@ CLEAR_GLOBAL=true
 ### 主な可変項目（補足）
 - `GUILD_IDS` はカンマ区切り（`GUILD_ID` 1件指定も可）
 - `UPLOAD_INTERNAL_URL` は Lavalink から到達できるURLを指定
-- `IMAGE_ENDPOINT` 未設定時は `/image` は利用不可
+- `IMAGE_ENDPOINT` 未設定時は `/ai image` は利用不可
 - `CLEAR_GLOBAL=true` で `register` 時にグローバルコマンドを削除
 - Lavalinkの高度設定も利用可（任意）
   - `LAVALINK_NODE_ID`
@@ -121,29 +121,25 @@ CLEAR_GLOBAL=true
 - `Mute Members`
 
 ## スラッシュコマンド
+- 登録されるトップレベルコマンドは `/ping` `/sbk` `/menu` `/help` `/ai` の5個です
 - `/ping` 生存確認
 - `/sbk user count? reason?` しばく
 - `/menu` メニュー表示
 - `/help` コマンド一覧
-- `/monday` 月曜日煽り
-- `/suimin user channel` 指定ユーザーをVC移動
-- `/maintenance mode:on|off` メンテナンス切替
-- `/mt mode:on|off` メンテ短縮コマンド
-- `/chat message new_session? private?` AI会話
-- `/reply message_id instruction? new_session? private?` 指定メッセージ返信生成
-- `/regen private?` 直前 `/reply` を再生成
-- `/image prompt size? private?` 画像生成（`IMAGE_ENDPOINT` 設定時）
-- `/history turns? private?` 会話履歴表示
-- `/setprompt content private? reset_history?` システムプロンプト更新
-- `/setcharacter character private? reset_history?` 口調プリセット適用
-- `/chatreset` AI会話履歴とプロンプトをリセット
-- `/check` / `/control` / `/immune` / `/members` / `/stats` / `/reset` / `/top`
-- `/vs question option1 option2` 2択投票（`GUILD_IDS` の先頭ギルド限定）
+- `/ai chat message new_session? private?` AI会話
+- `/ai reply message_id instruction? new_session? private?` 指定メッセージ返信生成
+- `/ai regen private?` 直前 `/ai reply` を再生成
+- `/ai image prompt size? private?` 画像生成（`IMAGE_ENDPOINT` 設定時）
+- `/ai history turns? private?` 会話履歴表示
+- `/ai setprompt content private? reset_history?` システムプロンプト更新
+- `/ai setcharacter character private? reset_history?` 口調プリセット適用
+- `/ai chatreset` AI会話履歴とプロンプトをリセット
+- ランキング、VC操作、ログ設定、免除管理、投票などの運用系機能は `/menu` から利用
 
 ## 音楽コマンド（メッセージ）
 プレフィックスは既定で `s!` です。
 
-- `s!play <URL or キーワード>` 再生/キュー追加
+- `s!play <URL / Spotify URI / キーワード>` 再生/キュー追加
 - `s!play 1` など 検索結果の番号選択
 - `s!np` 再生中表示
 - `s!skip` / `s!s` スキップ
@@ -157,6 +153,9 @@ CLEAR_GLOBAL=true
 - `s!help` ヘルプ
 
 対応アップロード形式: `mp3, wav, flac, m4a, aac, ogg`
+
+Spotify は公開 `track / album / playlist` URL と `spotify:track:...` / `spotify:album:...` / `spotify:playlist:...` を再生対象として扱います。
+Bot は Spotify の曲情報を参照して既存の再生ソースへ変換してキューに追加します。
 
 ## データ保存
 - ギルドDB: `data/guilds/<guildId>.db`

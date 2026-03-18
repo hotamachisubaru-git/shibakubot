@@ -55,6 +55,11 @@ import {
   toDisplayTrackTitleFromFilename,
 } from "./uploadUtils";
 import { hasAdminGuildOwnerOrDevPermission } from "../utils/permissions";
+import {
+  looksLikeSpotifyInput,
+  resolveSpotifyInput,
+  type SpotifyTrackMetadata,
+} from "./spotifyUtils";
 
 export type HandlePlayOptions = {
   titleFallback?: string;
@@ -186,6 +191,259 @@ function formatNowPlayingTime(ms: number): string {
 
 function isHttpUrl(url: string): boolean {
   return /^https?:\/\//i.test(url);
+}
+
+type TrackDisplayOverrides = Readonly<{
+  title?: string;
+  author?: string;
+  uri?: string;
+  artworkUrl?: string | null;
+}>;
+
+type TrackQueueValidation = Readonly<{
+  errorMessage: string | null;
+  hasDuration: boolean;
+}>;
+
+function applyTrackDisplayOverrides(
+  track: PendingTrack,
+  overrides: TrackDisplayOverrides,
+): void {
+  const title = overrides.title?.trim();
+  if (title) {
+    track.info.title = title;
+  }
+
+  const author = overrides.author?.trim();
+  if (author) {
+    track.info.author = author;
+    track.pluginInfo.author = author;
+  }
+
+  const uri = overrides.uri?.trim();
+  if (uri) {
+    track.info.uri = uri;
+    track.pluginInfo.uri = uri;
+    track.pluginInfo.url = uri;
+  }
+
+  const artworkUrl = overrides.artworkUrl?.trim();
+  if (artworkUrl) {
+    track.info.artworkUrl = artworkUrl;
+    track.pluginInfo.artworkUrl = artworkUrl;
+    track.pluginInfo.albumArtUrl ??= artworkUrl;
+  }
+}
+
+function validateTrackForQueue(
+  track: PendingTrack,
+  ngWords: string[],
+): TrackQueueValidation {
+  const lengthMs = getTrackDurationMs(track);
+  const isStream = isStreamTrack(track);
+  const hasDuration = Number.isFinite(lengthMs) && lengthMs > 0;
+  const shouldBlockStream = isStream && !hasDuration;
+
+  if (shouldBlockStream) {
+    return {
+      errorMessage: `🚫 ライブ配信/長さ不明の曲は再生できません。（最大 ${MAX_TRACK_MINUTES} 分まで）`,
+      hasDuration,
+    };
+  }
+
+  if (hasDuration && lengthMs > MAX_TRACK_MS) {
+    const mins = Math.floor(lengthMs / 60000);
+    const secs = Math.floor((lengthMs % 60000) / 1000);
+    return {
+      errorMessage: `🚫 この曲は長すぎます（${mins}:${secs
+        .toString()
+        .padStart(2, "0")}）。最大 ${MAX_TRACK_MINUTES} 分までです。`,
+      hasDuration,
+    };
+  }
+
+  const ngMatch = findNgWordMatch(
+    [track.info?.title, track.info?.author],
+    ngWords,
+  );
+  if (ngMatch) {
+    return {
+      errorMessage: "🚫 NGワードが含まれているため再生できません。",
+      hasDuration,
+    };
+  }
+
+  return {
+    errorMessage: null,
+    hasDuration,
+  };
+}
+
+function buildSpotifySearchQuery(track: SpotifyTrackMetadata): string {
+  return [track.title, track.artist].filter(Boolean).join(" ").trim();
+}
+
+function getSpotifyTypeLabel(type: "track" | "album" | "playlist"): string {
+  switch (type) {
+    case "track":
+      return "曲";
+    case "album":
+      return "アルバム";
+    case "playlist":
+      return "プレイリスト";
+    default:
+      return "コンテンツ";
+  }
+}
+
+async function searchPlayableTrack(
+  player: Player,
+  searchQuery: string,
+  requester: Message["author"],
+): Promise<PendingTrack | null> {
+  const result = await searchTracks(player, searchQuery, requester);
+  return result?.tracks?.[0] ?? null;
+}
+
+async function searchTracks(
+  player: Player,
+  searchQuery: string,
+  requester: Message["author"],
+): Promise<SearchResult | UnresolvedSearchResult | null> {
+  try {
+    return await player.search({ query: searchQuery }, requester);
+  } catch (error) {
+    console.warn("[music] search error", error);
+    return null;
+  }
+}
+
+async function handleSpotifyPlay(
+  message: Message,
+  player: Player,
+  query: string,
+): Promise<boolean> {
+  if (!looksLikeSpotifyInput(query)) {
+    return false;
+  }
+
+  const guildId = message.guildId;
+  if (!guildId) return true;
+
+  clearPendingSearch(message);
+
+  let spotifyResolution = null;
+  try {
+    spotifyResolution = await resolveSpotifyInput(query);
+  } catch (error) {
+    console.warn("[music] spotify resolve error", error);
+  }
+
+  if (!spotifyResolution?.tracks.length) {
+    await message.reply(
+      "⚠️ Spotify の公開トラック/アルバム/プレイリストを解決できませんでした。URL か URI を確認してください。",
+    );
+    return true;
+  }
+
+  const ngWords = getMusicNgWords(guildId);
+  const wasIdle = !player.playing && !player.paused;
+  let addedCount = 0;
+  let skippedCount = 0;
+  let unknownDurationCount = 0;
+  let firstAddedTitle: string | null = null;
+  let lastQueuePosition: number | null = null;
+  let firstFailureMessage: string | null = null;
+
+  for (const spotifyTrack of spotifyResolution.tracks) {
+    const searchQuery = `ytsearch:${buildSpotifySearchQuery(spotifyTrack)}`;
+    const resolvedTrack = await searchPlayableTrack(
+      player,
+      searchQuery,
+      message.author,
+    );
+    if (!resolvedTrack) {
+      skippedCount += 1;
+      firstFailureMessage ??=
+        "🔍 Spotify の曲に対応する再生候補が見つかりませんでした…。";
+      continue;
+    }
+
+    applyTrackDisplayOverrides(resolvedTrack, {
+      title: spotifyTrack.title,
+      author: spotifyTrack.artist,
+      uri: spotifyTrack.spotifyUrl,
+      artworkUrl: spotifyTrack.artworkUrl,
+    });
+
+    const validation = validateTrackForQueue(resolvedTrack, ngWords);
+    if (validation.errorMessage) {
+      skippedCount += 1;
+      firstFailureMessage ??= validation.errorMessage;
+      continue;
+    }
+
+    if (!validation.hasDuration) {
+      unknownDurationCount += 1;
+    }
+
+    await player.queue.add(resolvedTrack);
+    addedCount += 1;
+    if (!firstAddedTitle) {
+      firstAddedTitle = getTrackTitle(resolvedTrack);
+    }
+    lastQueuePosition = player.queue.tracks.length;
+  }
+
+  if (!addedCount) {
+    await message.reply(
+      firstFailureMessage ??
+        "🔍 Spotify から再生できる曲を見つけられませんでした…。",
+    );
+    return true;
+  }
+
+  if (wasIdle) {
+    await player.play();
+  }
+
+  const lines: string[] = [];
+  if (addedCount === 1 && firstAddedTitle) {
+    if (wasIdle) {
+      lines.push(`▶ 再生開始: **${firstAddedTitle}**（音量: ${FIXED_VOLUME}）`);
+    } else {
+      lines.push(
+        `⏱ キューに追加しました: **${firstAddedTitle}**（位置: ${lastQueuePosition ?? 1}）`,
+      );
+    }
+  } else {
+    const typeLabel = getSpotifyTypeLabel(spotifyResolution.type);
+    const actionLabel = wasIdle ? "再生キューに追加しました" : "キューに追加しました";
+    lines.push(
+      `🎵 Spotify の${typeLabel}を${actionLabel}: **${spotifyResolution.title}**（${addedCount}曲）`,
+    );
+  }
+
+  lines.push(`🔗 Spotify: ${spotifyResolution.sourceUrl}`);
+
+  if (spotifyResolution.truncated) {
+    lines.push(
+      `⚠️ 取り込み件数が多いため、先頭 ${spotifyResolution.tracks.length} 曲のみ追加対象にしました。`,
+    );
+  }
+  if (skippedCount > 0) {
+    lines.push(
+      `⚠️ ${skippedCount} 曲は見つからないか、長すぎる/NGワードのため追加できませんでした。`,
+    );
+  }
+  if (unknownDurationCount > 0) {
+    lines.push(
+      `⚠️ ${unknownDurationCount} 曲は長さを取得できないため、最大 ${MAX_TRACK_MINUTES} 分で自動停止します。`,
+    );
+  }
+
+  await message.reply(lines.join("\n"));
+  return true;
 }
 
 function buildNowPlayingBar(
@@ -337,19 +595,18 @@ export async function handlePlay(
 
   const isHttpUrl = /^https?:\/\//i.test(query);
   const normalizedQuery = isHttpUrl ? normalizeYouTubeShortsUrl(query) : query;
+
+  if (!track && (await handleSpotifyPlay(message, player, normalizedQuery))) {
+    return;
+  }
+
   if (!track) {
-    let result: SearchResult | UnresolvedSearchResult | null = null;
     const searchQuery = isHttpUrl
       ? normalizedQuery
       : `ytsearch:${normalizedQuery}`;
+    const searchResult = await searchTracks(player, searchQuery, message.author);
 
-    try {
-      result = await player.search({ query: searchQuery }, message.author);
-    } catch (error) {
-      console.warn("[music] search error", error);
-    }
-
-    if (!result?.tracks?.length) {
+    if (!searchResult?.tracks?.length) {
       if (options?.throwOnNotFound) {
         throw new Error("TRACK_NOT_FOUND");
       }
@@ -358,7 +615,7 @@ export async function handlePlay(
     }
 
     if (!isHttpUrl) {
-      const selectionTracks = result.tracks.slice(0, MAX_SELECTION_RESULTS);
+      const selectionTracks = searchResult.tracks.slice(0, MAX_SELECTION_RESULTS);
       setPendingSearch(message, selectionTracks, query);
       const lines = selectionTracks.map((candidate, index) => {
         const title = getTrackTitle(candidate);
@@ -375,7 +632,7 @@ export async function handlePlay(
       return;
     }
 
-    track = result.tracks[0];
+    track = searchResult.tracks[0];
   }
 
   clearPendingSearch(message);
@@ -383,11 +640,6 @@ export async function handlePlay(
     await message.reply("🔍 曲が見つかりませんでした…。");
     return;
   }
-
-  const lengthMs = getTrackDurationMs(track);
-  const isStream = isStreamTrack(track);
-  const hasDuration = Number.isFinite(lengthMs) && lengthMs > 0;
-  const shouldBlockStream = isStream && !hasDuration;
 
   const titleFallback = options?.titleFallback?.trim();
   const trackTitle = track.info?.title?.trim();
@@ -397,31 +649,13 @@ export async function handlePlay(
     track.info.title = titleFallback;
   }
 
-  if (shouldBlockStream) {
-    await message.reply(
-      `🚫 ライブ配信/長さ不明の曲は再生できません。（最大 ${MAX_TRACK_MINUTES} 分まで）`,
-    );
-    return;
-  }
-
-  if (hasDuration && lengthMs > MAX_TRACK_MS) {
-    const mins = Math.floor(lengthMs / 60000);
-    const secs = Math.floor((lengthMs % 60000) / 1000);
-    await message.reply(
-      `🚫 この曲は長すぎます（${mins}:${secs.toString().padStart(2, "0")}）。最大 ${MAX_TRACK_MINUTES} 分までです。`,
-    );
-    return;
-  }
-
   const ngWords = getMusicNgWords(guildId);
-  const ngMatch = findNgWordMatch(
-    [track.info?.title, track.info?.author],
-    ngWords,
-  );
-  if (ngMatch) {
-    await message.reply("🚫 NGワードが含まれているため再生できません。");
+  const validation = validateTrackForQueue(track, ngWords);
+  if (validation.errorMessage) {
+    await message.reply(validation.errorMessage);
     return;
   }
+  const hasDuration = validation.hasDuration;
 
   await player.queue.add(track);
   const displayTitle = getTrackTitle(track);

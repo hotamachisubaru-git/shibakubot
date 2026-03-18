@@ -636,7 +636,7 @@ export function buildMenuHelpEmbed(min: number, max: number): EmbedBuilder {
     .setDescription(
       [
         "コマンドが多いので、`/menu` は用途ごとにページを分けています。",
-        "迷ったらまず `基本` を開き、必要に応じて `VC操作` や `管理設定` に移動してください。",
+        "迷ったらまず `基本` を開き、下の矢印ボタンで `VC操作` や `管理設定` に移動してください。",
         `現在のしばく回数レンジ: **${safeCount(BigInt(min))}〜${safeCount(BigInt(max))}回**`,
       ].join("\n"),
     )
@@ -685,31 +685,29 @@ export function buildMenu(min: number, max: number, page: number = 1) {
   const rows: ActionRowBuilder<ButtonBuilder>[] = [];
   rows.push(buildActionRow(currentPage));
 
-  // 下部ページナビ
   const navButtons = [
-    ...MENU_PAGE_DEFINITIONS.map((pageDefinition) =>
-      new ButtonBuilder()
-        .setCustomId(pageDefinition.navCustomId)
-        .setLabel(pageDefinition.navLabel)
-        .setStyle(
-          currentPage.page === pageDefinition.page
-            ? ButtonStyle.Primary
-            : ButtonStyle.Secondary,
-        ),
-    ),
+    new ButtonBuilder()
+      .setCustomId("menu_page_prev")
+      .setLabel("←")
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(currentPage.page <= 1),
+    new ButtonBuilder()
+      .setCustomId(currentPage.navCustomId)
+      .setLabel(`${currentPage.navLabel} ${currentPage.page}/${maxPage}`)
+      .setStyle(ButtonStyle.Primary)
+      .setDisabled(true),
+    new ButtonBuilder()
+      .setCustomId("menu_page_next")
+      .setLabel("→")
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(currentPage.page >= maxPage),
     new ButtonBuilder()
       .setCustomId("menu_close")
       .setLabel("閉じる")
       .setStyle(ButtonStyle.Danger),
   ];
 
-  for (let index = 0; index < navButtons.length; index += 5) {
-    rows.push(
-      new ActionRowBuilder<ButtonBuilder>().addComponents(
-        ...navButtons.slice(index, index + 5),
-      ),
-    );
-  }
+  rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(...navButtons));
 
   return { embed, rows };
 }

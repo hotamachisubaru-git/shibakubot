@@ -76,6 +76,7 @@ import {
   joinLinesWithLimitOrNull,
   listBackupFiles,
   looksLikeSnowflake,
+  MENU_PAGE_DEFINITIONS,
   type PanelMessage,
   pickUnionValue,
   requireAdminOrDev,
@@ -611,6 +612,8 @@ export async function handleMenu(
     try {
       switch (btn.customId) {
         /* --- ページ切り替え --- */
+        case "menu_page_prev":
+        case "menu_page_next":
         case "menu_page_basic":
         case "menu_page_vc":
         case "menu_page_admin":
@@ -618,11 +621,16 @@ export async function handleMenu(
         case "menu_page_tools": {
           await btn.deferUpdate();
           const nextPage = getMenuPageByNavCustomId(btn.customId);
-          if (!nextPage) {
-            break;
+          if (btn.customId === "menu_page_prev") {
+            currentPage = Math.max(1, currentPage - 1);
+          } else if (btn.customId === "menu_page_next") {
+            currentPage = Math.min(MENU_PAGE_DEFINITIONS.length, currentPage + 1);
+          } else {
+            if (!nextPage) {
+              break;
+            }
+            currentPage = nextPage.page;
           }
-
-          currentPage = nextPage.page;
 
           const rebuilt = buildMenu(sbkMin, sbkMax, currentPage);
           built = rebuilt;

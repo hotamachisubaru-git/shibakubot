@@ -3,6 +3,7 @@ export const SLASH_COMMAND = {
   sbk: "sbk", //しばく
   menu: "menu", //メニュー
   help: "help", //ヘルプ
+  ai: "ai", // AI総合
   chat: "chat", //AIチャット
   reply: "reply", // AIチャット返信
   regen: "regen", // AIチャット再生成
