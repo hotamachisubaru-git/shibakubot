@@ -7,6 +7,18 @@ import {
 } from "lavalink-client";
 
 export type PendingTrack = Track | UnresolvedTrack;
+export type TrackDisplayOverrides = Readonly<{
+  title?: string;
+  author?: string;
+  uri?: string;
+  artworkUrl?: string | null;
+}>;
+
+type ShibakuTrackPluginInfo = PendingTrack["pluginInfo"] & {
+  shibakuRecoveredByYtDlp?: boolean;
+  shibakuOriginalSourceUrl?: string;
+  shibakuForcedDurationMs?: number;
+};
 
 export function getLavalink(message: Message): LavalinkManager<Player> | null {
   const client = message.client as Message["client"] & {
@@ -20,6 +32,11 @@ export function getTrackId(track: PendingTrack | null | undefined): string {
 }
 
 export function getTrackDurationMs(track: PendingTrack): number {
+  const forcedDuration = (track.pluginInfo as ShibakuTrackPluginInfo)
+    .shibakuForcedDurationMs;
+  if (typeof forcedDuration === "number" && Number.isFinite(forcedDuration)) {
+    return forcedDuration;
+  }
   const info = track.info as UnresolvedTrack["info"] & { length?: number };
   const rawDuration = info.duration ?? info.length ?? 0;
   return Number(rawDuration);
@@ -32,6 +49,77 @@ export function isStreamTrack(track: PendingTrack): boolean {
 export function getTrackTitle(track: PendingTrack): string {
   const title = track.info.title?.trim();
   return title && title.length > 0 ? title : "Unknown title";
+}
+
+export function applyTrackDisplayOverrides(
+  track: PendingTrack,
+  overrides: TrackDisplayOverrides,
+): void {
+  const title = overrides.title?.trim();
+  if (title) {
+    track.info.title = title;
+  }
+
+  const author = overrides.author?.trim();
+  if (author) {
+    track.info.author = author;
+    track.pluginInfo.author = author;
+  }
+
+  const uri = overrides.uri?.trim();
+  if (uri) {
+    track.info.uri = uri;
+    track.pluginInfo.uri = uri;
+    track.pluginInfo.url = uri;
+  }
+
+  const artworkUrl = overrides.artworkUrl?.trim();
+  if (artworkUrl) {
+    track.info.artworkUrl = artworkUrl;
+    track.pluginInfo.artworkUrl = artworkUrl;
+    track.pluginInfo.albumArtUrl ??= artworkUrl;
+  }
+}
+
+export function markTrackAsRecoveredByYtDlp(
+  track: PendingTrack,
+  originalSourceUrl: string,
+): void {
+  const pluginInfo = track.pluginInfo as ShibakuTrackPluginInfo;
+  pluginInfo.shibakuRecoveredByYtDlp = true;
+  const sourceUrl = originalSourceUrl.trim();
+  if (sourceUrl) {
+    pluginInfo.shibakuOriginalSourceUrl = sourceUrl;
+  }
+}
+
+export function applyTrackDurationOverride(
+  track: PendingTrack,
+  durationMs: number | null | undefined,
+): void {
+  if (typeof durationMs !== "number" || !Number.isFinite(durationMs) || durationMs <= 0) {
+    return;
+  }
+
+  const normalizedDuration = Math.round(durationMs);
+  const pluginInfo = track.pluginInfo as ShibakuTrackPluginInfo;
+  pluginInfo.shibakuForcedDurationMs = normalizedDuration;
+
+  const info = track.info as UnresolvedTrack["info"] & { length?: number };
+  info.duration = normalizedDuration;
+  info.length = normalizedDuration;
+}
+
+export function isTrackRecoveredByYtDlp(track: PendingTrack): boolean {
+  return (track.pluginInfo as ShibakuTrackPluginInfo).shibakuRecoveredByYtDlp === true;
+}
+
+export function getRecoveredTrackOriginalSourceUrl(
+  track: PendingTrack,
+): string | null {
+  const value = (track.pluginInfo as ShibakuTrackPluginInfo)
+    .shibakuOriginalSourceUrl;
+  return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
 export function findNgWordMatch(

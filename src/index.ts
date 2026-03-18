@@ -11,6 +11,7 @@ import { getMaintenanceEnabled } from "./data";
 import { startFileServer } from "./fileserver/fileServer";
 import { initLavalink, waitForLavalinkReady } from "./lavalink";
 import { handleMusicMessage } from "./music";
+import { recoverPlaybackWithYtDlp } from "./music/playbackRecovery";
 
 const runtimeConfig = getRuntimeConfig();
 const TOKEN = runtimeConfig.discord.token;
@@ -47,15 +48,21 @@ client.once(Events.ClientReady, async (readyClient) => {
   });
   client.lavalink.on("trackError", (player, track, payload) => {
     console.error(
-      `[music] track error guild=${player.guildId} title=${track?.info?.title ?? "unknown"}`,
-      payload?.exception?.message ?? payload,
+      `[music] track error guild=${player.guildId} title=${track?.info?.title ?? "unknown"} source=${track?.info?.sourceName ?? "unknown"} identifier=${track?.info?.identifier ?? "unknown"} uri=${track?.info?.uri ?? "unknown"}`,
+      {
+        message: payload?.exception?.message ?? "unknown",
+        severity: payload?.exception?.severity ?? "unknown",
+        cause: payload?.exception?.cause ?? "unknown",
+      },
     );
+    void recoverPlaybackWithYtDlp(client, player, track, payload);
   });
   client.lavalink.on("trackStuck", (player, track, payload) => {
     console.error(
-      `[music] track stuck guild=${player.guildId} title=${track?.info?.title ?? "unknown"}`,
+      `[music] track stuck guild=${player.guildId} title=${track?.info?.title ?? "unknown"} source=${track?.info?.sourceName ?? "unknown"} identifier=${track?.info?.identifier ?? "unknown"} uri=${track?.info?.uri ?? "unknown"}`,
       payload,
     );
+    void recoverPlaybackWithYtDlp(client, player, track, payload);
   });
 
   await waitForLavalinkReady();

@@ -13,6 +13,9 @@ const DEFAULT_MUSIC_FIXED_VOLUME = 20;
 const DEFAULT_MUSIC_MAX_TRACK_MINUTES = 15;
 const DEFAULT_PENDING_SEARCH_TTL_MS = 5 * 60 * 1000;
 const DEFAULT_MAX_SELECTION_RESULTS = 10;
+const DEFAULT_YT_DLP_ENABLED = true;
+const DEFAULT_YT_DLP_AUTO_DOWNLOAD = true;
+const DEFAULT_YT_DLP_TIMEOUT_MS = 3 * 60 * 1000;
 const DEFAULT_LAVALINK_NODE_ID = "local";
 const DEFAULT_LAVALINK_HOST = "127.0.0.1";
 const DEFAULT_LAVALINK_PORT = 2333;
@@ -95,6 +98,13 @@ export type RuntimeConfig = Readonly<{
     allowedExtensions: readonly string[];
     allowedExtensionsLabel: string;
     contentTypeToExtension: Readonly<Record<string, string>>;
+  }>;
+  ytdlp: Readonly<{
+    enabled: boolean;
+    binaryPath?: string;
+    autoDownload: boolean;
+    timeoutMs: number;
+    cacheDir: string;
   }>;
   lavalink: Readonly<{
     nodeId: string;
@@ -224,6 +234,9 @@ function buildRuntimeConfig(): RuntimeConfig {
   const uploadDir = path.resolve(
     parseText(process.env.FILE_DIR) || DEFAULT_FILE_DIR,
   );
+  const ytDlpCacheDir = path.resolve(
+    parseText(process.env.YT_DLP_CACHE_DIR) || "./data/yt-dlp",
+  );
 
   const allowedExtensions = [".mp3", ".wav", ".flac", ".m4a", ".aac", ".ogg"] as const;
   const contentTypeToExtension: Record<string, string> = {
@@ -333,6 +346,23 @@ function buildRuntimeConfig(): RuntimeConfig {
         .map((ext) => ext.replace(".", ""))
         .join(", "),
       contentTypeToExtension,
+    },
+    ytdlp: {
+      enabled: parseBoolean(
+        process.env.YT_DLP_ENABLED,
+        DEFAULT_YT_DLP_ENABLED,
+      ),
+      binaryPath: parseOptionalText(process.env.YT_DLP_PATH),
+      autoDownload: parseBoolean(
+        process.env.YT_DLP_AUTO_DOWNLOAD,
+        DEFAULT_YT_DLP_AUTO_DOWNLOAD,
+      ),
+      timeoutMs: parseInteger(
+        process.env.YT_DLP_TIMEOUT_MS,
+        DEFAULT_YT_DLP_TIMEOUT_MS,
+        { min: 1_000 },
+      ),
+      cacheDir: ytDlpCacheDir,
     },
     lavalink: {
       nodeId: parseText(process.env.LAVALINK_NODE_ID) || DEFAULT_LAVALINK_NODE_ID,

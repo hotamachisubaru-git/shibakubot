@@ -35,14 +35,18 @@ import {
   UPLOAD_DIR,
 } from "./constants";
 import {
+  applyTrackDisplayOverrides,
+  applyTrackDurationOverride,
   findNgWordMatch,
   formatTrackDuration,
   getLavalink,
   getTrackDurationMs,
   getTrackTitle,
   isStreamTrack,
+  markTrackAsRecoveredByYtDlp,
   normalizeYouTubeShortsUrl,
   type PendingTrack,
+  type TrackDisplayOverrides,
 } from "./trackUtils";
 import { clearAutoStop, clearPendingSearch, setPendingSearch } from "./state";
 import {
@@ -60,12 +64,22 @@ import {
   resolveSpotifyInput,
   type SpotifyTrackMetadata,
 } from "./spotifyUtils";
+import {
+  buildExternalTrackBlockedMessage,
+  downloadExternalTrack,
+  shouldPreferYtDlpDirect,
+  shouldAttemptYtDlpFallback,
+  YtDlpUserError,
+} from "./ytDlpUtils";
 
 export type HandlePlayOptions = {
   titleFallback?: string;
   forceTitle?: boolean;
   selectedTrack?: PendingTrack;
   throwOnNotFound?: boolean;
+  displayOverrides?: TrackDisplayOverrides;
+  durationOverrideMs?: number | null;
+  markAsYtDlpRecoveredFromUrl?: string;
 };
 
 const NOW_PLAYING_BAR_SEGMENTS = 16;
@@ -193,47 +207,10 @@ function isHttpUrl(url: string): boolean {
   return /^https?:\/\//i.test(url);
 }
 
-type TrackDisplayOverrides = Readonly<{
-  title?: string;
-  author?: string;
-  uri?: string;
-  artworkUrl?: string | null;
-}>;
-
 type TrackQueueValidation = Readonly<{
   errorMessage: string | null;
   hasDuration: boolean;
 }>;
-
-function applyTrackDisplayOverrides(
-  track: PendingTrack,
-  overrides: TrackDisplayOverrides,
-): void {
-  const title = overrides.title?.trim();
-  if (title) {
-    track.info.title = title;
-  }
-
-  const author = overrides.author?.trim();
-  if (author) {
-    track.info.author = author;
-    track.pluginInfo.author = author;
-  }
-
-  const uri = overrides.uri?.trim();
-  if (uri) {
-    track.info.uri = uri;
-    track.pluginInfo.uri = uri;
-    track.pluginInfo.url = uri;
-  }
-
-  const artworkUrl = overrides.artworkUrl?.trim();
-  if (artworkUrl) {
-    track.info.artworkUrl = artworkUrl;
-    track.pluginInfo.artworkUrl = artworkUrl;
-    track.pluginInfo.albumArtUrl ??= artworkUrl;
-  }
-}
 
 function validateTrackForQueue(
   track: PendingTrack,
@@ -446,6 +423,95 @@ async function handleSpotifyPlay(
   return true;
 }
 
+async function handleExternalUrlFallback(
+  message: Message,
+  query: string,
+): Promise<boolean> {
+  if (!shouldAttemptYtDlpFallback(query)) {
+    return false;
+  }
+
+  let downloadedTrack;
+  try {
+    downloadedTrack = await downloadExternalTrack(query);
+  } catch (error) {
+    if (error instanceof YtDlpUserError) {
+      await message.reply(`⚠️ ${error.message}`);
+      return true;
+    }
+
+    console.warn("[music] yt-dlp fallback error", error);
+    await message.reply(
+      "⚠️ そのURLは外部サイト取り込みでも再生できませんでした。非公開・地域制限・要ログインの可能性があります。",
+    );
+    return true;
+  }
+
+  const blockedMessage = buildExternalTrackBlockedMessage(
+    downloadedTrack.title,
+    downloadedTrack.durationMs,
+    downloadedTrack.isLive,
+  );
+  if (blockedMessage) {
+    await fs.promises.unlink(downloadedTrack.filePath).catch(() => undefined);
+    await message.reply(blockedMessage);
+    return true;
+  }
+
+  const guildId = message.guildId;
+  if (guildId) {
+    const ngWords = getMusicNgWords(guildId);
+    const ngMatch = findNgWordMatch(
+      [downloadedTrack.title, downloadedTrack.uploader ?? undefined],
+      ngWords,
+    );
+    if (ngMatch) {
+      await fs.promises.unlink(downloadedTrack.filePath).catch(() => undefined);
+      await message.reply("🚫 NGワードが含まれているため再生できません。");
+      return true;
+    }
+  }
+
+  const sourceLabel = downloadedTrack.extractor
+    ? ` (${downloadedTrack.extractor})`
+    : "";
+
+  await message.reply(
+    `✅ 外部URLを取り込みました: **${downloadedTrack.title}**${sourceLabel}\n` +
+      `🌐 元URL: ${downloadedTrack.sourceUrl}\n` +
+      `▶ 再生します…`,
+  );
+
+  const playOptions: HandlePlayOptions = {
+    titleFallback: downloadedTrack.title,
+    forceTitle: true,
+    throwOnNotFound: true,
+    durationOverrideMs: downloadedTrack.durationMs,
+    markAsYtDlpRecoveredFromUrl: downloadedTrack.sourceUrl,
+    displayOverrides: {
+      title: downloadedTrack.title,
+      author: downloadedTrack.uploader ?? undefined,
+      uri: downloadedTrack.sourceUrl,
+      artworkUrl: downloadedTrack.artworkUrl,
+    },
+  };
+
+  try {
+    await handlePlay(message, downloadedTrack.internalUrl, playOptions);
+  } catch {
+    try {
+      await handlePlay(message, downloadedTrack.publicUrl, playOptions);
+    } catch {
+      await fs.promises.unlink(downloadedTrack.filePath).catch(() => undefined);
+      await message.reply(
+        "⚠️ 外部URLの取り込みには成功しましたが、Lavalink から再生できませんでした。",
+      );
+    }
+  }
+
+  return true;
+}
+
 function buildNowPlayingBar(
   positionMs: number,
   durationMs: number,
@@ -600,6 +666,12 @@ export async function handlePlay(
     return;
   }
 
+  if (!track && isHttpUrl && shouldPreferYtDlpDirect(normalizedQuery)) {
+    if (await handleExternalUrlFallback(message, normalizedQuery)) {
+      return;
+    }
+  }
+
   if (!track) {
     const searchQuery = isHttpUrl
       ? normalizedQuery
@@ -607,6 +679,9 @@ export async function handlePlay(
     const searchResult = await searchTracks(player, searchQuery, message.author);
 
     if (!searchResult?.tracks?.length) {
+      if (isHttpUrl && (await handleExternalUrlFallback(message, normalizedQuery))) {
+        return;
+      }
       if (options?.throwOnNotFound) {
         throw new Error("TRACK_NOT_FOUND");
       }
@@ -647,6 +722,15 @@ export async function handlePlay(
     !trackTitle || trackTitle.toLowerCase() === "unknown title";
   if (titleFallback && (options?.forceTitle || isUnknownTitle)) {
     track.info.title = titleFallback;
+  }
+  if (options?.displayOverrides) {
+    applyTrackDisplayOverrides(track, options.displayOverrides);
+  }
+  if (options?.durationOverrideMs !== undefined) {
+    applyTrackDurationOverride(track, options.durationOverrideMs);
+  }
+  if (options?.markAsYtDlpRecoveredFromUrl) {
+    markTrackAsRecoveredByYtDlp(track, options.markAsYtDlpRecoveredFromUrl);
   }
 
   const ngWords = getMusicNgWords(guildId);
