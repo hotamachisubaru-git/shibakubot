@@ -245,10 +245,5 @@ export async function handleMusicMessage(message: Message): Promise<void> {
     await definition.handler(message, parsedCommand.args);
   } catch (error) {
     console.error("[music] command error", error);
-    try {
-      await message.reply("❌ 音楽コマンドの処理中にエラーが発生しました。");
-    } catch {
-      // noop
-    }
   }
 }

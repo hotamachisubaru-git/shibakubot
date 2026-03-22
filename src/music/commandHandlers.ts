@@ -696,6 +696,73 @@ async function searchTracks(
   }
 }
 
+function buildKeywordSearchQueries(query: string): readonly string[] {
+  return [`ytmsearch:${query}`, `ytsearch:${query}`];
+}
+
+function buildPendingTrackDedupKey(track: PendingTrack): string {
+  const sourceName = track.info?.sourceName ?? "unknown";
+  const identifier = track.info?.identifier?.trim();
+  if (identifier) {
+    return `${sourceName}:${identifier}`;
+  }
+
+  const uri = track.info?.uri?.trim();
+  if (uri) {
+    return `${sourceName}:${uri}`;
+  }
+
+  return [
+    sourceName,
+    compactSpotifyCandidateText(getTrackTitle(track)),
+    compactSpotifyCandidateText(track.info?.author ?? ""),
+  ].join(":");
+}
+
+async function searchKeywordCandidates(
+  player: Player,
+  query: string,
+  requester: Message["author"],
+  limit: number,
+): Promise<PendingTrack[]> {
+  const results = await Promise.all(
+    buildKeywordSearchQueries(query).map((searchQuery) =>
+      searchTracks(player, searchQuery, requester),
+    ),
+  );
+  const tracksByQuery = results.map(
+    (result) => result?.tracks?.slice(0, limit) ?? [],
+  );
+  const maxDepth = tracksByQuery.reduce(
+    (currentMax, tracks) => Math.max(currentMax, tracks.length),
+    0,
+  );
+  const mergedTracks: PendingTrack[] = [];
+  const seen = new Set<string>();
+
+  for (let index = 0; index < maxDepth && mergedTracks.length < limit; index += 1) {
+    for (const tracks of tracksByQuery) {
+      const track = tracks[index];
+      if (!track) {
+        continue;
+      }
+
+      const dedupKey = buildPendingTrackDedupKey(track);
+      if (seen.has(dedupKey)) {
+        continue;
+      }
+
+      seen.add(dedupKey);
+      mergedTracks.push(track);
+      if (mergedTracks.length >= limit) {
+        break;
+      }
+    }
+  }
+
+  return mergedTracks;
+}
+
 async function handleSpotifyPlay(
   message: Message,
   player: Player,
@@ -1179,24 +1246,19 @@ export async function handlePlay(
   }
 
   if (!track) {
-    const searchQuery = isHttpUrl
-      ? normalizedQuery
-      : `ytsearch:${normalizedQuery}`;
-    const searchResult = await searchTracks(player, searchQuery, message.author);
+    if (!isHttpUrl) {
+      const selectionTracks = await searchKeywordCandidates(
+        player,
+        normalizedQuery,
+        message.author,
+        MAX_SELECTION_RESULTS,
+      );
 
-    if (!searchResult?.tracks?.length) {
-      if (isHttpUrl && (await handleExternalUrlFallback(message, normalizedQuery))) {
+      if (!selectionTracks.length) {
+        await message.reply("🔍 曲が見つかりませんでした…。");
         return;
       }
-      if (options?.throwOnNotFound) {
-        throw new Error("TRACK_NOT_FOUND");
-      }
-      await message.reply("🔍 曲が見つかりませんでした…。");
-      return;
-    }
 
-    if (!isHttpUrl) {
-      const selectionTracks = searchResult.tracks.slice(0, MAX_SELECTION_RESULTS);
       setPendingSearch(message, selectionTracks, query);
       const lines = selectionTracks.map((candidate, index) => {
         const title = getTrackTitle(candidate);
@@ -1210,6 +1272,23 @@ export async function handlePlay(
           `${lines.join("\n")}\n` +
           `\n\`${PREFIX}${MUSIC_TEXT_COMMAND.play} 1\`〜\`${PREFIX}${MUSIC_TEXT_COMMAND.play} ${lines.length}\``,
       );
+      return;
+    }
+
+    const searchResult = await searchTracks(
+      player,
+      normalizedQuery,
+      message.author,
+    );
+
+    if (!searchResult?.tracks?.length) {
+      if (await handleExternalUrlFallback(message, normalizedQuery)) {
+        return;
+      }
+      if (options?.throwOnNotFound) {
+        throw new Error("TRACK_NOT_FOUND");
+      }
+      await message.reply("🔍 曲が見つかりませんでした…。");
       return;
     }
 

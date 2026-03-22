@@ -45,18 +45,18 @@ function getRecoveryMessageTarget(client: Client, textChannelId: string | null) 
   return null;
 }
 
-async function sendRecoveryMessage(
+function logRecoveryMessage(
   client: Client,
   player: Player,
   content: string,
-): Promise<void> {
+): void {
   const channel = getRecoveryMessageTarget(client, player.textChannelId ?? null);
-  if (!channel) return;
-  try {
-    await channel.send(content);
-  } catch {
-    // noop
-  }
+  console.warn("[music] recovery notice", {
+    guildId: player.guildId,
+    textChannelId: player.textChannelId ?? null,
+    channelId: channel?.id ?? null,
+    content,
+  });
 }
 
 function summarizePayload(payload: TrackExceptionEvent | TrackStuckEvent): string {
@@ -117,7 +117,7 @@ export async function recoverPlaybackWithYtDlp(
   const payloadSummary = summarizePayload(payload);
 
   try {
-    await sendRecoveryMessage(
+    logRecoveryMessage(
       client,
       player,
       `⚠️ **${trackTitle}** の再生で問題が出たので、外部URL取り込みで復旧を試します。\n原因: ${payloadSummary}`,
@@ -131,7 +131,7 @@ export async function recoverPlaybackWithYtDlp(
         error instanceof YtDlpUserError
           ? error.message
           : "外部URL取り込みでも復旧できませんでした。";
-      await sendRecoveryMessage(
+      logRecoveryMessage(
         client,
         player,
         `⚠️ **${trackTitle}** を復旧できませんでした。${detail}`,
@@ -146,7 +146,7 @@ export async function recoverPlaybackWithYtDlp(
     );
     if (blockedMessage) {
       await fs.promises.unlink(downloadedTrack.filePath).catch(() => undefined);
-      await sendRecoveryMessage(
+      logRecoveryMessage(
         client,
         player,
         `⚠️ **${trackTitle}** を復旧できませんでした。\n${blockedMessage}`,
@@ -161,7 +161,7 @@ export async function recoverPlaybackWithYtDlp(
     );
     if (!recoveredTrack) {
       await fs.promises.unlink(downloadedTrack.filePath).catch(() => undefined);
-      await sendRecoveryMessage(
+      logRecoveryMessage(
         client,
         player,
         `⚠️ **${trackTitle}** の取り込みには成功しましたが、Lavalink から再生トラックを作れませんでした。`,
@@ -187,7 +187,7 @@ export async function recoverPlaybackWithYtDlp(
 
     if (shouldPlayImmediately) {
       await player.play({ clientTrack: recoveredTrack, noReplace: false });
-      await sendRecoveryMessage(
+      logRecoveryMessage(
         client,
         player,
         `▶ **${downloadedTrack.title}** を外部URL取り込みで復旧して再生します。`,
@@ -196,7 +196,7 @@ export async function recoverPlaybackWithYtDlp(
     }
 
     await player.queue.add(recoveredTrack, 0);
-    await sendRecoveryMessage(
+    logRecoveryMessage(
       client,
       player,
       `⏱ **${downloadedTrack.title}** を外部URL取り込みで復旧し、次に再生するようキュー先頭へ戻しました。`,
@@ -204,7 +204,7 @@ export async function recoverPlaybackWithYtDlp(
     return true;
   } catch (error) {
     console.warn("[music] playback recovery error", error);
-    await sendRecoveryMessage(
+    logRecoveryMessage(
       client,
       player,
       `⚠️ **${trackTitle}** の自動復旧中にエラーが発生しました。`,

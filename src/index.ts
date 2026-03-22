@@ -14,6 +14,7 @@ import { startFileServer } from "./fileserver/fileServer";
 import { initLavalink, waitForLavalinkReady } from "./lavalink";
 import { handleMusicMessage } from "./music";
 import { recoverPlaybackWithYtDlp } from "./music/playbackRecovery";
+import { ensureSingleInstance } from "./utils/singleInstance";
 
 const runtimeConfig = getRuntimeConfig();
 const TOKEN = runtimeConfig.discord.token;
@@ -22,6 +23,8 @@ const nodeStatsLogCounters = new Map<string, number>();
 if (!TOKEN) {
   throw new Error("Missing required environment variable: TOKEN");
 }
+
+ensureSingleInstance();
 
 startFileServer();
 

@@ -10,12 +10,14 @@ const fileServer_1 = require("./fileserver/fileServer");
 const lavalink_1 = require("./lavalink");
 const music_1 = require("./music");
 const playbackRecovery_1 = require("./music/playbackRecovery");
+const singleInstance_1 = require("./utils/singleInstance");
 const runtimeConfig = (0, runtime_1.getRuntimeConfig)();
 const TOKEN = runtimeConfig.discord.token;
 const nodeStatsLogCounters = new Map();
 if (!TOKEN) {
     throw new Error("Missing required environment variable: TOKEN");
 }
+(0, singleInstance_1.ensureSingleInstance)();
 (0, fileServer_1.startFileServer)();
 function getBotVoiceDebugState(client, guildId) {
     const guild = client.guilds.cache.get(guildId);
