@@ -4,24 +4,29 @@ exports.handleTop = handleTop;
 // src/commands/top.ts
 const discord_js_1 = require("discord.js");
 const data_1 = require("../data");
-const bigint_1 = require("../utils/bigint");
 const PAGE_SIZE = 10;
 /** ギルドでは displayName（ニックネーム） → なければ user.tag → 最後にID */
 async function resolveDisplayName(interaction, userId) {
     const g = interaction.guild;
     if (g) {
+        const cachedMember = g.members.cache.get(userId);
+        if (cachedMember?.displayName)
+            return cachedMember.displayName;
         const m = await g.members.fetch(userId).catch(() => null);
         if (m?.displayName)
             return m.displayName;
     }
+    const cachedUser = interaction.client.users.cache.get(userId);
+    if (cachedUser?.tag)
+        return cachedUser.tag;
     const u = await interaction.client.users.fetch(userId).catch(() => null);
     return u?.tag ?? userId;
 }
 /** 指定ページの埋め込みを作る（0-based page） */
-async function buildPageEmbed(interaction, sortedEntries, page) {
-    const totalPages = Math.max(1, Math.ceil(sortedEntries.length / PAGE_SIZE));
+async function buildPageEmbed(interaction, guildId, totalEntries, page) {
+    const totalPages = Math.max(1, Math.ceil(totalEntries / PAGE_SIZE));
     const start = page * PAGE_SIZE;
-    const slice = sortedEntries.slice(start, start + PAGE_SIZE);
+    const slice = (0, data_1.getCountRankingPage)(guildId, start, PAGE_SIZE);
     const lines = await Promise.all(slice.map(async ([userId, count], i) => {
         const rank = start + i + 1;
         const name = await resolveDisplayName(interaction, userId);
@@ -50,7 +55,7 @@ async function handleTop(interaction) {
     if (!interaction.inGuild()) {
         await interaction.reply({
             content: "サーバー内で使ってね。",
-            ephemeral: true,
+            flags: "Ephemeral",
         });
         return;
     }
@@ -58,14 +63,13 @@ async function handleTop(interaction) {
     if (!guildId) {
         await interaction.reply({
             content: "サーバー情報を取得できませんでした。",
-            ephemeral: true,
+            flags: "Ephemeral",
         });
         return;
     }
     await interaction.deferReply();
-    const store = (0, data_1.loadGuildStore)(guildId);
-    const sorted = Object.entries(store.counts).sort((a, b) => (0, bigint_1.compareBigIntDesc)(a[1], b[1]));
-    if (sorted.length === 0) {
+    const totalEntries = (0, data_1.getTrackedUserCount)(guildId);
+    if (totalEntries === 0) {
         await interaction.editReply({
             embeds: [
                 new discord_js_1.EmbedBuilder()
@@ -76,8 +80,8 @@ async function handleTop(interaction) {
         return;
     }
     let page = 0;
-    const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
-    const embed = await buildPageEmbed(interaction, sorted, page);
+    const totalPages = Math.max(1, Math.ceil(totalEntries / PAGE_SIZE));
+    const embed = await buildPageEmbed(interaction, guildId, totalEntries, page);
     const row = buildNavRow(page, totalPages);
     // 一部の環境で InteractionReply の components が取得できないエラーを避けるため、reply → fetchReply の二段
     await interaction.editReply({
@@ -104,7 +108,7 @@ async function handleTop(interaction) {
         const dir = btn.customId === "top_prev" ? -1 : 1;
         page = Math.max(0, Math.min(page + dir, totalPages - 1));
         // ❸ メッセージ編集（Interaction.update は使わない）
-        const newEmbed = await buildPageEmbed(interaction, sorted, page);
+        const newEmbed = await buildPageEmbed(interaction, guildId, totalEntries, page);
         await message.edit({
             embeds: [newEmbed],
             components: [buildNavRow(page, totalPages)],

@@ -1,6 +1,6 @@
 import { type ChatInputCommandInteraction } from "discord.js";
 import { COMMON_MESSAGES } from "../constants/messages";
-import { loadGuildStore } from "../data";
+import { getUserCount } from "../data";
 
 export async function handleCheck(
   interaction: ChatInputCommandInteraction,
@@ -8,7 +8,7 @@ export async function handleCheck(
   if (!interaction.inGuild()) {
     await interaction.reply({
       content: "サーバー内で使用してください。",
-      ephemeral: true,
+      flags: "Ephemeral",
     });
     return;
   }
@@ -17,14 +17,13 @@ export async function handleCheck(
   if (!guildId) {
     await interaction.reply({
       content: COMMON_MESSAGES.guildUnavailable,
-      ephemeral: true,
+      flags: "Ephemeral",
     });
     return;
   }
 
   const target = interaction.options.getUser("user", true);
-  const store = loadGuildStore(guildId);
-  const count = store.counts[target.id] ?? 0n;
+  const count = getUserCount(guildId, target.id);
   const member = await interaction.guild?.members.fetch(target.id).catch(() => null);
   const displayName = member?.displayName ?? target.tag;
 

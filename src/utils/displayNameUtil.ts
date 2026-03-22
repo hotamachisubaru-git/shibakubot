@@ -9,6 +9,11 @@ async function tryFetchGuildDisplayName(
   const guild = interaction.guild;
   if (!guild) return null;
 
+  const cachedMember = guild.members.cache.get(userId);
+  if (cachedMember?.displayName) {
+    return cachedMember.displayName;
+  }
+
   const member = await guild.members.fetch(userId).catch(() => null);
   return member?.displayName ?? null;
 }
@@ -17,6 +22,11 @@ async function tryFetchUserTag(
   interaction: AnyInteraction,
   userId: string,
 ): Promise<string | null> {
+  const cachedUser = interaction.client.users.cache.get(userId);
+  if (cachedUser?.tag) {
+    return cachedUser.tag;
+  }
+
   const user = await interaction.client.users.fetch(userId).catch(() => null);
   return user?.tag ?? null;
 }

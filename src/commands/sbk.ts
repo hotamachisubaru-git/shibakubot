@@ -17,7 +17,7 @@ export async function handleSbk(
   if (!interaction.inGuild()) {
     await interaction.reply({
       content: "サーバー内で使ってね。",
-      ephemeral: true,
+      flags: "Ephemeral",
     });
     return;
   }
@@ -26,7 +26,7 @@ export async function handleSbk(
   if (!guildId) {
     await interaction.reply({
       content: COMMON_MESSAGES.guildUnavailable,
-      ephemeral: true,
+      flags: "Ephemeral",
     });
     return;
   }
@@ -35,7 +35,7 @@ export async function handleSbk(
   if (isBotOrSelfTarget(targetUser, interaction.client.user?.id)) {
     await interaction.reply({
       content: COMMON_MESSAGES.botTargetExcluded,
-      ephemeral: true,
+      flags: "Ephemeral",
     });
     return;
   }
@@ -43,7 +43,7 @@ export async function handleSbk(
   if (isImmune(guildId, targetUser.id) || IMMUNE_IDS.has(targetUser.id)) {
     await interaction.reply({
       content: "このユーザーはしばき免除のため実行できません。",
-      ephemeral: true,
+      flags: "Ephemeral",
     });
     return;
   }
@@ -55,7 +55,7 @@ export async function handleSbk(
   if (countRaw && !/^\d+$/.test(countRaw)) {
     await interaction.reply({
       content: "count は数字で入力してね。",
-      ephemeral: true,
+      flags: "Ephemeral",
     });
     return;
   }

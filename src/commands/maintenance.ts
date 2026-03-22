@@ -25,7 +25,7 @@ export async function handleMaintenance(
   if (!interaction.inGuild()) {
     await interaction.reply({
       content: `⚠️ ${COMMON_MESSAGES.guildOnly}`,
-      ephemeral: true,
+      flags: "Ephemeral",
     });
     return;
   }
@@ -33,7 +33,7 @@ export async function handleMaintenance(
   if (!hasAdminGuildOwnerOrDevPermission(interaction, OWNER_IDS)) {
     await interaction.reply({
       content: "⚠️ 権限がありません。（管理者のみ）",
-      ephemeral: true,
+      flags: "Ephemeral",
     });
     return;
   }
@@ -42,7 +42,7 @@ export async function handleMaintenance(
   if (!guildId) {
     await interaction.reply({
       content: `⚠️ ${COMMON_MESSAGES.guildUnavailable}`,
-      ephemeral: true,
+      flags: "Ephemeral",
     });
     return;
   }
@@ -51,7 +51,7 @@ export async function handleMaintenance(
   if (!mode) {
     await interaction.reply({
       content: "⚠️ mode は on / off を指定してください。",
-      ephemeral: true,
+      flags: "Ephemeral",
     });
     return;
   }
@@ -63,6 +63,6 @@ export async function handleMaintenance(
     content: enabled
       ? "✅ メンテナンスモードを有効化しました。"
       : "✅ メンテナンスモードを無効化しました。",
-    ephemeral: true,
+    flags: "Ephemeral",
   });
 }

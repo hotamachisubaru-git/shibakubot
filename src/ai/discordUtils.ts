@@ -24,7 +24,7 @@ export async function replyInChunks(
   for (const chunk of chunks.slice(1)) {
     await interaction.followUp({
       content: chunk,
-      ephemeral: isPrivate,
+      flags: isPrivate ? "Ephemeral" : undefined,
     });
   }
 }

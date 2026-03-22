@@ -14,7 +14,7 @@ export async function handleImmune(
   if (!interaction.inGuild()) {
     await interaction.reply({
       content: COMMON_MESSAGES.guildOnly,
-      ephemeral: true,
+      flags: "Ephemeral",
     });
     return;
   }
@@ -22,7 +22,7 @@ export async function handleImmune(
   if (!hasAdminOrDevPermission(interaction, OWNER_IDS)) {
     await interaction.reply({
       content: COMMON_MESSAGES.noPermissionAdminOrDev,
-      ephemeral: true,
+      flags: "Ephemeral",
     });
     return;
   }
@@ -31,7 +31,7 @@ export async function handleImmune(
   if (!guildId) {
     await interaction.reply({
       content: COMMON_MESSAGES.guildUnavailable,
-      ephemeral: true,
+      flags: "Ephemeral",
     });
     return;
   }
@@ -43,7 +43,7 @@ export async function handleImmune(
     if (user.bot) {
       await interaction.reply({
         content: "BOTはそもそもしばけません。",
-        ephemeral: true,
+        flags: "Ephemeral",
       });
       return;
     }
@@ -54,7 +54,7 @@ export async function handleImmune(
         ? `\`${user.tag}\` を免除リストに追加しました。`
         : `\`${user.tag}\` はすでに免除リストに存在します。`,
       allowedMentions: { parse: [] },
-      ephemeral: true,
+      flags: "Ephemeral",
     });
     return;
   }
@@ -67,7 +67,7 @@ export async function handleImmune(
         ? `\`${user.tag}\` を免除リストから削除しました。`
         : `\`${user.tag}\` は免除リストにありません。`,
       allowedMentions: { parse: [] },
-      ephemeral: true,
+      flags: "Ephemeral",
     });
     return;
   }
@@ -94,7 +94,7 @@ export async function handleImmune(
         },
       ],
       allowedMentions: { parse: [] },
-      ephemeral: true,
+      flags: "Ephemeral",
     });
   }
 }

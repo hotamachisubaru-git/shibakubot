@@ -383,11 +383,6 @@ export function getRecoverableTrackUrl(track: PendingTrack): string | null {
     return markedSourceUrl;
   }
 
-  const rawUri = track.info.uri?.trim();
-  if (rawUri && shouldAttemptYtDlpFallback(rawUri)) {
-    return rawUri;
-  }
-
   const sourceName = track.info.sourceName?.trim().toLowerCase();
   const identifier = track.info.identifier?.trim();
   if (sourceName === "youtube" && identifier) {
@@ -396,6 +391,11 @@ export function getRecoverableTrackUrl(track: PendingTrack): string | null {
 
   if (sourceName === "youtubemusic" && identifier) {
     return buildYouTubeWatchUrl(identifier);
+  }
+
+  const rawUri = track.info.uri?.trim();
+  if (rawUri && shouldAttemptYtDlpFallback(rawUri)) {
+    return rawUri;
   }
 
   return null;

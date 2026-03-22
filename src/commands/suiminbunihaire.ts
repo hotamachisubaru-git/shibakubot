@@ -13,7 +13,7 @@ export async function handleSuimin(
   if (!interaction.inGuild()) {
     await interaction.reply({
       content: "サーバー内で使ってね。",
-      ephemeral: true,
+      flags: "Ephemeral",
     });
     return;
   }
@@ -22,7 +22,7 @@ export async function handleSuimin(
   if (!guild) {
     await interaction.reply({
       content: "サーバー情報を取得できませんでした。",
-      ephemeral: true,
+      flags: "Ephemeral",
     });
     return;
   }
@@ -33,12 +33,12 @@ export async function handleSuimin(
   if (!isVoiceDestination(destination.type)) {
     await interaction.reply({
       content: "移動先はボイスチャンネルを指定してください。",
-      ephemeral: true,
+      flags: "Ephemeral",
     });
     return;
   }
 
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: "Ephemeral" });
 
   const member = await guild.members.fetch(targetUser.id).catch(() => null);
   if (!member) {

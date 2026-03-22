@@ -23,7 +23,7 @@ export async function handleChatInputInteraction(
   ) {
     await interaction.reply({
       content: "⚠️ 現在メンテナンス中です。しばらくお待ちください。",
-      ephemeral: true,
+      flags: "Ephemeral",
     });
     return;
   }

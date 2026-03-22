@@ -11,7 +11,7 @@ export async function handleVs(
   if (!interaction.inGuild()) {
     await interaction.reply({
       content: COMMON_MESSAGES.guildOnly,
-      ephemeral: true,
+      flags: "Ephemeral",
     });
     return;
   }
@@ -20,7 +20,7 @@ export async function handleVs(
   if (!guildId) {
     await interaction.reply({
       content: COMMON_MESSAGES.guildUnavailable,
-      ephemeral: true,
+      flags: "Ephemeral",
     });
     return;
   }
@@ -28,7 +28,7 @@ export async function handleVs(
   if (!TARGET_GUILD_ID || guildId !== TARGET_GUILD_ID) {
     await interaction.reply({
       content: "このコマンドは対象サーバーでのみ使用できます。",
-      ephemeral: true,
+      flags: "Ephemeral",
     });
     return;
   }
@@ -40,7 +40,7 @@ export async function handleVs(
   if (option1 === option2) {
     await interaction.reply({
       content: "項目1と項目2は別の内容を指定してください。",
-      ephemeral: true,
+      flags: "Ephemeral",
     });
     return;
   }
@@ -62,7 +62,7 @@ export async function handleVs(
     await interaction.followUp({
       content:
         "⚠️ 投票は作成しましたが、リアクション追加に失敗しました。権限を確認してください。",
-      ephemeral: true,
+      flags: "Ephemeral",
     });
   }
 }

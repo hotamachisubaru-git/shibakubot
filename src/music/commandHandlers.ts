@@ -84,7 +84,16 @@ export type HandlePlayOptions = {
 
 const NOW_PLAYING_BAR_SEGMENTS = 16;
 const NOW_PLAYING_COLOR = 0x57f287;
+const SPOTIFY_DEBUG_TRACK_LOG_LIMIT = 5;
+const SPOTIFY_SEARCH_RESULT_LIMIT = 5;
+const SPOTIFY_SEARCH_MIN_SCORE = 45;
 type MusicMetadataModule = typeof import("music-metadata");
+
+type SpotifyDebugContext = Readonly<{
+  guildId: string;
+  channelId: string;
+  userId: string;
+}>;
 
 let musicMetadataModulePromise: Promise<MusicMetadataModule> | null = null;
 
@@ -185,6 +194,128 @@ function truncateText(text: string, maxLength: number): string {
   return `${text.slice(0, Math.max(0, maxLength - 3))}...`;
 }
 
+function createSpotifyDebugContext(message: Message): SpotifyDebugContext {
+  return {
+    guildId: message.guildId ?? "unknown",
+    channelId: message.channelId,
+    userId: message.author.id,
+  };
+}
+
+function logSpotifyDebug(
+  context: SpotifyDebugContext,
+  event: string,
+  details?: Record<string, unknown>,
+): void {
+  const prefix =
+    `[spotify-debug] guild=${context.guildId} ` +
+    `channel=${context.channelId} user=${context.userId} event=${event}`;
+
+  if (details) {
+    console.log(prefix, details);
+    return;
+  }
+
+  console.log(prefix);
+}
+
+function warnSpotifyDebug(
+  context: SpotifyDebugContext,
+  event: string,
+  details?: Record<string, unknown>,
+  error?: unknown,
+): void {
+  const prefix =
+    `[spotify-debug] guild=${context.guildId} ` +
+    `channel=${context.channelId} user=${context.userId} event=${event}`;
+
+  if (details && error !== undefined) {
+    console.warn(prefix, details, error);
+    return;
+  }
+
+  if (details) {
+    console.warn(prefix, details);
+    return;
+  }
+
+  if (error !== undefined) {
+    console.warn(prefix, error);
+    return;
+  }
+
+  console.warn(prefix);
+}
+
+function errorSpotifyDebug(
+  context: SpotifyDebugContext,
+  event: string,
+  details?: Record<string, unknown>,
+  error?: unknown,
+): void {
+  const prefix =
+    `[spotify-debug] guild=${context.guildId} ` +
+    `channel=${context.channelId} user=${context.userId} event=${event}`;
+
+  if (details && error !== undefined) {
+    console.error(prefix, details, error);
+    return;
+  }
+
+  if (details) {
+    console.error(prefix, details);
+    return;
+  }
+
+  if (error !== undefined) {
+    console.error(prefix, error);
+    return;
+  }
+
+  console.error(prefix);
+}
+
+function formatSpotifyDebugQuery(query: string): string {
+  return truncateText(query.trim(), 160);
+}
+
+function formatSpotifyDebugDuration(durationMs: number): string | null {
+  if (!Number.isFinite(durationMs) || durationMs <= 0) {
+    return null;
+  }
+
+  return formatTrackDuration(durationMs) ?? `${durationMs}ms`;
+}
+
+function summarizeSpotifyTrackMetadata(
+  track: SpotifyTrackMetadata,
+): Record<string, unknown> {
+  return {
+    title: track.title,
+    artist: track.artist,
+    duration: formatSpotifyDebugDuration(track.durationMs),
+    spotifyUrl: track.spotifyUrl,
+  };
+}
+
+function summarizePendingTrackForDebug(
+  track: PendingTrack | null | undefined,
+): Record<string, unknown> | null {
+  if (!track) {
+    return null;
+  }
+
+  return {
+    title: getTrackTitle(track),
+    author: track.info?.author ?? null,
+    source: track.info?.sourceName ?? null,
+    identifier: track.info?.identifier ?? null,
+    uri: track.info?.uri ?? null,
+    duration: formatSpotifyDebugDuration(getTrackDurationMs(track)),
+    isStream: isStreamTrack(track),
+  };
+}
+
 function formatNowPlayingTime(ms: number): string {
   if (!Number.isFinite(ms) || ms < 0) return "00:00";
   const totalSeconds = Math.floor(ms / 1000);
@@ -260,6 +391,269 @@ function buildSpotifySearchQuery(track: SpotifyTrackMetadata): string {
   return [track.title, track.artist].filter(Boolean).join(" ").trim();
 }
 
+function buildSpotifySearchQueries(track: SpotifyTrackMetadata): readonly string[] {
+  const query = buildSpotifySearchQuery(track);
+  return [`ytmsearch:${query}`, `ytsearch:${query}`];
+}
+
+function normalizeSpotifyCandidateText(text: string | null | undefined): string {
+  return (text ?? "")
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[(){}\[\]"'`’“”]/g, " ")
+    .replace(/[!?,.:;/\\|@#$%^&*_+=~\-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function compactSpotifyCandidateText(text: string | null | undefined): string {
+  return normalizeSpotifyCandidateText(text).replace(/\s+/g, "");
+}
+
+function splitSpotifyCandidateTerms(text: string | null | undefined): string[] {
+  return normalizeSpotifyCandidateText(text)
+    .split(" ")
+    .map((term) => term.trim())
+    .filter((term) => term.length >= 2);
+}
+
+function scoreSpotifyTextMatch(expected: string, actual: string): number {
+  if (!expected || !actual) {
+    return 0;
+  }
+
+  if (expected === actual) {
+    return 70;
+  }
+
+  if (actual.includes(expected) || expected.includes(actual)) {
+    return 55;
+  }
+
+  const expectedTerms = splitSpotifyCandidateTerms(expected);
+  if (!expectedTerms.length) {
+    return 0;
+  }
+
+  const matchedTerms = expectedTerms.filter((term) => actual.includes(term));
+  if (!matchedTerms.length) {
+    return 0;
+  }
+
+  return Math.round((matchedTerms.length / expectedTerms.length) * 35);
+}
+
+function getSpotifyCandidatePenalty(
+  candidateTitle: string,
+  candidateAuthor: string,
+): { score: number; reasons: string[] } {
+  const haystack = `${candidateTitle} ${candidateAuthor}`;
+  const reasons: string[] = [];
+  let score = 0;
+
+  const heavyPenaltyKeywords = [
+    "shorts",
+    "#shorts",
+    "切り抜き",
+    "mirrativ",
+    "ミラティブ",
+    "reaction",
+    "react",
+  ];
+  for (const keyword of heavyPenaltyKeywords) {
+    if (haystack.includes(keyword)) {
+      score -= 80;
+      reasons.push(`penalty:${keyword}`);
+      break;
+    }
+  }
+
+  const mediumPenaltyKeywords = [
+    "cover",
+    "歌ってみた",
+    "ライブ",
+    "live",
+    "remix",
+    "nightcore",
+    "slowed",
+    "sped up",
+    "instrumental",
+    "karaoke",
+  ];
+  for (const keyword of mediumPenaltyKeywords) {
+    if (haystack.includes(keyword)) {
+      score -= 25;
+      reasons.push(`penalty:${keyword}`);
+      break;
+    }
+  }
+
+  return { score, reasons };
+}
+
+function scoreSpotifySearchCandidate(
+  spotifyTrack: SpotifyTrackMetadata,
+  candidate: PendingTrack,
+  query: string,
+): { score: number; reasons: string[] } {
+  const reasons: string[] = [];
+  let score = 0;
+
+  const expectedTitleCompact = compactSpotifyCandidateText(spotifyTrack.title);
+  const expectedArtistCompact = compactSpotifyCandidateText(spotifyTrack.artist);
+  const candidateTitleRaw = getTrackTitle(candidate);
+  const candidateAuthorRaw = candidate.info?.author ?? "";
+  const candidateTitleCompact = compactSpotifyCandidateText(candidateTitleRaw);
+  const candidateAuthorCompact = compactSpotifyCandidateText(candidateAuthorRaw);
+
+  const titleScore = scoreSpotifyTextMatch(
+    expectedTitleCompact,
+    candidateTitleCompact,
+  );
+  score += titleScore;
+  if (titleScore > 0) {
+    reasons.push(`title:${titleScore}`);
+  }
+
+  const artistScore = Math.max(
+    scoreSpotifyTextMatch(expectedArtistCompact, candidateAuthorCompact),
+    scoreSpotifyTextMatch(expectedArtistCompact, candidateTitleCompact),
+  );
+  score += artistScore;
+  if (artistScore > 0) {
+    reasons.push(`artist:${artistScore}`);
+  }
+
+  const durationMs = getTrackDurationMs(candidate);
+  const durationDiffMs = Math.abs(durationMs - spotifyTrack.durationMs);
+  if (Number.isFinite(durationMs) && durationMs > 0) {
+    if (durationDiffMs <= 2_000) {
+      score += 35;
+      reasons.push("duration:35");
+    } else if (durationDiffMs <= 5_000) {
+      score += 25;
+      reasons.push("duration:25");
+    } else if (durationDiffMs <= 10_000) {
+      score += 10;
+      reasons.push("duration:10");
+    } else if (durationDiffMs > 60_000) {
+      score -= 35;
+      reasons.push("duration:-35");
+    } else if (durationDiffMs > 30_000) {
+      score -= 15;
+      reasons.push("duration:-15");
+    }
+  }
+
+  if (candidate.info?.sourceName === "youtube") {
+    score += 10;
+    reasons.push("source:youtube");
+  }
+
+  if (query.startsWith("ytmsearch:")) {
+    score += 8;
+    reasons.push("query:ytmsearch");
+  }
+
+  const penalty = getSpotifyCandidatePenalty(
+    normalizeSpotifyCandidateText(candidateTitleRaw),
+    normalizeSpotifyCandidateText(candidateAuthorRaw),
+  );
+  score += penalty.score;
+  reasons.push(...penalty.reasons);
+
+  return { score, reasons };
+}
+
+async function resolveSpotifyTrackCandidate(
+  player: Player,
+  spotifyTrack: SpotifyTrackMetadata,
+  requester: Message["author"],
+  debugContext: SpotifyDebugContext,
+  index: number,
+  totalTracks: number,
+): Promise<PendingTrack | null> {
+  const searchQueries = buildSpotifySearchQueries(spotifyTrack);
+  const scoredCandidates: Array<{
+    track: PendingTrack;
+    query: string;
+    score: number;
+    reasons: string[];
+  }> = [];
+
+  for (const searchQuery of searchQueries) {
+    const result = await searchTracks(player, searchQuery, requester);
+    const candidates = result?.tracks?.slice(0, SPOTIFY_SEARCH_RESULT_LIMIT) ?? [];
+    if (!candidates.length) {
+      warnSpotifyDebug(debugContext, "search-query-empty", {
+        index,
+        totalTracks,
+        searchQuery: formatSpotifyDebugQuery(searchQuery),
+      });
+      continue;
+    }
+
+    for (const candidate of candidates) {
+      const { score, reasons } = scoreSpotifySearchCandidate(
+        spotifyTrack,
+        candidate,
+        searchQuery,
+      );
+      scoredCandidates.push({
+        track: candidate,
+        query: searchQuery,
+        score,
+        reasons,
+      });
+    }
+  }
+
+  if (!scoredCandidates.length) {
+    return null;
+  }
+
+  scoredCandidates.sort((left, right) => right.score - left.score);
+  const best = scoredCandidates[0];
+
+  logSpotifyDebug(debugContext, "search-candidates", {
+    index,
+    totalTracks,
+    topCandidates: scoredCandidates.slice(0, 3).map((candidate) => ({
+      score: candidate.score,
+      query: formatSpotifyDebugQuery(candidate.query),
+      reasons: candidate.reasons,
+      track: summarizePendingTrackForDebug(candidate.track),
+    })),
+  });
+
+  if (best.score < SPOTIFY_SEARCH_MIN_SCORE) {
+    warnSpotifyDebug(debugContext, "search-low-confidence", {
+      index,
+      totalTracks,
+      minimumScore: SPOTIFY_SEARCH_MIN_SCORE,
+      bestScore: best.score,
+      bestCandidate: {
+        query: formatSpotifyDebugQuery(best.query),
+        reasons: best.reasons,
+        track: summarizePendingTrackForDebug(best.track),
+      },
+      spotifyTrack: summarizeSpotifyTrackMetadata(spotifyTrack),
+    });
+    return null;
+  }
+
+  logSpotifyDebug(debugContext, "search-selected", {
+    index,
+    totalTracks,
+    score: best.score,
+    query: formatSpotifyDebugQuery(best.query),
+    reasons: best.reasons,
+    track: summarizePendingTrackForDebug(best.track),
+  });
+
+  return best.track;
+}
+
 function getSpotifyTypeLabel(type: "track" | "album" | "playlist"): string {
   switch (type) {
     case "track":
@@ -290,7 +684,14 @@ async function searchTracks(
   try {
     return await player.search({ query: searchQuery }, requester);
   } catch (error) {
-    console.warn("[music] search error", error);
+    console.warn(
+      "[music] search error",
+      {
+        requesterId: requester.id,
+        query: formatSpotifyDebugQuery(searchQuery),
+      },
+      error,
+    );
     return null;
   }
 }
@@ -306,22 +707,51 @@ async function handleSpotifyPlay(
 
   const guildId = message.guildId;
   if (!guildId) return true;
+  const debugContext = createSpotifyDebugContext(message);
 
   clearPendingSearch(message);
+
+  logSpotifyDebug(debugContext, "received-input", {
+    query: formatSpotifyDebugQuery(query),
+    playerConnected: player.connected,
+    playerPlaying: player.playing,
+    playerPaused: player.paused,
+    queueSize: player.queue.tracks.length,
+  });
 
   let spotifyResolution = null;
   try {
     spotifyResolution = await resolveSpotifyInput(query);
   } catch (error) {
-    console.warn("[music] spotify resolve error", error);
+    warnSpotifyDebug(
+      debugContext,
+      "resolve-error",
+      {
+        query: formatSpotifyDebugQuery(query),
+      },
+      error,
+    );
   }
 
   if (!spotifyResolution?.tracks.length) {
+    warnSpotifyDebug(debugContext, "resolve-empty", {
+      query: formatSpotifyDebugQuery(query),
+    });
     await message.reply(
       "⚠️ Spotify の公開トラック/アルバム/プレイリストを解決できませんでした。URL か URI を確認してください。",
     );
     return true;
   }
+
+  const totalSpotifyTracks = spotifyResolution.tracks.length;
+  logSpotifyDebug(debugContext, "resolved", {
+    query: formatSpotifyDebugQuery(query),
+    sourceUrl: spotifyResolution.sourceUrl,
+    type: spotifyResolution.type,
+    title: spotifyResolution.title,
+    totalTracks: totalSpotifyTracks,
+    truncated: spotifyResolution.truncated,
+  });
 
   const ngWords = getMusicNgWords(guildId);
   const wasIdle = !player.playing && !player.paused;
@@ -332,17 +762,43 @@ async function handleSpotifyPlay(
   let lastQueuePosition: number | null = null;
   let firstFailureMessage: string | null = null;
 
-  for (const spotifyTrack of spotifyResolution.tracks) {
-    const searchQuery = `ytsearch:${buildSpotifySearchQuery(spotifyTrack)}`;
-    const resolvedTrack = await searchPlayableTrack(
+  for (const [index, spotifyTrack] of spotifyResolution.tracks.entries()) {
+    const shouldLogTrackDetail =
+      totalSpotifyTracks <= SPOTIFY_DEBUG_TRACK_LOG_LIMIT ||
+      index < SPOTIFY_DEBUG_TRACK_LOG_LIMIT;
+    if (shouldLogTrackDetail) {
+      logSpotifyDebug(debugContext, "search-start", {
+        index: index + 1,
+        totalTracks: totalSpotifyTracks,
+        searchQuery: formatSpotifyDebugQuery(
+          buildSpotifySearchQuery(spotifyTrack),
+        ),
+        spotifyTrack: summarizeSpotifyTrackMetadata(spotifyTrack),
+      });
+    } else if (index === SPOTIFY_DEBUG_TRACK_LOG_LIMIT) {
+      logSpotifyDebug(debugContext, "search-log-truncated", {
+        totalTracks: totalSpotifyTracks,
+        omittedDetailedLogs: totalSpotifyTracks - SPOTIFY_DEBUG_TRACK_LOG_LIMIT,
+      });
+    }
+
+    const resolvedTrack = await resolveSpotifyTrackCandidate(
       player,
-      searchQuery,
+      spotifyTrack,
       message.author,
+      debugContext,
+      index + 1,
+      totalSpotifyTracks,
     );
     if (!resolvedTrack) {
       skippedCount += 1;
       firstFailureMessage ??=
         "🔍 Spotify の曲に対応する再生候補が見つかりませんでした…。";
+      warnSpotifyDebug(debugContext, "search-no-result", {
+        index: index + 1,
+        totalTracks: totalSpotifyTracks,
+        spotifyTrack: summarizeSpotifyTrackMetadata(spotifyTrack),
+      });
       continue;
     }
 
@@ -357,6 +813,12 @@ async function handleSpotifyPlay(
     if (validation.errorMessage) {
       skippedCount += 1;
       firstFailureMessage ??= validation.errorMessage;
+      warnSpotifyDebug(debugContext, "queue-validation-failed", {
+        index: index + 1,
+        totalTracks: totalSpotifyTracks,
+        reason: validation.errorMessage,
+        resolvedTrack: summarizePendingTrackForDebug(resolvedTrack),
+      });
       continue;
     }
 
@@ -370,9 +832,23 @@ async function handleSpotifyPlay(
       firstAddedTitle = getTrackTitle(resolvedTrack);
     }
     lastQueuePosition = player.queue.tracks.length;
+
+    if (shouldLogTrackDetail) {
+      logSpotifyDebug(debugContext, "queue-added", {
+        index: index + 1,
+        totalTracks: totalSpotifyTracks,
+        queuePosition: lastQueuePosition,
+        resolvedTrack: summarizePendingTrackForDebug(resolvedTrack),
+      });
+    }
   }
 
   if (!addedCount) {
+    warnSpotifyDebug(debugContext, "queue-empty-after-search", {
+      totalTracks: totalSpotifyTracks,
+      skippedCount,
+      firstFailureMessage,
+    });
     await message.reply(
       firstFailureMessage ??
         "🔍 Spotify から再生できる曲を見つけられませんでした…。",
@@ -381,7 +857,26 @@ async function handleSpotifyPlay(
   }
 
   if (wasIdle) {
-    await player.play();
+    try {
+      await player.play();
+      logSpotifyDebug(debugContext, "play-started", {
+        currentTrack: summarizePendingTrackForDebug(player.queue.current),
+        queueSize: player.queue.tracks.length,
+      });
+    } catch (error) {
+      errorSpotifyDebug(
+        debugContext,
+        "play-start-failed",
+        {
+          addedCount,
+          skippedCount,
+          queueSize: player.queue.tracks.length,
+          currentTrack: summarizePendingTrackForDebug(player.queue.current),
+        },
+        error,
+      );
+      throw error;
+    }
   }
 
   const lines: string[] = [];
@@ -418,6 +913,17 @@ async function handleSpotifyPlay(
       `⚠️ ${unknownDurationCount} 曲は長さを取得できないため、最大 ${MAX_TRACK_MINUTES} 分で自動停止します。`,
     );
   }
+
+  logSpotifyDebug(debugContext, "completed", {
+    type: spotifyResolution.type,
+    title: spotifyResolution.title,
+    addedCount,
+    skippedCount,
+    unknownDurationCount,
+    wasIdle,
+    queueSize: player.queue.tracks.length,
+    currentTrack: summarizePendingTrackForDebug(player.queue.current),
+  });
 
   await message.reply(lines.join("\n"));
   return true;

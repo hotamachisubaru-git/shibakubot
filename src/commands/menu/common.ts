@@ -12,7 +12,7 @@ import {
   ModalSubmitInteraction,
   MessageComponentInteraction,
 } from "discord.js";
-import { loadGuildStore } from "../../data";
+import { getAllCounts, getTopCountEntries } from "../../data";
 import { getRuntimeConfig } from "../../config/runtime";
 import { COMMON_MESSAGES } from "../../constants/messages";
 import { SETTING_KEYS } from "../../constants/settings";
@@ -328,8 +328,7 @@ export async function guildTopEmbed(
       .setDescription(UNKNOWN_GUILD_MESSAGE);
   }
 
-  const store = loadGuildStore(gid);
-  const entries = Object.entries(store.counts);
+  const entries = getTopCountEntries(gid, PAGE_SIZE);
 
   if (!entries.length) {
     return new EmbedBuilder()
@@ -339,8 +338,6 @@ export async function guildTopEmbed(
 
   const lines = await Promise.all(
     entries
-      .sort((a, b) => compareBigIntDesc(a[1], b[1]))
-      .slice(0, PAGE_SIZE)
       .map(async ([uid, cnt], idx) => {
         const name = await displayNameFrom(i, uid);
         return `#${idx + 1} ${name} × **${formatCountWithReading(cnt)}**`;
@@ -377,7 +374,7 @@ export async function guildMembersEmbed(
       .setDescription(UNKNOWN_GUILD_MESSAGE);
   }
 
-  const store = loadGuildStore(gid);
+  const counts = getAllCounts(gid);
   const { members } = await fetchGuildMembersSafe(guild);
   const humans = members.filter((m) => !m.user.bot);
 
@@ -385,7 +382,7 @@ export async function guildMembersEmbed(
     humans.map(async (m) => ({
       tag: m.displayName || m.user.tag,
       id: m.id,
-      count: store.counts[m.id] ?? 0n,
+      count: counts[m.id] ?? 0n,
     })),
   );
 
@@ -553,7 +550,7 @@ export async function requireAdminOrDev(
   message = "この操作は管理者/開発者のみ利用できます。",
 ): Promise<boolean> {
   if (!hasAdminOrDevPermission(i, OWNER_IDS)) {
-    await i.reply({ content: `⚠️ ${message}`, ephemeral: true });
+    await i.reply({ content: `⚠️ ${message}`, flags: "Ephemeral" });
     return false;
   }
   return true;

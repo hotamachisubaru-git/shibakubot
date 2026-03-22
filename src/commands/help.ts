@@ -21,5 +21,5 @@ export async function handleHelp(
     .setFooter({ text: HELP_FOOTER })
     .setColor(HELP_COLOR);
 
-  await interaction.reply({ embeds: [embed], ephemeral: true });
+  await interaction.reply({ embeds: [embed], flags: "Ephemeral" });
 }

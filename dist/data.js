@@ -5,11 +5,17 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.openDb = openDb;
 exports.getAllCounts = getAllCounts;
+exports.getUserCount = getUserCount;
+exports.getTrackedUserCount = getTrackedUserCount;
+exports.getCountRankingPage = getCountRankingPage;
+exports.getTopCountEntries = getTopCountEntries;
 exports.getImmuneList = getImmuneList;
+exports.getGuildStatsSnapshot = getGuildStatsSnapshot;
 exports.getRecentLogs = getRecentLogs;
 exports.getLogCount = getLogCount;
 exports.addCountGuild = addCountGuild;
 exports.setCountGuild = setCountGuild;
+exports.resetAllCounts = resetAllCounts;
 exports.addImmuneId = addImmuneId;
 exports.removeImmuneId = removeImmuneId;
 exports.isImmune = isImmune;
@@ -27,8 +33,10 @@ exports.setMusicEnabled = setMusicEnabled;
 exports.getMaintenanceEnabled = getMaintenanceEnabled;
 exports.setMaintenanceEnabled = setMaintenanceEnabled;
 exports.setSbkRange = setSbkRange;
+exports.getGuildDbInfo = getGuildDbInfo;
+exports.checkpointGuildDb = checkpointGuildDb;
+exports.vacuumGuildDb = vacuumGuildDb;
 exports.loadGuildStore = loadGuildStore;
-// src/data.ts
 const node_fs_1 = __importDefault(require("node:fs"));
 const node_path_1 = __importDefault(require("node:path"));
 const better_sqlite3_1 = __importDefault(require("better-sqlite3"));
@@ -37,6 +45,7 @@ const paths_1 = require("./constants/paths");
 const settings_1 = require("./constants/settings");
 const BIGINT_RE = /^-?\d+$/;
 const runtimeConfig = (0, runtime_1.getRuntimeConfig)();
+const guildDbContexts = new Map();
 function hasTextAffinity(type) {
     const t = (type ?? "").toUpperCase();
     return t.includes("TEXT") || t.includes("CHAR") || t.includes("CLOB");
@@ -77,6 +86,13 @@ function parseSettingBoolean(raw, fallback) {
         return fallback;
     return raw.toLowerCase() === "true";
 }
+function sumCounts(counts) {
+    let total = 0n;
+    for (const value of Object.values(counts)) {
+        total += value;
+    }
+    return total;
+}
 // ---------- パス系 ----------
 const DATA_DIR = paths_1.GUILD_DB_ROOT;
 function ensureDir(p) {
@@ -89,7 +105,6 @@ function dbPath(gid) {
 }
 // ---------- スキーマ & マイグレ ----------
 function ensureSchema(db) {
-    // 期待する各テーブルを作成
     db.exec(`
     CREATE TABLE IF NOT EXISTS counts (
       userId TEXT PRIMARY KEY,
@@ -120,9 +135,7 @@ function ensureSchema(db) {
       value  TEXT,
       PRIMARY KEY (userId, key)
     );
-
   `);
-    // counts の列チェック（legacy: user / username → userId）
     let cols = db.prepare(`PRAGMA table_info(counts)`).all();
     const hasUserId = cols.some((c) => c.name === "userId");
     const hasUser = cols.some((c) => c.name === "user");
@@ -185,127 +198,284 @@ function ensureSchema(db) {
         })();
     }
 }
-// ---------- DB open (これだけを使う) ----------
+function buildStatements(db) {
+    return {
+        selectAllCounts: db.prepare(`SELECT userId, count FROM counts`),
+        selectCountByUser: db.prepare(`SELECT count FROM counts WHERE userId=?`),
+        upsertCount: db.prepare(`
+      INSERT INTO counts(userId, count) VALUES(?, ?)
+      ON CONFLICT(userId) DO UPDATE SET count = excluded.count
+    `),
+        resetAllCounts: db.prepare(`UPDATE counts SET count='0'`),
+        countTrackedUsers: db.prepare(`SELECT COUNT(*) AS count FROM counts`),
+        // count は TEXT 管理なので、非負整数である前提で桁数 -> 文字列の順に並べる。
+        selectRankedCountsPage: db.prepare(`
+      SELECT userId, count
+      FROM counts
+      ORDER BY LENGTH(count) DESC, count DESC, userId ASC
+      LIMIT ? OFFSET ?
+    `),
+        selectAllImmuneIds: db.prepare(`SELECT userId FROM immune`),
+        selectImmuneId: db.prepare(`SELECT userId FROM immune WHERE userId=?`),
+        insertImmuneId: db.prepare(`INSERT OR IGNORE INTO immune(userId) VALUES(?)`),
+        deleteImmuneId: db.prepare(`DELETE FROM immune WHERE userId=?`),
+        countImmuneIds: db.prepare(`SELECT COUNT(*) AS count FROM immune`),
+        selectSetting: db.prepare(`SELECT value FROM settings WHERE key=?`),
+        upsertSetting: db.prepare(`
+      INSERT INTO settings(key, value) VALUES(?, ?)
+      ON CONFLICT(key) DO UPDATE SET value=excluded.value
+    `),
+        deleteSetting: db.prepare(`DELETE FROM settings WHERE key=?`),
+        selectRecentLogs: db.prepare(`
+      SELECT id, at, actor, target, reason, delta
+      FROM logs
+      ORDER BY id DESC
+      LIMIT ?
+    `),
+        countLogs: db.prepare(`SELECT COUNT(*) AS count FROM logs`),
+        insertLog: db.prepare(`
+      INSERT INTO logs(at, actor, target, reason, delta)
+      VALUES(?,?,?,?,?)
+    `),
+        countSettings: db.prepare(`SELECT COUNT(*) AS count FROM settings`),
+        selectMusicVolume: db.prepare(`
+      SELECT value
+      FROM user_music_settings
+      WHERE userId=? AND key=?
+    `),
+        upsertMusicVolume: db.prepare(`
+      INSERT INTO user_music_settings(userId, key, value) VALUES(?, ?, ?)
+      ON CONFLICT(userId, key) DO UPDATE SET value = excluded.value
+    `),
+    };
+}
+// ---------- DB open ----------
 function openDb(gid) {
     const db = new better_sqlite3_1.default(dbPath(gid));
     db.pragma("journal_mode = WAL");
     ensureSchema(db);
     return db;
 }
-// ---------- 読み取り ----------
-function getAllCounts(gid) {
+function createGuildDbContext(gid) {
     const db = openDb(gid);
-    const rows = db.prepare(`SELECT userId, count FROM counts`).all();
+    return {
+        db,
+        statements: buildStatements(db),
+        settingsCache: new Map(),
+        countsCache: null,
+        immuneCache: null,
+    };
+}
+function getGuildDbContext(gid) {
+    const existing = guildDbContexts.get(gid);
+    if (existing) {
+        return existing;
+    }
+    const created = createGuildDbContext(gid);
+    guildDbContexts.set(gid, created);
+    return created;
+}
+function closeGuildDbContext(gid) {
+    const existing = guildDbContexts.get(gid);
+    if (!existing)
+        return;
+    guildDbContexts.delete(gid);
+    try {
+        existing.db.close();
+    }
+    catch {
+        // noop
+    }
+}
+function closeAllGuildDbContexts() {
+    for (const gid of [...guildDbContexts.keys()]) {
+        closeGuildDbContext(gid);
+    }
+}
+process.once("exit", () => {
+    closeAllGuildDbContexts();
+});
+function loadCountsCache(context) {
+    if (context.countsCache) {
+        return context.countsCache;
+    }
     const map = {};
-    for (const r of rows)
-        map[r.userId] = coerceBigInt(r.count);
+    const rows = context.statements.selectAllCounts.all();
+    for (const row of rows) {
+        map[row.userId] = coerceBigInt(row.count);
+    }
+    context.countsCache = map;
     return map;
 }
-function getImmuneList(gid) {
+function loadImmuneCache(context) {
+    if (context.immuneCache) {
+        return context.immuneCache;
+    }
+    const ids = new Set();
+    const rows = context.statements.selectAllImmuneIds.all();
+    for (const row of rows) {
+        ids.add(row.userId);
+    }
+    context.immuneCache = ids;
+    return ids;
+}
+function getCountRow(context, userId) {
+    const row = context.statements.selectCountByUser.get(userId);
+    return coerceBigInt(row?.count);
+}
+function runGuildMaintenance(gid, task) {
+    closeGuildDbContext(gid);
     const db = openDb(gid);
-    const rows = db.prepare(`SELECT userId FROM immune`).all();
-    return rows.map((r) => r.userId);
+    try {
+        return task(db);
+    }
+    finally {
+        db.close();
+    }
+}
+// ---------- 読み取り ----------
+function getAllCounts(gid) {
+    const counts = loadCountsCache(getGuildDbContext(gid));
+    return { ...counts };
+}
+function getUserCount(gid, userId) {
+    const context = getGuildDbContext(gid);
+    if (context.countsCache) {
+        return context.countsCache[userId] ?? 0n;
+    }
+    return getCountRow(context, userId);
+}
+function getTrackedUserCount(gid) {
+    const context = getGuildDbContext(gid);
+    if (context.countsCache) {
+        return Object.keys(context.countsCache).length;
+    }
+    const row = context.statements.countTrackedUsers.get();
+    return row?.count ?? 0;
+}
+function getCountRankingPage(gid, offset, limit) {
+    const context = getGuildDbContext(gid);
+    const rows = context.statements.selectRankedCountsPage.all(limit, offset);
+    return rows.map((row) => [row.userId, coerceBigInt(row.count)]);
+}
+function getTopCountEntries(gid, limit) {
+    return getCountRankingPage(gid, 0, limit);
+}
+function getImmuneList(gid) {
+    return [...loadImmuneCache(getGuildDbContext(gid))];
+}
+function getGuildStatsSnapshot(gid) {
+    const context = getGuildDbContext(gid);
+    const counts = loadCountsCache(context);
+    const immune = loadImmuneCache(context);
+    return {
+        total: sumCounts(counts),
+        members: Object.keys(counts).length,
+        immune: immune.size,
+    };
 }
 // ---------- ログ ----------
 function getRecentLogs(gid, limit = 20) {
-    const db = openDb(gid);
-    const rows = db
-        .prepare(`
-    SELECT id, at, actor, target, reason, delta
-    FROM logs
-    ORDER BY id DESC
-    LIMIT ?
-  `)
-        .all(limit);
+    const context = getGuildDbContext(gid);
+    const rows = context.statements.selectRecentLogs.all(limit);
     return rows.map((row) => ({
         ...row,
         delta: coerceBigInt(row.delta),
     }));
 }
 function getLogCount(gid) {
-    const db = openDb(gid);
-    const row = db.prepare(`SELECT COUNT(*) AS count FROM logs`).get();
+    const context = getGuildDbContext(gid);
+    const row = context.statements.countLogs.get();
     return row?.count ?? 0;
 }
 // ---------- 書き込み ----------
 function addCountGuild(gid, userId, by = 1, actor, reason) {
-    const db = openDb(gid);
-    const tx = db.transaction(() => {
+    const context = getGuildDbContext(gid);
+    const tx = context.db.transaction(() => {
         const delta = toBigIntInput(by);
-        const currentRow = db
-            .prepare(`SELECT count FROM counts WHERE userId=?`)
-            .get(userId);
-        const current = coerceBigInt(currentRow?.count);
+        const current = context.countsCache
+            ? (context.countsCache[userId] ?? 0n)
+            : getCountRow(context, userId);
         const next = current + delta;
-        db.prepare(`
-      INSERT INTO counts(userId, count) VALUES(?, ?)
-      ON CONFLICT(userId) DO UPDATE SET count = excluded.count
-    `).run(userId, toDbText(next));
-        db.prepare(`
-      INSERT INTO logs(at, actor, target, reason, delta)
-      VALUES(?,?,?,?,?)
-    `).run(Date.now(), actor ?? null, userId, reason ?? null, toDbText(delta));
+        context.statements.upsertCount.run(userId, toDbText(next));
+        context.statements.insertLog.run(Date.now(), actor ?? null, userId, reason ?? null, toDbText(delta));
+        if (context.countsCache) {
+            context.countsCache[userId] = next;
+        }
         return next;
     });
     return tx();
 }
 function setCountGuild(gid, userId, value) {
-    const db = openDb(gid);
+    const context = getGuildDbContext(gid);
     const next = toBigIntInput(value);
     const clamped = next < 0n ? 0n : next;
-    db.prepare(`
-    INSERT INTO counts(userId, count) VALUES(?, ?)
-    ON CONFLICT(userId) DO UPDATE SET count = excluded.count
-  `).run(userId, toDbText(clamped));
-    const row = db
-        .prepare(`SELECT count FROM counts WHERE userId=?`)
-        .get(userId);
-    return row ? coerceBigInt(row.count) : clamped;
+    context.statements.upsertCount.run(userId, toDbText(clamped));
+    if (context.countsCache) {
+        context.countsCache[userId] = clamped;
+    }
+    return clamped;
+}
+function resetAllCounts(gid) {
+    const context = getGuildDbContext(gid);
+    context.statements.resetAllCounts.run();
+    if (!context.countsCache) {
+        return;
+    }
+    for (const userId of Object.keys(context.countsCache)) {
+        context.countsCache[userId] = 0n;
+    }
 }
 // ---------- 免除 ----------
 function addImmuneId(gid, userId) {
-    const db = openDb(gid);
-    return (db.prepare(`INSERT OR IGNORE INTO immune(userId) VALUES(?)`).run(userId)
-        .changes > 0);
+    const context = getGuildDbContext(gid);
+    const added = context.statements.insertImmuneId.run(userId).changes > 0;
+    if (added && context.immuneCache) {
+        context.immuneCache.add(userId);
+    }
+    return added;
 }
 function removeImmuneId(gid, userId) {
-    const db = openDb(gid);
-    return (db.prepare(`DELETE FROM immune WHERE userId=?`).run(userId).changes > 0);
+    const context = getGuildDbContext(gid);
+    const removed = context.statements.deleteImmuneId.run(userId).changes > 0;
+    if (removed && context.immuneCache) {
+        context.immuneCache.delete(userId);
+    }
+    return removed;
 }
 function isImmune(gid, userId) {
-    const db = openDb(gid);
-    return !!db.prepare(`SELECT 1 FROM immune WHERE userId=?`).get(userId);
+    const context = getGuildDbContext(gid);
+    if (context.immuneCache) {
+        return context.immuneCache.has(userId);
+    }
+    return !!context.statements.selectImmuneId.get(userId);
 }
-// ---------- しばく回数の範囲 ----------
+// ---------- 設定 ----------
 const SBK_MIN_DEFAULT = runtimeConfig.sbk.min;
-const SBK_MAX_DEFAULT = runtimeConfig.sbk.max; // 初期値としてだけ使う
+const SBK_MAX_DEFAULT = runtimeConfig.sbk.max;
 function getSetting(gid, key) {
-    const db = openDb(gid);
-    const row = db.prepare(`SELECT value FROM settings WHERE key=?`).get(key);
-    return row?.value ?? null;
+    const context = getGuildDbContext(gid);
+    if (context.settingsCache.has(key)) {
+        return context.settingsCache.get(key) ?? null;
+    }
+    const row = context.statements.selectSetting.get(key);
+    const value = row?.value ?? null;
+    context.settingsCache.set(key, value);
+    return value;
 }
 function setSetting(gid, key, value) {
-    const db = openDb(gid);
+    const context = getGuildDbContext(gid);
     if (value === null) {
-        db.prepare(`DELETE FROM settings WHERE key=?`).run(key);
+        context.statements.deleteSetting.run(key);
+        context.settingsCache.set(key, null);
         return;
     }
-    db.prepare(`
-    INSERT INTO settings(key, value) VALUES(?, ?)
-    ON CONFLICT(key) DO UPDATE SET value=excluded.value
-  `).run(key, value);
+    context.statements.upsertSetting.run(key, value);
+    context.settingsCache.set(key, value);
 }
 function getSbkRange(gid) {
-    const db = openDb(gid);
-    const minRow = db
-        .prepare(`SELECT value FROM settings WHERE key=?`)
-        .get(settings_1.SETTING_KEYS.sbkMin);
-    const maxRow = db
-        .prepare(`SELECT value FROM settings WHERE key=?`)
-        .get(settings_1.SETTING_KEYS.sbkMax);
-    let min = Number(minRow?.value ?? SBK_MIN_DEFAULT);
-    let max = Number(maxRow?.value ?? SBK_MAX_DEFAULT);
-    // 数値チェック & 下限だけ守る（1以上・max は min 以上）
+    let min = Number(getSetting(gid, settings_1.SETTING_KEYS.sbkMin) ?? SBK_MIN_DEFAULT);
+    let max = Number(getSetting(gid, settings_1.SETTING_KEYS.sbkMax) ?? SBK_MAX_DEFAULT);
     if (!Number.isFinite(min) || min < 1)
         min = SBK_MIN_DEFAULT;
     if (!Number.isFinite(max) || max < min)
@@ -319,22 +489,17 @@ const MUSIC_VOL_DEFAULT = runtimeConfig.music.fixedVolume;
 const MUSIC_VOL_MIN = 0;
 const MUSIC_VOL_MAX = 20;
 function getUserMusicVolume(gid, userId) {
-    const db = openDb(gid);
-    const row = db
-        .prepare(`SELECT value FROM user_music_settings WHERE userId=? AND key=?`)
-        .get(userId, settings_1.SETTING_KEYS.musicVolume);
+    const context = getGuildDbContext(gid);
+    const row = context.statements.selectMusicVolume.get(userId, settings_1.SETTING_KEYS.musicVolume);
     const v = Number(row?.value ?? MUSIC_VOL_DEFAULT);
     if (!Number.isFinite(v))
         return MUSIC_VOL_DEFAULT;
     return Math.min(MUSIC_VOL_MAX, Math.max(MUSIC_VOL_MIN, Math.round(v)));
 }
 function setUserMusicVolume(gid, userId, vol) {
-    const db = openDb(gid);
+    const context = getGuildDbContext(gid);
     const clamped = Math.min(MUSIC_VOL_MAX, Math.max(MUSIC_VOL_MIN, Math.round(vol)));
-    db.prepare(`
-    INSERT INTO user_music_settings(userId, key, value) VALUES(?, ?, ?)
-    ON CONFLICT(userId, key) DO UPDATE SET value = excluded.value
-  `).run(userId, settings_1.SETTING_KEYS.musicVolume, String(clamped));
+    context.statements.upsertMusicVolume.run(userId, settings_1.SETTING_KEYS.musicVolume, String(clamped));
     return clamped;
 }
 // ---------- 音楽 NG ワード ----------
@@ -402,21 +567,52 @@ function setMaintenanceEnabled(gid, enabled) {
     setSetting(gid, settings_1.SETTING_KEYS.maintenanceEnabled, enabled ? "true" : "false");
 }
 function setSbkRange(gid, min, max) {
-    const db = openDb(gid);
+    const context = getGuildDbContext(gid);
     const normalizedMin = Number.isFinite(min) && min >= 1 ? Math.floor(min) : SBK_MIN_DEFAULT;
     const normalizedMaxCandidate = Number.isFinite(max) ? Math.floor(max) : normalizedMin;
     const normalizedMax = Math.max(normalizedMin, normalizedMaxCandidate);
-    db.transaction(() => {
-        db.prepare(`
-      INSERT INTO settings(key, value) VALUES(?, ?)
-      ON CONFLICT(key) DO UPDATE SET value=excluded.value
-    `).run(settings_1.SETTING_KEYS.sbkMin, String(normalizedMin));
-        db.prepare(`
-      INSERT INTO settings(key, value) VALUES(?, ?)
-      ON CONFLICT(key) DO UPDATE SET value=excluded.value
-    `).run(settings_1.SETTING_KEYS.sbkMax, String(normalizedMax));
+    context.db.transaction(() => {
+        context.statements.upsertSetting.run(settings_1.SETTING_KEYS.sbkMin, String(normalizedMin));
+        context.statements.upsertSetting.run(settings_1.SETTING_KEYS.sbkMax, String(normalizedMax));
     })();
+    context.settingsCache.set(settings_1.SETTING_KEYS.sbkMin, String(normalizedMin));
+    context.settingsCache.set(settings_1.SETTING_KEYS.sbkMax, String(normalizedMax));
     return { min: normalizedMin, max: normalizedMax };
+}
+// ---------- 保守用 ----------
+function getGuildDbInfo(gid) {
+    return runGuildMaintenance(gid, (db) => {
+        const countRow = db
+            .prepare(`SELECT COUNT(*) AS count FROM counts`)
+            .get();
+        const immuneRow = db
+            .prepare(`SELECT COUNT(*) AS count FROM immune`)
+            .get();
+        const logRow = db
+            .prepare(`SELECT COUNT(*) AS count FROM logs`)
+            .get();
+        const settingsRow = db
+            .prepare(`SELECT COUNT(*) AS count FROM settings`)
+            .get();
+        const fullPath = dbPath(gid);
+        return {
+            counts: countRow?.count ?? 0,
+            immune: immuneRow?.count ?? 0,
+            logs: logRow?.count ?? 0,
+            settings: settingsRow?.count ?? 0,
+            sizeBytes: node_fs_1.default.existsSync(fullPath) ? node_fs_1.default.statSync(fullPath).size : 0,
+        };
+    });
+}
+function checkpointGuildDb(gid) {
+    runGuildMaintenance(gid, (db) => {
+        db.pragma("wal_checkpoint(TRUNCATE)");
+    });
+}
+function vacuumGuildDb(gid) {
+    runGuildMaintenance(gid, (db) => {
+        db.exec("VACUUM");
+    });
 }
 // ---------- 互換ラッパ ----------
 function loadGuildStore(gid) {

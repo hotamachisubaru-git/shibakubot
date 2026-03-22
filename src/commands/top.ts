@@ -7,11 +7,9 @@ import {
   EmbedBuilder,
   type ChatInputCommandInteraction,
 } from "discord.js";
-import { loadGuildStore } from "../data";
-import { compareBigIntDesc } from "../utils/bigint";
+import { getCountRankingPage, getTrackedUserCount } from "../data";
 
 const PAGE_SIZE = 10;
-type RankingEntry = readonly [userId: string, count: bigint];
 
 /** ギルドでは displayName（ニックネーム） → なければ user.tag → 最後にID */
 async function resolveDisplayName(
@@ -20,9 +18,16 @@ async function resolveDisplayName(
 ): Promise<string> {
   const g = interaction.guild;
   if (g) {
+    const cachedMember = g.members.cache.get(userId);
+    if (cachedMember?.displayName) return cachedMember.displayName;
+
     const m = await g.members.fetch(userId).catch(() => null);
     if (m?.displayName) return m.displayName;
   }
+
+  const cachedUser = interaction.client.users.cache.get(userId);
+  if (cachedUser?.tag) return cachedUser.tag;
+
   const u = await interaction.client.users.fetch(userId).catch(() => null);
   return u?.tag ?? userId;
 }
@@ -30,12 +35,13 @@ async function resolveDisplayName(
 /** 指定ページの埋め込みを作る（0-based page） */
 async function buildPageEmbed(
   interaction: ChatInputCommandInteraction,
-  sortedEntries: readonly RankingEntry[],
+  guildId: string,
+  totalEntries: number,
   page: number,
 ): Promise<EmbedBuilder> {
-  const totalPages = Math.max(1, Math.ceil(sortedEntries.length / PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(totalEntries / PAGE_SIZE));
   const start = page * PAGE_SIZE;
-  const slice = sortedEntries.slice(start, start + PAGE_SIZE);
+  const slice = getCountRankingPage(guildId, start, PAGE_SIZE);
 
   const lines = await Promise.all(
     slice.map(async ([userId, count], i) => {
@@ -78,7 +84,7 @@ export async function handleTop(
   if (!interaction.inGuild()) {
     await interaction.reply({
       content: "サーバー内で使ってね。",
-      ephemeral: true,
+      flags: "Ephemeral",
     });
     return;
   }
@@ -87,19 +93,16 @@ export async function handleTop(
   if (!guildId) {
     await interaction.reply({
       content: "サーバー情報を取得できませんでした。",
-      ephemeral: true,
+      flags: "Ephemeral",
     });
     return;
   }
 
   await interaction.deferReply();
 
-  const store = loadGuildStore(guildId);
-  const sorted: RankingEntry[] = Object.entries(store.counts).sort((a, b) =>
-    compareBigIntDesc(a[1], b[1]),
-  );
+  const totalEntries = getTrackedUserCount(guildId);
 
-  if (sorted.length === 0) {
+  if (totalEntries === 0) {
     await interaction.editReply({
       embeds: [
         new EmbedBuilder()
@@ -111,9 +114,9 @@ export async function handleTop(
   }
 
   let page = 0;
-  const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(totalEntries / PAGE_SIZE));
 
-  const embed = await buildPageEmbed(interaction, sorted, page);
+  const embed = await buildPageEmbed(interaction, guildId, totalEntries, page);
   const row = buildNavRow(page, totalPages);
 
   // 一部の環境で InteractionReply の components が取得できないエラーを避けるため、reply → fetchReply の二段
@@ -144,7 +147,7 @@ export async function handleTop(
     page = Math.max(0, Math.min(page + dir, totalPages - 1));
 
     // ❸ メッセージ編集（Interaction.update は使わない）
-    const newEmbed = await buildPageEmbed(interaction, sorted, page);
+    const newEmbed = await buildPageEmbed(interaction, guildId, totalEntries, page);
     await message.edit({
       embeds: [newEmbed],
       components: [buildNavRow(page, totalPages)],

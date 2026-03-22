@@ -6,11 +6,117 @@ import { getRuntimeConfig } from "./config/runtime";
 
 // このプロジェクト用の Client 型
 export type ShibakuClient = Client & { lavalink: LavalinkManager<Player> };
+type LavalinkRawData = Parameters<LavalinkManager<Player>["sendRawData"]>[0];
+type CachedVoiceServerUpdate = Readonly<{
+  packet: LavalinkRawData;
+  appliedSessionId: string | null;
+}>;
+type LatestBotVoiceState = Readonly<{
+  sessionId: string | null;
+  channelId: string | null;
+  seenAt: number;
+}>;
+type ParsedDiscordVoiceServerUpdate = Readonly<{
+  guildId: string;
+}>;
+type ParsedDiscordVoiceStateUpdate = Readonly<{
+  guildId: string;
+  userId: string;
+  sessionId: string | null;
+  channelId: string | null;
+}>;
 
 const LAVALINK_READY_CHECK_INTERVAL_MS = 3_000;
 const LAVALINK_READY_CHECK_TIMEOUT_MS = 2_000;
+const BOT_VOICE_STATE_RECENCY_MS = 5_000;
 
 class LavalinkNotReadyError extends Error {}
+
+function parseDiscordVoiceServerUpdate(
+  data: LavalinkRawData,
+): ParsedDiscordVoiceServerUpdate | null {
+  if (
+    typeof data !== "object" ||
+    data === null ||
+    !("t" in data) ||
+    data.t !== "VOICE_SERVER_UPDATE" ||
+    !("d" in data) ||
+    typeof data.d !== "object" ||
+    data.d === null
+  ) {
+    return null;
+  }
+
+  const guildId =
+    "guild_id" in data.d && typeof data.d.guild_id === "string"
+      ? data.d.guild_id
+      : null;
+  const token =
+    "token" in data.d && typeof data.d.token === "string"
+      ? data.d.token
+      : null;
+
+  if (!guildId || !token) {
+    return null;
+  }
+
+  return { guildId };
+}
+
+function parseDiscordVoiceStateUpdate(
+  data: LavalinkRawData,
+): ParsedDiscordVoiceStateUpdate | null {
+  if (
+    typeof data !== "object" ||
+    data === null ||
+    !("t" in data) ||
+    data.t !== "VOICE_STATE_UPDATE" ||
+    !("d" in data) ||
+    typeof data.d !== "object" ||
+    data.d === null
+  ) {
+    return null;
+  }
+
+  const guildId =
+    "guild_id" in data.d && typeof data.d.guild_id === "string"
+      ? data.d.guild_id
+      : null;
+  const userId =
+    "user_id" in data.d && typeof data.d.user_id === "string"
+      ? data.d.user_id
+      : null;
+  const sessionId =
+    "session_id" in data.d ? normalizeOptionalId(data.d.session_id) : null;
+  const channelId =
+    "channel_id" in data.d
+      ? normalizeOptionalId(
+          typeof data.d.channel_id === "string" || data.d.channel_id === null
+            ? data.d.channel_id
+            : undefined,
+        )
+      : null;
+
+  if (!guildId || !userId) {
+    return null;
+  }
+
+  return {
+    guildId,
+    userId,
+    sessionId,
+    channelId,
+  };
+}
+
+function normalizeOptionalId(value: string | null | undefined): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
+}
 
 function createLavalinkOptions(client: Client): ManagerOptions<Player> {
   const runtimeConfig = getRuntimeConfig();
@@ -57,16 +163,71 @@ function createLavalinkOptions(client: Client): ManagerOptions<Player> {
 
 export function initLavalink(client: Client): ShibakuClient {
   const typedClient = client as ShibakuClient;
+  const pendingVoiceServerUpdates = new Map<string, CachedVoiceServerUpdate>();
+  const latestBotVoiceStates = new Map<string, LatestBotVoiceState>();
 
   typedClient.lavalink = new LavalinkManager<Player>(
     createLavalinkOptions(typedClient),
   );
 
+  async function forwardLavalinkRawData(data: LavalinkRawData): Promise<void> {
+    const voiceStateUpdate = parseDiscordVoiceStateUpdate(data);
+    if (voiceStateUpdate && voiceStateUpdate.userId === typedClient.user?.id) {
+      const { guildId, sessionId, channelId } = voiceStateUpdate;
+
+      latestBotVoiceStates.set(guildId, {
+        sessionId,
+        channelId,
+        seenAt: Date.now(),
+      });
+
+      await typedClient.lavalink.sendRawData(data);
+
+      if (!channelId) {
+        pendingVoiceServerUpdates.delete(guildId);
+        latestBotVoiceStates.delete(guildId);
+        return;
+      }
+
+      const pending = pendingVoiceServerUpdates.get(guildId);
+      if (pending && sessionId && pending.appliedSessionId !== sessionId) {
+        console.warn(
+          `[lavalink] replaying VOICE_SERVER_UPDATE after bot session refresh: guild=${guildId}`,
+        );
+        await typedClient.lavalink.sendRawData(pending.packet);
+        pendingVoiceServerUpdates.set(guildId, {
+          packet: pending.packet,
+          appliedSessionId: sessionId,
+        });
+      }
+      return;
+    }
+
+    const voiceServerUpdate = parseDiscordVoiceServerUpdate(data);
+    if (voiceServerUpdate) {
+      const { guildId } = voiceServerUpdate;
+      const latestState = latestBotVoiceStates.get(guildId);
+      const appliedSessionId =
+        latestState &&
+        latestState.sessionId &&
+        Date.now() - latestState.seenAt <= BOT_VOICE_STATE_RECENCY_MS
+          ? latestState.sessionId
+          : null;
+
+      pendingVoiceServerUpdates.set(guildId, {
+        packet: data,
+        appliedSessionId,
+      });
+    }
+
+    await typedClient.lavalink.sendRawData(data);
+  }
+
   // Discord の raw イベントを Lavalink に渡す
   typedClient.on(
     "raw",
-    (data: Parameters<LavalinkManager<Player>["sendRawData"]>[0]) => {
-      void typedClient.lavalink.sendRawData(data);
+    (data: LavalinkRawData) => {
+      void forwardLavalinkRawData(data);
     },
   );
 

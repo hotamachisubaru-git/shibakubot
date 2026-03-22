@@ -23,7 +23,7 @@ export async function handleControl(
   if (!interaction.inGuild()) {
     await interaction.reply({
       content: COMMON_MESSAGES.guildOnly,
-      ephemeral: true,
+      flags: "Ephemeral",
     });
     return;
   }
@@ -31,7 +31,7 @@ export async function handleControl(
   if (!hasAdminOrDevPermission(interaction, OWNER_IDS)) {
     await interaction.reply({
       content: COMMON_MESSAGES.noPermissionAdminOrDev,
-      ephemeral: true,
+      flags: "Ephemeral",
     });
     return;
   }
@@ -40,7 +40,7 @@ export async function handleControl(
   if (!guildId) {
     await interaction.reply({
       content: COMMON_MESSAGES.guildUnavailable,
-      ephemeral: true,
+      flags: "Ephemeral",
     });
     return;
   }
@@ -49,7 +49,7 @@ export async function handleControl(
   if (isBotOrSelfTarget(target, interaction.client.user?.id)) {
     await interaction.reply({
       content: COMMON_MESSAGES.botTargetExcluded,
-      ephemeral: true,
+      flags: "Ephemeral",
     });
     return;
   }
@@ -57,7 +57,7 @@ export async function handleControl(
   if (isOwnerTarget(target.id, OWNER_IDS)) {
     await interaction.reply({
       content: COMMON_MESSAGES.ownerTargetExcluded,
-      ephemeral: true,
+      flags: "Ephemeral",
     });
     return;
   }
@@ -72,6 +72,6 @@ export async function handleControl(
   await interaction.reply({
     content: `**${displayName}** のしばかれ回数を **${after} 回** に設定しました。`,
     allowedMentions: { parse: [] },
-    ephemeral: true,
+    flags: "Ephemeral",
   });
 }

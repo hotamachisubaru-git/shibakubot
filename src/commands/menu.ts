@@ -27,19 +27,23 @@ import { BACKUP_ROOT, GUILD_DB_ROOT } from "../constants/paths";
 import { COMMON_MESSAGES } from "../constants/messages";
 import {
   addImmuneId,
+  checkpointGuildDb,
+  getGuildDbInfo,
+  getGuildStatsSnapshot,
   getMaintenanceEnabled,
   getImmuneList,
   getLogCount,
   getRecentLogs,
   getSbkRange,
   getSetting,
-  loadGuildStore,
-  openDb,
   removeImmuneId,
+  resetAllCounts,
   setCountGuild,
   setMaintenanceEnabled,
   setSbkRange,
   setSetting,
+  getUserCount,
+  vacuumGuildDb,
 } from "../data";
 import {
   SKY_DREAM_TYPE_A_BETS,
@@ -139,7 +143,7 @@ async function handleVoiceBatchAction(
   if (!hasVoicePermission(btn, config.permissionFlag)) {
     await btn.reply({
       content: config.noPermissionMessage,
-      ephemeral: true,
+      flags: "Ephemeral",
     });
     return;
   }
@@ -165,7 +169,7 @@ async function handleVoiceBatchAction(
   await btn.reply({
     content: config.promptMessage,
     components: [rowUsers, rowExec],
-    ephemeral: true,
+    flags: "Ephemeral",
   });
 
   const panel = await btn.fetchReply();
@@ -192,7 +196,7 @@ async function handleVoiceBatchAction(
       if (!pickedUsers.length) {
         await i.reply({
           content: config.missingTargetMessage,
-          ephemeral: true,
+          flags: "Ephemeral",
         });
         return;
       }
@@ -203,7 +207,7 @@ async function handleVoiceBatchAction(
       if (!guild) {
         await i.followUp({
           content: UNKNOWN_GUILD_MESSAGE,
-          ephemeral: true,
+          flags: "Ephemeral",
         });
         return;
       }
@@ -231,7 +235,7 @@ async function handleVoiceBatchAction(
       await clearPanelComponents(panel);
       await i.followUp({
         content: `${config.resultHeader}\n${results.join("\n")}`,
-        ephemeral: true,
+        flags: "Ephemeral",
         allowedMentions: { parse: [] },
       });
       sub.stop("done");
@@ -248,7 +252,7 @@ async function requireAdminGuildOwnerOrDev(
   if (!hasAdminGuildOwnerOrDevPermission(interaction, OWNER_IDS)) {
     await interaction.reply({
       content: `⚠️ ${message}`,
-      ephemeral: true,
+      flags: "Ephemeral",
     });
     return false;
   }
@@ -512,7 +516,7 @@ function startMedalPanelSession(
           attempt.reason === "insufficient_medals"
             ? `メダルが足りません。現在 **${formatMedalCount(attempt.balance)}** です。`
             : "BET値が不正です。",
-        ephemeral: true,
+        flags: "Ephemeral",
       });
       return;
     }
@@ -647,7 +651,7 @@ export async function handleMenu(
           await btn.deferUpdate();
           await btn.followUp({
             embeds: [await guildTopEmbed(btn)],
-            ephemeral: true,
+            flags: "Ephemeral",
           });
           break;
         }
@@ -657,7 +661,7 @@ export async function handleMenu(
           await btn.deferUpdate();
           await btn.followUp({
             embeds: [await guildMembersEmbed(btn)],
-            ephemeral: true,
+            flags: "Ephemeral",
           });
           break;
         }
@@ -665,10 +669,7 @@ export async function handleMenu(
         /* --- 統計 --- */
         case "menu_stats": {
           await btn.deferUpdate();
-          const store = loadGuildStore(gid);
-          const total = Object.values(store.counts).reduce((a, b) => a + b, 0n);
-          const unique = Object.keys(store.counts).length;
-          const immune = store.immune.length;
+          const snapshot = getGuildStatsSnapshot(gid);
           await btn.followUp({
             embeds: [
               new EmbedBuilder()
@@ -676,14 +677,22 @@ export async function handleMenu(
                 .addFields(
                   {
                     name: "総しばき回数",
-                    value: formatCountWithReading(total),
+                    value: formatCountWithReading(snapshot.total),
                     inline: true,
                   },
-                  { name: "対象人数", value: String(unique), inline: true },
-                  { name: "免除ユーザー", value: String(immune), inline: true },
+                  {
+                    name: "対象人数",
+                    value: String(snapshot.members),
+                    inline: true,
+                  },
+                  {
+                    name: "免除ユーザー",
+                    value: String(snapshot.immune),
+                    inline: true,
+                  },
                 ),
             ],
-            ephemeral: true,
+            flags: "Ephemeral",
           });
           break;
         }
@@ -723,7 +732,7 @@ export async function handleMenu(
           if (!Number.isFinite(minIn) || !Number.isFinite(maxIn)) {
             await submitted.reply({
               content: "数値を入力してください。",
-              ephemeral: true,
+              flags: "Ephemeral",
             });
             break;
           }
@@ -740,7 +749,7 @@ export async function handleMenu(
           } catch {}
           await submitted.reply({
             content: `✅ しばく回数の範囲を **${safeCount(BigInt(min))}〜${safeCount(BigInt(max))}回** に変更しました。`,
-            ephemeral: true,
+            flags: "Ephemeral",
           });
           break;
         }
@@ -786,7 +795,7 @@ export async function handleMenu(
                   .setStyle(ButtonStyle.Secondary),
               ),
             ],
-            ephemeral: true,
+            flags: "Ephemeral",
           });
 
           const panel = await btn.fetchReply();
@@ -821,14 +830,14 @@ export async function handleMenu(
               if (!act) {
                 await i.reply({
                   content: "操作を選んでください。",
-                  ephemeral: true,
+                  flags: "Ephemeral",
                 });
                 return;
               }
               if ((act === "add" || act === "remove") && !target) {
                 await i.reply({
                   content: "対象を選んでください。",
-                  ephemeral: true,
+                  flags: "Ephemeral",
                 });
                 return;
               }
@@ -841,14 +850,14 @@ export async function handleMenu(
                         .map((x, n) => `${n + 1}. <@${x}> (\`${x}\`)`)
                         .join("\n")
                     : "（なし）",
-                  ephemeral: true,
+                  flags: "Ephemeral",
                 });
               } else if (act === "add") {
                 const targetUserId = target;
                 if (!targetUserId) {
                   await i.reply({
                     content: "対象を選んでください。",
-                    ephemeral: true,
+                    flags: "Ephemeral",
                   });
                   return;
                 }
@@ -859,14 +868,14 @@ export async function handleMenu(
                   content: ok
                     ? `\`${tag}\` を免除リストに追加しました。`
                     : `\`${tag}\` は既に免除リストに存在します。`,
-                  ephemeral: true,
+                  flags: "Ephemeral",
                 });
               } else if (act === "remove") {
                 const targetUserId = target;
                 if (!targetUserId) {
                   await i.reply({
                     content: "対象を選んでください。",
-                    ephemeral: true,
+                    flags: "Ephemeral",
                   });
                   return;
                 }
@@ -877,7 +886,7 @@ export async function handleMenu(
                   content: ok
                     ? `\`${tag}\` を免除リストから削除しました。`
                     : `\`${tag}\` は免除リストにありません。`,
-                  ephemeral: true,
+                  flags: "Ephemeral",
                 });
               }
 
@@ -921,7 +930,7 @@ export async function handleMenu(
                   .setStyle(ButtonStyle.Secondary),
               ),
             ],
-            ephemeral: true,
+            flags: "Ephemeral",
           });
 
           const panel = await btn.fetchReply();
@@ -950,7 +959,7 @@ export async function handleMenu(
               if (!targetUserId) {
                 await i.reply({
                   content: "対象を選んでください。",
-                  ephemeral: true,
+                  flags: "Ephemeral",
                 });
                 return;
               }
@@ -961,7 +970,7 @@ export async function handleMenu(
               if (!targetUser) {
                 await i.reply({
                   content: COMMON_MESSAGES.targetUserUnavailable,
-                  ephemeral: true,
+                  flags: "Ephemeral",
                 });
                 return;
               }
@@ -969,7 +978,7 @@ export async function handleMenu(
               if (isBotOrSelfTarget(targetUser, i.client.user?.id)) {
                 await i.reply({
                   content: COMMON_MESSAGES.botTargetExcluded,
-                  ephemeral: true,
+                  flags: "Ephemeral",
                 });
                 return;
               }
@@ -977,7 +986,7 @@ export async function handleMenu(
               if (isOwnerTarget(targetUserId, OWNER_IDS)) {
                 await i.reply({
                   content: COMMON_MESSAGES.ownerTargetExcluded,
-                  ephemeral: true,
+                  flags: "Ephemeral",
                 });
                 return;
               }
@@ -1003,7 +1012,7 @@ export async function handleMenu(
               if (value === null || value < 0n) {
                 await submitted.reply({
                   content: "0以上の数値を入力してください。",
-                  ephemeral: true,
+                  flags: "Ephemeral",
                 });
                 return;
               }
@@ -1015,7 +1024,7 @@ export async function handleMenu(
 
               await submitted.reply({
                 content: `**${tag}** のしばかれ回数を **${safeCount(next)} 回** に設定しました。`,
-                ephemeral: true,
+                flags: "Ephemeral",
               });
 
               sub.stop("done");
@@ -1032,7 +1041,7 @@ export async function handleMenu(
           if (!hasVoicePermission(btn, PermissionFlagsBits.MoveMembers)) {
             await btn.reply({
               content: "⚠️ VC移動は管理者/MoveMembers権限/開発者のみ使えます。",
-              ephemeral: true,
+              flags: "Ephemeral",
             });
             break;
           }
@@ -1071,7 +1080,7 @@ export async function handleMenu(
           await btn.reply({
             content: "🎧 移動するメンバーと移動先VCを選んでください。",
             components: [rowUsers, rowDest, rowExec],
-            ephemeral: true,
+            flags: "Ephemeral",
           });
 
           const panel = await btn.fetchReply();
@@ -1107,14 +1116,14 @@ export async function handleMenu(
               if (!pickedUsers.length) {
                 await i.reply({
                   content: "移動するメンバーを選んでください。",
-                  ephemeral: true,
+                  flags: "Ephemeral",
                 });
                 return;
               }
               if (!selectedDestChannelId) {
                 await i.reply({
                   content: "移動先のVCを選んでください。",
-                  ephemeral: true,
+                  flags: "Ephemeral",
                 });
                 return;
               }
@@ -1125,7 +1134,7 @@ export async function handleMenu(
               if (!g) {
                 await i.followUp({
                   content: UNKNOWN_GUILD_MESSAGE,
-                  ephemeral: true,
+                  flags: "Ephemeral",
                 });
                 return;
               }
@@ -1140,7 +1149,7 @@ export async function handleMenu(
               ) {
                 await i.followUp({
                   content: "❌ 移動先がボイスチャンネルではありません。",
-                  ephemeral: true,
+                  flags: "Ephemeral",
                 });
                 return;
               }
@@ -1169,7 +1178,7 @@ export async function handleMenu(
               await clearPanelComponents(panel);
               await i.followUp({
                 content: `📦 VC移動結果（→ <#${selectedDestChannelId}>）\n${results.join("\n")}`,
-                ephemeral: true,
+                flags: "Ephemeral",
                 allowedMentions: { parse: [] },
               });
               sub.stop("done");
@@ -1274,7 +1283,7 @@ export async function handleMenu(
           await btn.reply({
             content: "回数を確認するユーザーを選んでください。",
             components: [rowUser, rowExec],
-            ephemeral: true,
+            flags: "Ephemeral",
           });
 
           const panel = await btn.fetchReply();
@@ -1301,13 +1310,12 @@ export async function handleMenu(
               if (!targetUserId) {
                 await i.reply({
                   content: "対象ユーザーを選んでください。",
-                  ephemeral: true,
+                  flags: "Ephemeral",
                 });
                 return;
               }
 
-              const store = loadGuildStore(gid);
-              const count = store.counts[targetUserId] ?? 0n;
+              const count = getUserCount(gid, targetUserId);
               const displayName = await displayNameFrom(i, targetUserId);
               await i.update({
                 content: `**${displayName}** は今までに ${formatCountWithReading(count)} しばかれました。`,
@@ -1363,7 +1371,7 @@ export async function handleMenu(
           await btn.reply({
             content: "個別リセットか全員リセットを選んでください。",
             components: [rowUser, rowExec],
-            ephemeral: true,
+            flags: "Ephemeral",
           });
 
           const panel = await btn.fetchReply();
@@ -1387,10 +1395,7 @@ export async function handleMenu(
             }
 
             if (i.isButton() && i.customId === "reset_exec_all") {
-              const store = loadGuildStore(gid);
-              for (const userId of Object.keys(store.counts)) {
-                setCountGuild(gid, userId, 0n);
-              }
+              resetAllCounts(gid);
               await i.update({
                 content: "全員のしばき回数を0にリセットしました。",
                 components: [],
@@ -1403,7 +1408,7 @@ export async function handleMenu(
               if (!resetTargetUserId) {
                 await i.reply({
                   content: "対象ユーザーを選んでください。",
-                  ephemeral: true,
+                  flags: "Ephemeral",
                 });
                 return;
               }
@@ -1454,7 +1459,7 @@ export async function handleMenu(
           await btn.reply({
             content: `現在のメンテナンスモード: **${enabled ? "ON" : "OFF"}**`,
             components: [row],
-            ephemeral: true,
+            flags: "Ephemeral",
           });
 
           const panel = await btn.fetchReply();
@@ -1499,7 +1504,7 @@ export async function handleMenu(
           if (!TARGET_GUILD_ID || gid !== TARGET_GUILD_ID) {
             await btn.reply({
               content: "この機能は対象サーバーでのみ利用できます。",
-              ephemeral: true,
+              flags: "Ephemeral",
             });
             break;
           }
@@ -1546,7 +1551,7 @@ export async function handleMenu(
           if (option1 === option2) {
             await submitted.reply({
               content: "項目1と項目2は別の内容を指定してください。",
-              ephemeral: true,
+              flags: "Ephemeral",
             });
             break;
           }
@@ -1555,7 +1560,7 @@ export async function handleMenu(
           if (!channelForPoll || !("send" in channelForPoll)) {
             await submitted.reply({
               content: "投票の送信先チャンネルを取得できませんでした。",
-              ephemeral: true,
+              flags: "Ephemeral",
             });
             break;
           }
@@ -1577,14 +1582,14 @@ export async function handleMenu(
             await submitted.reply({
               content:
                 "⚠️ 投票は作成しましたが、リアクション追加に失敗しました。権限を確認してください。",
-              ephemeral: true,
+              flags: "Ephemeral",
             });
             break;
           }
 
           await submitted.reply({
             content: "✅ 投票を作成しました。",
-            ephemeral: true,
+            flags: "Ephemeral",
           });
           break;
         }
@@ -1594,7 +1599,7 @@ export async function handleMenu(
           await btn.deferUpdate();
           await btn.followUp({
             embeds: [buildMenuHelpEmbed(sbkMin, sbkMax)],
-            ephemeral: true,
+            flags: "Ephemeral",
           });
           break;
         }
@@ -1613,7 +1618,7 @@ export async function handleMenu(
           await btn.reply({
             embeds: [panelState.embed],
             components: panelState.rows,
-            ephemeral: true,
+            flags: "Ephemeral",
           });
 
           const panel = await btn.fetchReply();
@@ -1643,7 +1648,7 @@ export async function handleMenu(
           if (!logs.length) {
             await btn.followUp({
               content: "監査ログはまだありません。",
-              ephemeral: true,
+              flags: "Ephemeral",
             });
             break;
           }
@@ -1680,7 +1685,7 @@ export async function handleMenu(
             .setDescription(desc)
             .setFooter({ text: `最新 ${logs.length} 件 / 全 ${total} 件` });
 
-          await btn.followUp({ embeds: [embed], ephemeral: true });
+          await btn.followUp({ embeds: [embed], flags: "Ephemeral" });
           break;
         }
 
@@ -1731,7 +1736,7 @@ export async function handleMenu(
               `現在のログチャンネル: ${currentText}\n` +
               "チャンネルを選択して「保存」を押してください。",
             components: [rowChannel, rowExec],
-            ephemeral: true,
+            flags: "Ephemeral",
           });
 
           const panel = await btn.fetchReply();
@@ -1762,7 +1767,7 @@ export async function handleMenu(
               setSetting(gid, LOG_CHANNEL_KEY, null);
               await i.reply({
                 content: `ログチャンネル設定をクリアしました。現在: ${fallbackText}`,
-                ephemeral: true,
+                flags: "Ephemeral",
               });
               await clearPanelComponents(panel);
               sub.stop("done");
@@ -1773,7 +1778,7 @@ export async function handleMenu(
               if (!pickedChannelId) {
                 await i.reply({
                   content: "チャンネルを選択してください。",
-                  ephemeral: true,
+                  flags: "Ephemeral",
                 });
                 return;
               }
@@ -1781,7 +1786,7 @@ export async function handleMenu(
               setSetting(gid, LOG_CHANNEL_KEY, pickedChannelId);
               await i.reply({
                 content: `ログチャンネルを <#${pickedChannelId}> に設定しました。`,
-                ephemeral: true,
+                flags: "Ephemeral",
               });
 
               await clearPanelComponents(panel);
@@ -1799,7 +1804,7 @@ export async function handleMenu(
           if (!isDev) {
             await btn.reply({
               content: "開発者ツールは OWNER_IDS のみ利用できます。",
-              ephemeral: true,
+              flags: "Ephemeral",
             });
             break;
           }
@@ -1829,7 +1834,7 @@ export async function handleMenu(
           await btn.reply({
             content: "実行する開発者ツールを選んでください。",
             components: [rowAct, rowExec],
-            ephemeral: true,
+            flags: "Ephemeral",
           });
 
           const panel = await btn.fetchReply();
@@ -1860,7 +1865,7 @@ export async function handleMenu(
               if (!act) {
                 await i.reply({
                   content: "ツールを選択してください。",
-                  ephemeral: true,
+                  flags: "Ephemeral",
                 });
                 return;
               }
@@ -1868,89 +1873,63 @@ export async function handleMenu(
               await i.deferUpdate();
 
               if (act === "info") {
-                const db = openDb(gid);
-                try {
-                  const countRow = db
-                    .prepare(`SELECT COUNT(*) AS count FROM counts`)
-                    .get() as { count: number };
-                  const immuneRow = db
-                    .prepare(`SELECT COUNT(*) AS count FROM immune`)
-                    .get() as { count: number };
-                  const logRow = db
-                    .prepare(`SELECT COUNT(*) AS count FROM logs`)
-                    .get() as { count: number };
-                  const settingsRow = db
-                    .prepare(`SELECT COUNT(*) AS count FROM settings`)
-                    .get() as { count: number };
-                  const dbPath = path.join(GUILD_DB_ROOT, `${gid}.db`);
-                  const dbSize = fs.existsSync(dbPath)
-                    ? formatBytes(fs.statSync(dbPath).size)
-                    : "0 B";
-                  const logChannel = getSetting(gid, LOG_CHANNEL_KEY);
-                  const logLabel = logChannel
-                    ? `<#${logChannel}>`
-                    : LOG_CHANNEL_ID
-                      ? `<#${LOG_CHANNEL_ID}>（env）`
-                      : "未設定";
+                const dbInfo = getGuildDbInfo(gid);
+                const logChannel = getSetting(gid, LOG_CHANNEL_KEY);
+                const logLabel = logChannel
+                  ? `<#${logChannel}>`
+                  : LOG_CHANNEL_ID
+                    ? `<#${LOG_CHANNEL_ID}>（env）`
+                    : "未設定";
 
-                  const embed = new EmbedBuilder()
-                    .setTitle("開発者ツール: デバッグ情報")
-                    .addFields(
-                      {
-                        name: "ギルド",
-                        value: `${i.guild?.name ?? "unknown"} (${gid})`,
-                      },
-                      {
-                        name: "DB",
-                        value: `size: ${dbSize}\ncounts: ${countRow.count}\nimmune: ${immuneRow.count}\nlogs: ${logRow.count}\nsettings: ${settingsRow.count}`,
-                      },
-                      { name: "ログチャンネル", value: logLabel },
-                      {
-                        name: "SBKレンジ",
-                        value: `${safeCount(BigInt(sbkMin))}〜${safeCount(BigInt(sbkMax))}回`,
-                        inline: true,
-                      },
-                    );
+                const embed = new EmbedBuilder()
+                  .setTitle("開発者ツール: デバッグ情報")
+                  .addFields(
+                    {
+                      name: "ギルド",
+                      value: `${i.guild?.name ?? "unknown"} (${gid})`,
+                    },
+                    {
+                      name: "DB",
+                      value: `size: ${formatBytes(dbInfo.sizeBytes)}\ncounts: ${dbInfo.counts}\nimmune: ${dbInfo.immune}\nlogs: ${dbInfo.logs}\nsettings: ${dbInfo.settings}`,
+                    },
+                    { name: "ログチャンネル", value: logLabel },
+                    {
+                      name: "SBKレンジ",
+                      value: `${safeCount(BigInt(sbkMin))}〜${safeCount(BigInt(sbkMax))}回`,
+                      inline: true,
+                    },
+                  );
 
-                  await i.followUp({ embeds: [embed], ephemeral: true });
-                } finally {
-                  db.close();
-                }
+                await i.followUp({ embeds: [embed], flags: "Ephemeral" });
               }
 
               if (act === "checkpoint") {
-                const db = openDb(gid);
                 try {
-                  db.pragma("wal_checkpoint(TRUNCATE)");
+                  checkpointGuildDb(gid);
                   await i.followUp({
                     content: "WALチェックポイントを実行しました。",
-                    ephemeral: true,
+                    flags: "Ephemeral",
                   });
                 } catch (e) {
                   await i.followUp({
                     content: "WALチェックポイントに失敗しました。",
-                    ephemeral: true,
+                    flags: "Ephemeral",
                   });
-                } finally {
-                  db.close();
                 }
               }
 
               if (act === "vacuum") {
-                const db = openDb(gid);
                 try {
-                  db.exec("VACUUM");
+                  vacuumGuildDb(gid);
                   await i.followUp({
                     content: "VACUUM を実行しました。",
-                    ephemeral: true,
+                    flags: "Ephemeral",
                   });
                 } catch {
                   await i.followUp({
                     content: "VACUUM に失敗しました。",
-                    ephemeral: true,
+                    flags: "Ephemeral",
                   });
-                } finally {
-                  db.close();
                 }
               }
 
@@ -2010,7 +1989,7 @@ export async function handleMenu(
             },
           );
 
-          await btn.followUp({ embeds: [embed], ephemeral: true });
+          await btn.followUp({ embeds: [embed], flags: "Ephemeral" });
           break;
         }
 
@@ -2048,7 +2027,7 @@ export async function handleMenu(
           await btn.reply({
             content: "バックアップ操作を選んでください。",
             components: [rowAct, rowExec],
-            ephemeral: true,
+            flags: "Ephemeral",
           });
 
           const panel = await btn.fetchReply();
@@ -2075,7 +2054,7 @@ export async function handleMenu(
               if (!act) {
                 await i.reply({
                   content: "操作を選択してください。",
-                  ephemeral: true,
+                  flags: "Ephemeral",
                 });
                 return;
               }
@@ -2087,16 +2066,11 @@ export async function handleMenu(
                 if (!fs.existsSync(src)) {
                   await i.followUp({
                     content: "ギルドDBが見つかりません。",
-                    ephemeral: true,
+                    flags: "Ephemeral",
                   });
                 } else {
                   try {
-                    const db = openDb(gid);
-                    try {
-                      db.pragma("wal_checkpoint(TRUNCATE)");
-                    } finally {
-                      db.close();
-                    }
+                    checkpointGuildDb(gid);
                   } catch {}
 
                   const stamp = formatTimestamp();
@@ -2110,7 +2084,7 @@ export async function handleMenu(
                     content: copied.length
                       ? `バックアップを作成しました:\n${list}`
                       : "バックアップに失敗しました。",
-                    ephemeral: true,
+                    flags: "Ephemeral",
                   });
                 }
               }
@@ -2128,7 +2102,7 @@ export async function handleMenu(
 
                 await i.followUp({
                   content: lines.join("\n"),
-                  ephemeral: true,
+                  flags: "Ephemeral",
                 });
               }
 
@@ -2171,4 +2145,3 @@ export async function handleMenu(
     } catch {}
   });
 }
-

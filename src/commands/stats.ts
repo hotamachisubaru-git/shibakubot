@@ -6,8 +6,7 @@ import {
 import { getRuntimeConfig } from "../config/runtime";
 import { EMBED_COLORS } from "../constants/embedColors";
 import { COMMON_MESSAGES } from "../constants/messages";
-import { loadGuildStore } from "../data";
-import { compareBigIntDesc } from "../utils/bigint";
+import { getGuildStatsSnapshot, getTopCountEntries } from "../data";
 import { hasAdminOrDevPermission } from "../utils/permissions";
 
 const runtimeConfig = getRuntimeConfig();
@@ -28,7 +27,7 @@ export async function handleStats(
   if (!interaction.inGuild()) {
     await interaction.reply({
       content: COMMON_MESSAGES.guildOnly,
-      ephemeral: true,
+      flags: "Ephemeral",
     });
     return;
   }
@@ -36,7 +35,7 @@ export async function handleStats(
   if (!hasAdminOrDevPermission(interaction, OWNER_IDS)) {
     await interaction.reply({
       content: "権限がありません（管理者/開発者のみ）",
-      ephemeral: true,
+      flags: "Ephemeral",
     });
     return;
   }
@@ -45,21 +44,16 @@ export async function handleStats(
   if (!guildId) {
     await interaction.reply({
       content: COMMON_MESSAGES.guildUnavailable,
-      ephemeral: true,
+      flags: "Ephemeral",
     });
     return;
   }
 
-  const store = loadGuildStore(guildId);
-  const counts = Object.values(store.counts);
-  const total = counts.reduce((a, b) => a + b, 0n);
-  const members = counts.length;
-  const average = formatAverage(total, members);
+  const snapshot = getGuildStatsSnapshot(guildId);
+  const average = formatAverage(snapshot.total, snapshot.members);
 
   const top =
-    Object.entries(store.counts)
-      .sort((a, b) => compareBigIntDesc(a[1], b[1]))
-      .slice(0, 5)
+    getTopCountEntries(guildId, 5)
       .map(([uid, cnt], i) => `#${i + 1} <@${uid}> — **${cnt} 回**`)
       .join("\n") || "データなし";
 
@@ -67,13 +61,13 @@ export async function handleStats(
     .setTitle("📊 しばき統計情報")
     .setDescription("現在のサーバー全体のしばかれ回数の統計です。")
     .addFields(
-      { name: "総しばき回数", value: `${total} 回`, inline: true },
-      { name: "登録メンバー数", value: `${members} 人`, inline: true },
+      { name: "総しばき回数", value: `${snapshot.total} 回`, inline: true },
+      { name: "登録メンバー数", value: `${snapshot.members} 人`, inline: true },
       { name: "平均しばかれ回数", value: `${average} 回/人`, inline: true },
       { name: "しばかれ回数 TOP 5", value: top },
     )
     .setFooter({ text: `最終更新: ${new Date().toLocaleString("ja-JP")}` })
     .setColor(EMBED_COLORS.success);
 
-  await interaction.reply({ embeds: [embed], ephemeral: true });
+  await interaction.reply({ embeds: [embed], flags: "Ephemeral" });
 }

@@ -113,7 +113,7 @@ async function handleAiCommand(
   } catch {
     await interaction.reply({
       content: "使用するAI機能を選んでください。`/ai chat` などを使えます。",
-      ephemeral: true,
+      flags: "Ephemeral",
     });
     return;
   }
@@ -122,7 +122,7 @@ async function handleAiCommand(
   if (!handler) {
     await interaction.reply({
       content: `未対応のAIサブコマンドです: \`${subcommand}\``,
-      ephemeral: true,
+      flags: "Ephemeral",
     });
     return;
   }
@@ -140,12 +140,12 @@ async function handleChatCommand(
   if (userMessage.length === 0) {
     await interaction.reply({
       content: "メッセージは空にできません。",
-      ephemeral: true,
+      flags: "Ephemeral",
     });
     return;
   }
 
-  await interaction.deferReply({ ephemeral: isPrivate });
+  await interaction.deferReply({ flags: isPrivate ? "Ephemeral" : undefined });
 
   const conversationKey = buildConversationKey(interaction);
 
@@ -185,7 +185,7 @@ async function handleReplyCommand(
   if (!isSnowflake(messageId)) {
     await interaction.reply({
       content: "`message_id` は Discord メッセージ ID (数値) を指定してください。",
-      ephemeral: true,
+      flags: "Ephemeral",
     });
     return;
   }
@@ -194,12 +194,12 @@ async function handleReplyCommand(
   if (!channel || !channel.isTextBased() || !("messages" in channel)) {
     await interaction.reply({
       content: "このチャンネルでは `/ai reply` を使用できません。",
-      ephemeral: true,
+      flags: "Ephemeral",
     });
     return;
   }
 
-  await interaction.deferReply({ ephemeral: isPrivate });
+  await interaction.deferReply({ flags: isPrivate ? "Ephemeral" : undefined });
 
   let targetMessage: Message;
   try {
@@ -267,7 +267,7 @@ async function handleRegenCommand(
   if (!savedState) {
     await interaction.reply({
       content: "再生成できる返信がありません。先に `/ai reply` を実行してください。",
-      ephemeral: true,
+      flags: "Ephemeral",
     });
     return;
   }
@@ -276,13 +276,13 @@ async function handleRegenCommand(
   if (!channel || !channel.isTextBased() || !("messages" in channel)) {
     await interaction.reply({
       content: "このチャンネルでは `/ai regen` を使用できません。",
-      ephemeral: true,
+      flags: "Ephemeral",
     });
     return;
   }
 
   const isPrivate = interaction.options.getBoolean("private") ?? savedState.isPrivate;
-  await interaction.deferReply({ ephemeral: isPrivate });
+  await interaction.deferReply({ flags: isPrivate ? "Ephemeral" : undefined });
 
   let targetMessage: Message;
   try {
@@ -366,7 +366,7 @@ async function handleImageCommand(
   if (prompt.length === 0) {
     await interaction.reply({
       content: "プロンプトは空にできません。",
-      ephemeral: true,
+      flags: "Ephemeral",
     });
     return;
   }
@@ -374,7 +374,7 @@ async function handleImageCommand(
   if (!imageClient) {
     await interaction.reply({
       content: "画像生成は未設定です。`IMAGE_ENDPOINT` を設定してください。",
-      ephemeral: true,
+      flags: "Ephemeral",
     });
     return;
   }
@@ -383,12 +383,12 @@ async function handleImageCommand(
     await interaction.reply({
       content:
         "画像サイズは `幅x高さ` 形式で指定してください（例: `512x512`, `1024x1536`）。",
-      ephemeral: true,
+      flags: "Ephemeral",
     });
     return;
   }
 
-  await interaction.deferReply({ ephemeral: isPrivate });
+  await interaction.deferReply({ flags: isPrivate ? "Ephemeral" : undefined });
 
   try {
     const generated = await imageClient.generateImage({
@@ -433,7 +433,7 @@ async function handleChatResetCommand(
 
   await interaction.reply({
     content: "会話履歴とカスタムプロンプトをリセットしました。",
-    ephemeral: true,
+    flags: "Ephemeral",
   });
 }
 
@@ -444,7 +444,7 @@ async function handleHistoryCommand(
   const turns = interaction.options.getInteger("turns") ?? Math.min(10, aiConfig.maxHistoryTurns);
   const key = buildConversationKey(interaction);
 
-  await interaction.deferReply({ ephemeral: isPrivate });
+  await interaction.deferReply({ flags: isPrivate ? "Ephemeral" : undefined });
 
   const history = await conversationStore.runExclusive(key, async () =>
     conversationStore.getHistory(key),
@@ -471,7 +471,7 @@ async function handleSetPromptCommand(
   if (prompt.length === 0) {
     await interaction.reply({
       content: "プロンプト内容は空にできません。",
-      ephemeral: true,
+      flags: "Ephemeral",
     });
     return;
   }
@@ -483,7 +483,7 @@ async function handleSetPromptCommand(
     resetHistory,
   });
 
-  await interaction.deferReply({ ephemeral: isPrivate });
+  await interaction.deferReply({ flags: isPrivate ? "Ephemeral" : undefined });
 
   const summaryLines = [
     "システムプロンプトを更新しました。",
@@ -513,7 +513,7 @@ async function handleSetCharacterCommand(
   if (!preset) {
     await interaction.reply({
       content: "指定されたキャラクターは未対応です。",
-      ephemeral: true,
+      flags: "Ephemeral",
     });
     return;
   }
@@ -525,7 +525,7 @@ async function handleSetCharacterCommand(
     resetHistory,
   });
 
-  await interaction.deferReply({ ephemeral: isPrivate });
+  await interaction.deferReply({ flags: isPrivate ? "Ephemeral" : undefined });
 
   const summaryLines = [
     `キャラクターを「${preset.displayName}」に設定しました。`,
