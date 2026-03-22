@@ -28,6 +28,7 @@ const DEFAULT_LAVALINK_CLIENT_POSITION_UPDATE_INTERVAL = 150;
 const DEFAULT_LAVALINK_VOLUME_DECREMENTER = 0.75;
 const DEFAULT_MODEL_ENDPOINT = "http://localhost:11434/api/chat";
 const DEFAULT_MODEL_NAME = "gpt-oss:20b";
+const DEFAULT_MODEL_AUTO_DETECT_NAMES = ["gemma3:27b", "gpt-oss:20b"] as const;
 const DEFAULT_MODEL_TIMEOUT_MS = 120_000;
 const DEFAULT_MAX_HISTORY_TURNS = 8;
 const DEFAULT_MAX_RESPONSE_CHARS = 8_000;
@@ -46,6 +47,7 @@ const DEFAULT_AI_SYSTEM_PROMPT = [
   "キャラクター設定:",
   "あなたは親切で実用的なAIアシスタントです。回答は日本語で行ってください。",
 ].join("\n");
+const DISABLED_TEXT_VALUES = new Set(["none", "null", "undefined"]);
 
 type UrlBaseConfig = Readonly<{
   publicBaseUrl: URL;
@@ -54,18 +56,29 @@ type UrlBaseConfig = Readonly<{
 
 function parseOptionalText(raw: string | undefined): string | undefined {
   const value = parseText(raw);
-  if (!value) return undefined;
-
-  const normalized = value.toLowerCase();
-  if (
-    normalized === "none" ||
-    normalized === "null" ||
-    normalized === "undefined"
-  ) {
+  if (!value || isDisabledTextValue(value)) {
     return undefined;
   }
 
   return value;
+}
+
+function parseModelAutoDetectNames(raw: string | undefined): readonly string[] {
+  const value = parseText(raw);
+  if (!value) {
+    return [...DEFAULT_MODEL_AUTO_DETECT_NAMES];
+  }
+
+  if (isDisabledTextValue(value)) {
+    return [];
+  }
+
+  const values = parseCsvValues(raw).filter((item) => !isDisabledTextValue(item));
+  return values.length > 0 ? values : [...DEFAULT_MODEL_AUTO_DETECT_NAMES];
+}
+
+function isDisabledTextValue(value: string): boolean {
+  return DISABLED_TEXT_VALUES.has(value.trim().toLowerCase());
 }
 
 export type RuntimeConfig = Readonly<{
@@ -126,6 +139,7 @@ export type RuntimeConfig = Readonly<{
   ai: Readonly<{
     modelEndpoint: string;
     modelName: string;
+    autoDetectModelNames: readonly string[];
     modelApiKey?: string;
     modelTimeoutMs: number;
     maxHistoryTurns: number;
@@ -261,6 +275,9 @@ function buildRuntimeConfig(): RuntimeConfig {
     : DEFAULT_LAVALINK_VOLUME_DECREMENTER;
   const modelEndpoint = parseText(process.env.MODEL_ENDPOINT) || DEFAULT_MODEL_ENDPOINT;
   const modelName = parseText(process.env.MODEL_NAME) || DEFAULT_MODEL_NAME;
+  const autoDetectModelNames = parseModelAutoDetectNames(
+    process.env.MODEL_AUTO_DETECT_NAMES,
+  );
   const modelApiKey = parseOptionalText(process.env.MODEL_API_KEY);
   const modelTimeoutMs = parseInteger(
     process.env.MODEL_TIMEOUT_MS,
@@ -408,6 +425,7 @@ function buildRuntimeConfig(): RuntimeConfig {
     ai: {
       modelEndpoint,
       modelName,
+      autoDetectModelNames,
       modelApiKey,
       modelTimeoutMs,
       maxHistoryTurns,

@@ -2,6 +2,33 @@
 
 このファイルでは、このプロジェクトの主な変更点を記録します。
 
+## [1.4.0] - 2026-03-22
+### 追加
+- 音楽再生機能として、`s!` プレフィックス再生、音源アップロード再生、NGワード管理を 1.4.0 の配布対象として整理。
+- AIチャット機能として、Ollama / OpenAI互換 API 接続を 1.4.0 リリース対象に整理。
+- AI画像生成機能として、Stable Diffusion WebUI API 連携を 1.4.0 リリース対象に整理。
+- `npm run release:bundle` 実行時に、従来の `release/shibakubot-v<version>` に加えて `release/<version>` 配布用フォルダも生成するよう追加。
+
+### 変更
+- AI モデルの自動検出処理を整理し、Ollama 実行中モデル一覧から候補名の先頭一致で選べるよう改善。
+- AI モデル自動検出の結果を短時間キャッシュし、会話ごとの余分な問い合わせを減らすよう改善。
+- `README.md` と `.env.example` の AI / Lavalink / Spotify 設定例を、現行の配布内容に合わせて整理。
+
+### 修正
+- Windows 環境で発生していた Git の LF / CRLF 警告を `.gitattributes` で抑制。
+- AI モデル一覧の取得に失敗した場合でも、`MODEL_NAME` へ確実にフォールバックするよう修正。
+
+## [1.3.0] - 2026-03-18
+### 追加
+- `yt-dlp` フォールバックによる外部URL取り込み再生を追加。
+- `trackError` / `trackStuck` 発生時に、外部URL取り込みで復旧を試みる仕組みを追加。
+- Spotify の公開 `track / album / playlist` URL と `spotify:...` URI の再生対応を追加。
+
+### 変更
+- `release` ブランチを配布向けに整理し、公開スラッシュコマンドを `/ping` `/help` `/ai` に限定。
+- ニコニコ動画の直URLは `yt-dlp` を優先して再生するよう改善。
+- 外部URL取り込み時に、`yt-dlp` の再生時間を優先して長さ判定・表示へ反映するよう改善。
+
 ## [1.2.5] - 2026-03-09
 ### 追加
 - `main` / `master` への push 時に、`package.json` の未リリース版を自動で GitHub Release 化する仕組みを追加。

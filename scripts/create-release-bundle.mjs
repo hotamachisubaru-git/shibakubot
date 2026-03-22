@@ -25,6 +25,7 @@ if (typeof version !== "string" || version.trim().length === 0) {
 const releaseRoot = path.join(projectRoot, "release");
 const bundleName = `shibakubot-v${version}`;
 const bundleDir = path.join(releaseRoot, bundleName);
+const distributionDir = path.join(releaseRoot, version);
 
 const filesToCopy = [
   "README.md",
@@ -38,14 +39,6 @@ const filesToCopy = [
 assertExists(distPath);
 for (const filePath of filesToCopy) {
   assertExists(path.join(projectRoot, filePath));
-}
-
-rmSync(bundleDir, { recursive: true, force: true });
-mkdirSync(bundleDir, { recursive: true });
-
-cpSync(distPath, path.join(bundleDir, "dist"), { recursive: true });
-for (const filePath of filesToCopy) {
-  cpSync(path.join(projectRoot, filePath), path.join(bundleDir, filePath));
 }
 
 const releaseReadme = [
@@ -62,7 +55,22 @@ const releaseReadme = [
   "このバンドルは `scripts/create-release-bundle.mjs` によって生成されました。",
 ].join("\n");
 
-writeFileSync(path.join(bundleDir, "RELEASE.md"), releaseReadme, "utf8");
+function populateBundle(targetDir) {
+  rmSync(targetDir, { recursive: true, force: true });
+  mkdirSync(targetDir, { recursive: true });
+
+  cpSync(distPath, path.join(targetDir, "dist"), { recursive: true });
+  for (const filePath of filesToCopy) {
+    cpSync(path.join(projectRoot, filePath), path.join(targetDir, filePath));
+  }
+
+  writeFileSync(path.join(targetDir, "RELEASE.md"), releaseReadme, "utf8");
+}
+
+populateBundle(bundleDir);
+populateBundle(distributionDir);
 
 const relativeBundleDir = path.relative(projectRoot, bundleDir);
+const relativeDistributionDir = path.relative(projectRoot, distributionDir);
 console.log(`リリースバンドルを作成しました: ${relativeBundleDir}`);
+console.log(`配布用フォルダを作成しました: ${relativeDistributionDir}`);

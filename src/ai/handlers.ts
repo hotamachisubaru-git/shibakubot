@@ -48,6 +48,7 @@ const replyStateStore = new ReplyStateStore();
 const modelClient = new OllamaCompatibleClient({
   endpoint: aiConfig.modelEndpoint,
   modelName: aiConfig.modelName,
+  autoDetectModelNames: aiConfig.autoDetectModelNames,
   apiKey: aiConfig.modelApiKey,
   timeoutMs: aiConfig.modelTimeoutMs,
 });
