@@ -14,7 +14,8 @@
   - `SBK_MIN`, `SBK_MAX` — デフォルト射程（`src/config.ts`）
 
 - **アーキテクチャ概観**:
-  - コマンドエントリ: `src/index.ts` — Discord クライアント初期化、Interaction ハンドラ、コンソールコマンド。
+  - コマンドエントリ: `src/index.ts` — Discord クライアント初期化、Interaction ハンドラ。
+  - コンソールコマンド: `src/consoleCommands.ts` — stdin からの `move`, `timeout`, `muteAll` などを処理。
   - コマンド実装: `src/commands/*.ts`（例: `help.ts`, `top.ts`, `members.ts`）。新しいコマンドはここに実装して `deploy-commands.ts` に反映。
   - 永続化: per-guild SQLite を `data/guilds/{guildId}.db` に保存（`src/data.ts` の `openDb(gid)` を使用）。
   - メダル管理: 別 DB `data/medalbank.db`（非同期 `sqlite` を利用）
@@ -29,7 +30,7 @@
 - **実装上の小さな注意点（既存コード参照）**:
   - `src/db.ts` と `src/data.ts` に似たスキーマ処理があるが、実際のランタイムは `src/data.ts` を参照している箇所が多い。変更時はどちらが影響するか確認すること。
   - Lavalink のノード設定では `authorization` が `youshallnotpass`（デフォルト）になっている。実運用では Lavalink 側の `application.yml` と合わせる必要あり（`src/index.ts`）。
-  - コンソールコマンド（stdin）を `src/index.ts` が受け付ける：`move`, `timeout`, `muteAll` 等がある。修正時は入出力フォーマットに注意。
+  - コンソールコマンド（stdin）は `src/consoleCommands.ts` で受け付ける：`move`, `timeout`, `muteAll` 等がある。修正時は入出力フォーマットに注意。
 
 - **よくある小タスクの例（テンプレ）**:
   - 新しい slash コマンドを追加する：`src/commands/<name>.ts` にハンドラ追加 → `src/deploy-commands.ts` を実行して `npm run register`。
@@ -41,7 +42,8 @@
   - Lavalink が必要な機能（音楽再生）をテストする場合は Lavalink サーバーを立て、`src/index.ts` の `nodes` 設定と `authorization` を合わせる。
 
 - **参照すべきファイル一覧（最優先）**:
-  - `src/index.ts` — エントリ / Interaction ハンドラ / コンソールコマンド
+  - `src/index.ts` — エントリ / Interaction ハンドラ
+  - `src/consoleCommands.ts` — コンソールコマンド
   - `src/data.ts`  — 永続化ロジック（counts, immune, logs, settings, music settings）
   - `src/commands/` — 個別コマンド実装
   - `src/triggers.ts` — メッセージ→アクションの定義

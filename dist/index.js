@@ -6,6 +6,7 @@ const discord_js_1 = require("discord.js");
 const runtime_1 = require("./config/runtime");
 const interactionRouter_1 = require("./discord/interactionRouter");
 const data_1 = require("./data");
+const consoleCommands_1 = require("./consoleCommands");
 const fileServer_1 = require("./fileserver/fileServer");
 const lavalink_1 = require("./lavalink");
 const music_1 = require("./music");
@@ -89,6 +90,7 @@ const client = (0, lavalink_1.initLavalink)(new discord_js_1.Client({
         discord_js_1.GatewayIntentBits.GuildVoiceStates,
     ],
 }));
+(0, consoleCommands_1.registerConsoleCommands)(client);
 client.once(discord_js_1.Events.ClientReady, async (readyClient) => {
     console.log(`✅ ログイン完了: ${readyClient.user.tag}`);
     client.lavalink.nodeManager.on("connect", (node) => {

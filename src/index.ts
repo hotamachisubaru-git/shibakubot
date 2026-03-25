@@ -10,6 +10,7 @@ import {
 import { getRuntimeConfig } from "./config/runtime";
 import { handleChatInputInteraction } from "./discord/interactionRouter";
 import { getMaintenanceEnabled } from "./data";
+import { registerConsoleCommands } from "./consoleCommands";
 import { startFileServer } from "./fileserver/fileServer";
 import { initLavalink, waitForLavalinkReady } from "./lavalink";
 import { handleMusicMessage } from "./music";
@@ -156,6 +157,7 @@ const client = initLavalink(
     ],
   }),
 );
+registerConsoleCommands(client);
 
 client.once(Events.ClientReady, async (readyClient) => {
   console.log(`✅ ログイン完了: ${readyClient.user.tag}`);
