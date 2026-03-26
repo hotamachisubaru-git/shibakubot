@@ -7,6 +7,10 @@ import {
   Message,
   VoiceState,
 } from "discord.js";
+import {
+  notifyGuildMessage,
+  refreshGuildMemoriesOnStartup,
+} from "./ai/guild-memory";
 import { getRuntimeConfig } from "./config/runtime";
 import { handleChatInputInteraction } from "./discord/interactionRouter";
 import { getMaintenanceEnabled } from "./data";
@@ -274,6 +278,8 @@ client.once(Events.ClientReady, async (readyClient) => {
     id: readyClient.user.id,
     username: runtimeConfig.lavalink.username,
   });
+
+  void refreshGuildMemoriesOnStartup(client.guilds.cache.values());
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
@@ -285,6 +291,7 @@ void client.login(TOKEN);
 
 client.on("messageCreate", async (message: Message) => {
   if (message.guildId && getMaintenanceEnabled(message.guildId)) return;
+  notifyGuildMessage(message);
   await handleMusicMessage(message);
 });
 

@@ -45,7 +45,7 @@ async function handlePlayMessageCommand(
   const query = args.join(" ").trim();
   if (!query) {
     await message.reply(
-      "🎵 再生したい曲の URL / Spotify URI / キーワード を入力してください。",
+      "🎵 再生したい曲の URL / Spotify URI / キーワード を入力してください。`ytm:` / `yt:` / `sc:` / `bc:` で検索先も指定できます。",
     );
     return;
   }
@@ -197,12 +197,15 @@ function buildMusicHelpMessage(): string {
   return (
     "🎵 音楽コマンド一覧:\n" +
     `\`${PREFIX}${MUSIC_TEXT_COMMAND.play} <URL / Spotify URI / キーワード>\` - 曲を再生・キューに追加\n` +
+    "キーワード検索は YouTube Music / YouTube / SoundCloud / Bandcamp の候補を順に探します\n" +
+    "検索先を固定したい場合は `ytm:` / `yt:` / `sc:` / `bc:` を先頭につけて検索できます\n" +
     `\`${PREFIX}${MUSIC_TEXT_COMMAND.np}\` - 現在再生中の曲を表示\n` +
     `\`${PREFIX}${MUSIC_TEXT_COMMAND.skip}\` (${PREFIX}${MUSIC_TEXT_COMMAND.skipAlias}) - 曲をスキップ\n` +
     `\`${PREFIX}${MUSIC_TEXT_COMMAND.stop}\` - 再生を停止し、VCから退出\n` +
     `\`${PREFIX}${MUSIC_TEXT_COMMAND.queue}\` - 再生中・キュー中の曲一覧を表示\n` +
     `\`${PREFIX}${MUSIC_TEXT_COMMAND.upload} [表示名]\` - 音楽ファイルをアップロードして再生（対応形式: ${ALLOWED_EXTENSIONS_LABEL}）\n` +
     `Spotify の公開 track / album / playlist URL と \`spotify:track:...\` 形式に対応\n` +
+    "Lavalink 側で有効な直URLにも対応します（例: YouTube / ニコニコ / SoundCloud / Bandcamp / Vimeo / Twitch / HTTP音声）\n" +
     "未対応URLは yt-dlp フォールバックで取り込み再生を試みます（例: TikTok / Bilibili / X / Instagram / Dailymotion など）\n" +
     `\`${PREFIX}${MUSIC_TEXT_COMMAND.ng} <サブコマンド>\` - 音楽NGワード管理コマンド（管理者のみ）\n` +
     `（例: \`${PREFIX}${MUSIC_TEXT_COMMAND.ng} add <ワード>\` / \`${PREFIX}${MUSIC_TEXT_COMMAND.ng} remove <ワード>\` / \`${PREFIX}${MUSIC_TEXT_COMMAND.ng} list\` / \`${PREFIX}${MUSIC_TEXT_COMMAND.ng} clear\`）\n` +

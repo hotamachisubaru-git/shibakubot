@@ -28,6 +28,28 @@ export type GuildDbInfo = {
   settings: number;
   sizeBytes: number;
 };
+export type AiChatRole = "system" | "user" | "assistant";
+export type AiChatMessage = {
+  role: AiChatRole;
+  content: string;
+};
+export type AiConversationTurn = {
+  userMessage: string;
+  assistantMessage: string;
+};
+export type AiReplyStateRecord = {
+  targetMessageId: string;
+  userMessage: string;
+  quickReplyInput: string;
+  lastAssistantMessage: string;
+  isPrivate: boolean;
+};
+export type AiGuildMemoryRecord = {
+  summary: string;
+  updatedAt: number;
+  sampledChannels: number;
+  sampledMessages: number;
+};
 
 type GuildDbStatements = {
   selectAllCounts: Database.Statement;
@@ -50,6 +72,19 @@ type GuildDbStatements = {
   countSettings: Database.Statement;
   selectMusicVolume: Database.Statement;
   upsertMusicVolume: Database.Statement;
+  selectAiSession: Database.Statement;
+  upsertAiSession: Database.Statement;
+  deleteAiSession: Database.Statement;
+  selectAiMessages: Database.Statement;
+  selectAiMessagesDescLimited: Database.Statement;
+  insertAiMessage: Database.Statement;
+  countAiMessages: Database.Statement;
+  deleteOldestAiMessages: Database.Statement;
+  deleteAiMessagesByConversation: Database.Statement;
+  deleteAiMessageById: Database.Statement;
+  selectAiReplyState: Database.Statement;
+  upsertAiReplyState: Database.Statement;
+  deleteAiReplyState: Database.Statement;
 };
 
 type GuildDbContext = {
@@ -153,6 +188,34 @@ function ensureSchema(db: Database.Database) {
       key    TEXT NOT NULL,
       value  TEXT,
       PRIMARY KEY (userId, key)
+    );
+
+    CREATE TABLE IF NOT EXISTS ai_sessions (
+      conversationKey TEXT PRIMARY KEY,
+      customPrompt    TEXT,
+      characterId     TEXT,
+      updatedAt       INTEGER NOT NULL DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS ai_messages (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      conversationKey TEXT NOT NULL,
+      role            TEXT NOT NULL,
+      content         TEXT NOT NULL,
+      createdAt       INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_ai_messages_conversation
+      ON ai_messages(conversationKey, id);
+
+    CREATE TABLE IF NOT EXISTS ai_reply_states (
+      conversationKey      TEXT PRIMARY KEY,
+      targetMessageId      TEXT NOT NULL,
+      userMessage          TEXT NOT NULL,
+      quickReplyInput      TEXT NOT NULL,
+      lastAssistantMessage TEXT NOT NULL,
+      isPrivate            INTEGER NOT NULL DEFAULT 0,
+      updatedAt            INTEGER NOT NULL DEFAULT 0
     );
   `);
 
@@ -280,6 +343,96 @@ function buildStatements(db: Database.Database): GuildDbStatements {
       INSERT INTO user_music_settings(userId, key, value) VALUES(?, ?, ?)
       ON CONFLICT(userId, key) DO UPDATE SET value = excluded.value
     `),
+    selectAiSession: db.prepare(`
+      SELECT customPrompt, characterId
+      FROM ai_sessions
+      WHERE conversationKey=?
+    `),
+    upsertAiSession: db.prepare(`
+      INSERT INTO ai_sessions(conversationKey, customPrompt, characterId, updatedAt)
+      VALUES(?, ?, ?, ?)
+      ON CONFLICT(conversationKey) DO UPDATE
+      SET customPrompt = excluded.customPrompt,
+          characterId = excluded.characterId,
+          updatedAt = excluded.updatedAt
+    `),
+    deleteAiSession: db.prepare(`
+      DELETE FROM ai_sessions
+      WHERE conversationKey=?
+    `),
+    selectAiMessages: db.prepare(`
+      SELECT role, content
+      FROM ai_messages
+      WHERE conversationKey=?
+      ORDER BY id ASC
+    `),
+    selectAiMessagesDescLimited: db.prepare(`
+      SELECT id, role, content
+      FROM ai_messages
+      WHERE conversationKey=?
+      ORDER BY id DESC
+      LIMIT ?
+    `),
+    insertAiMessage: db.prepare(`
+      INSERT INTO ai_messages(conversationKey, role, content, createdAt)
+      VALUES(?, ?, ?, ?)
+    `),
+    countAiMessages: db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM ai_messages
+      WHERE conversationKey=?
+    `),
+    deleteOldestAiMessages: db.prepare(`
+      DELETE FROM ai_messages
+      WHERE id IN (
+        SELECT id
+        FROM ai_messages
+        WHERE conversationKey=?
+        ORDER BY id ASC
+        LIMIT ?
+      )
+    `),
+    deleteAiMessagesByConversation: db.prepare(`
+      DELETE FROM ai_messages
+      WHERE conversationKey=?
+    `),
+    deleteAiMessageById: db.prepare(`
+      DELETE FROM ai_messages
+      WHERE id=?
+    `),
+    selectAiReplyState: db.prepare(`
+      SELECT
+        targetMessageId,
+        userMessage,
+        quickReplyInput,
+        lastAssistantMessage,
+        isPrivate
+      FROM ai_reply_states
+      WHERE conversationKey=?
+    `),
+    upsertAiReplyState: db.prepare(`
+      INSERT INTO ai_reply_states(
+        conversationKey,
+        targetMessageId,
+        userMessage,
+        quickReplyInput,
+        lastAssistantMessage,
+        isPrivate,
+        updatedAt
+      )
+      VALUES(?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(conversationKey) DO UPDATE
+      SET targetMessageId = excluded.targetMessageId,
+          userMessage = excluded.userMessage,
+          quickReplyInput = excluded.quickReplyInput,
+          lastAssistantMessage = excluded.lastAssistantMessage,
+          isPrivate = excluded.isPrivate,
+          updatedAt = excluded.updatedAt
+    `),
+    deleteAiReplyState: db.prepare(`
+      DELETE FROM ai_reply_states
+      WHERE conversationKey=?
+    `),
   };
 }
 
@@ -334,6 +487,67 @@ function closeAllGuildDbContexts(): void {
 process.once("exit", () => {
   closeAllGuildDbContexts();
 });
+
+type AiSessionRow = {
+  customPrompt: string | null;
+  characterId: string | null;
+};
+
+type AiMessageRow = {
+  id: number;
+  role: string;
+  content: string;
+};
+
+type AiReplyStateRow = {
+  targetMessageId: string;
+  userMessage: string;
+  quickReplyInput: string;
+  lastAssistantMessage: string;
+  isPrivate: number;
+};
+
+function getAiSessionRow(
+  context: GuildDbContext,
+  conversationKey: string,
+): AiSessionRow | undefined {
+  return context.statements.selectAiSession.get(conversationKey) as
+    | AiSessionRow
+    | undefined;
+}
+
+function saveAiSessionRow(
+  context: GuildDbContext,
+  conversationKey: string,
+  customPrompt: string | null,
+  characterId: string | null,
+): void {
+  if (customPrompt === null && characterId === null) {
+    context.statements.deleteAiSession.run(conversationKey);
+    return;
+  }
+
+  context.statements.upsertAiSession.run(
+    conversationKey,
+    customPrompt,
+    characterId,
+    Date.now(),
+  );
+}
+
+function normalizeAiRole(role: string): AiChatRole | undefined {
+  if (role === "system" || role === "user" || role === "assistant") {
+    return role;
+  }
+  return undefined;
+}
+
+function getAiMessageCount(context: GuildDbContext, conversationKey: string): number {
+  const row = context.statements.countAiMessages.get(conversationKey) as
+    | { count: number }
+    | undefined;
+  return row?.count ?? 0;
+}
 
 function loadCountsCache(context: GuildDbContext): CounterMap {
   if (context.countsCache) {
@@ -763,6 +977,248 @@ export function setSbkRange(gid: string, min: number, max: number): SbkRange {
   context.settingsCache.set(SETTING_KEYS.sbkMax, String(normalizedMax));
 
   return { min: normalizedMin, max: normalizedMax };
+}
+
+// ---------- AI 会話 ----------
+export function getAiConversationHistory(
+  gid: string,
+  conversationKey: string,
+): AiChatMessage[] {
+  const context = getGuildDbContext(gid);
+  const rows = context.statements.selectAiMessages.all(conversationKey) as AiMessageRow[];
+  const messages: AiChatMessage[] = [];
+
+  for (const row of rows) {
+    const role = normalizeAiRole(row.role);
+    if (!role) {
+      continue;
+    }
+    messages.push({
+      role,
+      content: row.content,
+    });
+  }
+
+  return messages;
+}
+
+export function appendAiConversationTurn(
+  gid: string,
+  conversationKey: string,
+  userMessage: string,
+  assistantMessage: string,
+  maxMessages: number,
+): void {
+  const context = getGuildDbContext(gid);
+  const safeMaxMessages = Math.max(2, Math.floor(maxMessages));
+
+  context.db.transaction(() => {
+    const now = Date.now();
+    context.statements.insertAiMessage.run(
+      conversationKey,
+      "user",
+      userMessage,
+      now,
+    );
+    context.statements.insertAiMessage.run(
+      conversationKey,
+      "assistant",
+      assistantMessage,
+      now,
+    );
+
+    const overflow = getAiMessageCount(context, conversationKey) - safeMaxMessages;
+    if (overflow > 0) {
+      context.statements.deleteOldestAiMessages.run(conversationKey, overflow);
+    }
+  })();
+}
+
+export function getAiConversationLastTurn(
+  gid: string,
+  conversationKey: string,
+): AiConversationTurn | undefined {
+  const context = getGuildDbContext(gid);
+  const rows = context.statements.selectAiMessagesDescLimited.all(
+    conversationKey,
+    2,
+  ) as AiMessageRow[];
+  if (rows.length < 2) {
+    return undefined;
+  }
+
+  const [assistant, user] = rows;
+  if (assistant.role !== "assistant" || user.role !== "user") {
+    return undefined;
+  }
+
+  return {
+    userMessage: user.content,
+    assistantMessage: assistant.content,
+  };
+}
+
+export function removeAiConversationLastTurn(
+  gid: string,
+  conversationKey: string,
+): AiConversationTurn | undefined {
+  const context = getGuildDbContext(gid);
+
+  return context.db.transaction(() => {
+    const rows = context.statements.selectAiMessagesDescLimited.all(
+      conversationKey,
+      2,
+    ) as AiMessageRow[];
+    if (rows.length < 2) {
+      return undefined;
+    }
+
+    const [assistant, user] = rows;
+    if (assistant.role !== "assistant" || user.role !== "user") {
+      return undefined;
+    }
+
+    context.statements.deleteAiMessageById.run(assistant.id);
+    context.statements.deleteAiMessageById.run(user.id);
+
+    return {
+      userMessage: user.content,
+      assistantMessage: assistant.content,
+    };
+  })();
+}
+
+export function resetAiConversation(gid: string, conversationKey: string): void {
+  const context = getGuildDbContext(gid);
+  context.statements.deleteAiMessagesByConversation.run(conversationKey);
+}
+
+export function getAiCustomPrompt(
+  gid: string,
+  conversationKey: string,
+): string | null {
+  return getAiSessionRow(getGuildDbContext(gid), conversationKey)?.customPrompt ?? null;
+}
+
+export function setAiCustomPrompt(
+  gid: string,
+  conversationKey: string,
+  prompt: string | null,
+): void {
+  const context = getGuildDbContext(gid);
+  const current = getAiSessionRow(context, conversationKey);
+  saveAiSessionRow(
+    context,
+    conversationKey,
+    prompt,
+    current?.characterId ?? null,
+  );
+}
+
+export function getAiCharacter(
+  gid: string,
+  conversationKey: string,
+): string | null {
+  return getAiSessionRow(getGuildDbContext(gid), conversationKey)?.characterId ?? null;
+}
+
+export function setAiCharacter(
+  gid: string,
+  conversationKey: string,
+  characterId: string | null,
+): void {
+  const context = getGuildDbContext(gid);
+  const current = getAiSessionRow(context, conversationKey);
+  saveAiSessionRow(
+    context,
+    conversationKey,
+    current?.customPrompt ?? null,
+    characterId,
+  );
+}
+
+export function getAiReplyState(
+  gid: string,
+  conversationKey: string,
+): AiReplyStateRecord | undefined {
+  const context = getGuildDbContext(gid);
+  const row = context.statements.selectAiReplyState.get(conversationKey) as
+    | AiReplyStateRow
+    | undefined;
+  if (!row) {
+    return undefined;
+  }
+
+  return {
+    targetMessageId: row.targetMessageId,
+    userMessage: row.userMessage,
+    quickReplyInput: row.quickReplyInput,
+    lastAssistantMessage: row.lastAssistantMessage,
+    isPrivate: row.isPrivate !== 0,
+  };
+}
+
+export function setAiReplyState(
+  gid: string,
+  conversationKey: string,
+  state: AiReplyStateRecord,
+): void {
+  const context = getGuildDbContext(gid);
+  context.statements.upsertAiReplyState.run(
+    conversationKey,
+    state.targetMessageId,
+    state.userMessage,
+    state.quickReplyInput,
+    state.lastAssistantMessage,
+    state.isPrivate ? 1 : 0,
+    Date.now(),
+  );
+}
+
+export function clearAiReplyState(gid: string, conversationKey: string): void {
+  const context = getGuildDbContext(gid);
+  context.statements.deleteAiReplyState.run(conversationKey);
+}
+
+export function getAiGuildMemory(gid: string): AiGuildMemoryRecord | undefined {
+  const raw = getSetting(gid, SETTING_KEYS.aiGuildMemory);
+  if (!raw) {
+    return undefined;
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as Partial<AiGuildMemoryRecord>;
+    if (
+      typeof parsed.summary !== "string" ||
+      typeof parsed.updatedAt !== "number" ||
+      !Number.isFinite(parsed.updatedAt)
+    ) {
+      return undefined;
+    }
+
+    return {
+      summary: parsed.summary,
+      updatedAt: parsed.updatedAt,
+      sampledChannels:
+        typeof parsed.sampledChannels === "number" && Number.isFinite(parsed.sampledChannels)
+          ? Math.max(0, Math.floor(parsed.sampledChannels))
+          : 0,
+      sampledMessages:
+        typeof parsed.sampledMessages === "number" && Number.isFinite(parsed.sampledMessages)
+          ? Math.max(0, Math.floor(parsed.sampledMessages))
+          : 0,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+export function setAiGuildMemory(gid: string, memory: AiGuildMemoryRecord): void {
+  setSetting(gid, SETTING_KEYS.aiGuildMemory, JSON.stringify(memory));
+}
+
+export function clearAiGuildMemory(gid: string): void {
+  setSetting(gid, SETTING_KEYS.aiGuildMemory, null);
 }
 
 // ---------- 保守用 ----------

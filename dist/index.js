@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 require("dotenv/config");
 const promises_1 = require("node:timers/promises");
 const discord_js_1 = require("discord.js");
+const guild_memory_1 = require("./ai/guild-memory");
 const runtime_1 = require("./config/runtime");
 const interactionRouter_1 = require("./discord/interactionRouter");
 const data_1 = require("./data");
@@ -184,6 +185,7 @@ client.once(discord_js_1.Events.ClientReady, async (readyClient) => {
         id: readyClient.user.id,
         username: runtimeConfig.lavalink.username,
     });
+    void (0, guild_memory_1.refreshGuildMemoriesOnStartup)(client.guilds.cache.values());
 });
 client.on(discord_js_1.Events.InteractionCreate, async (interaction) => {
     if (!interaction.isChatInputCommand())
@@ -194,6 +196,7 @@ void client.login(TOKEN);
 client.on("messageCreate", async (message) => {
     if (message.guildId && (0, data_1.getMaintenanceEnabled)(message.guildId))
         return;
+    (0, guild_memory_1.notifyGuildMessage)(message);
     await (0, music_1.handleMusicMessage)(message);
 });
 client.on(discord_js_1.Events.VoiceStateUpdate, (oldState, newState) => {

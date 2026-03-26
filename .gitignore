@@ -24,6 +24,7 @@ logs/
 *.js
 *.log
 *.mp3
+files/remote-*
 *.tsbuildinfo
 .vscode/settings
 .DS_Store

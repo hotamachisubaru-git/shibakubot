@@ -87,6 +87,24 @@ const NOW_PLAYING_COLOR = 0x57f287;
 const SPOTIFY_DEBUG_TRACK_LOG_LIMIT = 5;
 const SPOTIFY_SEARCH_RESULT_LIMIT = 5;
 const SPOTIFY_SEARCH_MIN_SCORE = 45;
+const PRIMARY_KEYWORD_SEARCH_PREFIXES = ["ytmsearch", "ytsearch"] as const;
+const SECONDARY_KEYWORD_SEARCH_PREFIXES = ["scsearch", "bcsearch"] as const;
+const EXPLICIT_KEYWORD_SEARCH_SOURCE_ALIASES: Readonly<
+  Record<string, (typeof PRIMARY_KEYWORD_SEARCH_PREFIXES)[number] | (typeof SECONDARY_KEYWORD_SEARCH_PREFIXES)[number]>
+> = {
+  ytm: "ytmsearch",
+  ytmsearch: "ytmsearch",
+  youtubemusic: "ytmsearch",
+  yt: "ytsearch",
+  ytsearch: "ytsearch",
+  youtube: "ytsearch",
+  sc: "scsearch",
+  scsearch: "scsearch",
+  soundcloud: "scsearch",
+  bc: "bcsearch",
+  bcsearch: "bcsearch",
+  bandcamp: "bcsearch",
+};
 type MusicMetadataModule = typeof import("music-metadata");
 
 type SpotifyDebugContext = Readonly<{
@@ -391,9 +409,43 @@ function buildSpotifySearchQuery(track: SpotifyTrackMetadata): string {
   return [track.title, track.artist].filter(Boolean).join(" ").trim();
 }
 
-function buildSpotifySearchQueries(track: SpotifyTrackMetadata): readonly string[] {
+function parseExplicitKeywordSearchQuery(query: string): string | null {
+  const trimmed = query.trim();
+  const separatorIndex = trimmed.indexOf(":");
+  if (separatorIndex <= 0) {
+    return null;
+  }
+
+  const sourceCandidate = trimmed.slice(0, separatorIndex).toLowerCase();
+  const normalizedSource = sourceCandidate.replace(/[^a-z]/g, "");
+  const keyword = trimmed.slice(separatorIndex + 1).trim();
+  if (!keyword) {
+    return null;
+  }
+
+  const searchPrefix = EXPLICIT_KEYWORD_SEARCH_SOURCE_ALIASES[normalizedSource];
+  if (!searchPrefix) {
+    return null;
+  }
+
+  return `${searchPrefix}:${keyword}`;
+}
+
+function buildSearchQueries(
+  query: string,
+  prefixes: readonly string[],
+): readonly string[] {
+  return prefixes.map((prefix) => `${prefix}:${query}`);
+}
+
+function buildSpotifySearchQueryGroups(
+  track: SpotifyTrackMetadata,
+): readonly (readonly string[])[] {
   const query = buildSpotifySearchQuery(track);
-  return [`ytmsearch:${query}`, `ytsearch:${query}`];
+  return [
+    buildSearchQueries(query, PRIMARY_KEYWORD_SEARCH_PREFIXES),
+    buildSearchQueries(query, SECONDARY_KEYWORD_SEARCH_PREFIXES),
+  ];
 }
 
 function normalizeSpotifyCandidateText(text: string | null | undefined): string {
@@ -573,7 +625,6 @@ async function resolveSpotifyTrackCandidate(
   index: number,
   totalTracks: number,
 ): Promise<PendingTrack | null> {
-  const searchQueries = buildSpotifySearchQueries(spotifyTrack);
   const scoredCandidates: Array<{
     track: PendingTrack;
     query: string;
@@ -581,30 +632,40 @@ async function resolveSpotifyTrackCandidate(
     reasons: string[];
   }> = [];
 
-  for (const searchQuery of searchQueries) {
-    const result = await searchTracks(player, searchQuery, requester);
-    const candidates = result?.tracks?.slice(0, SPOTIFY_SEARCH_RESULT_LIMIT) ?? [];
-    if (!candidates.length) {
-      warnSpotifyDebug(debugContext, "search-query-empty", {
-        index,
-        totalTracks,
-        searchQuery: formatSpotifyDebugQuery(searchQuery),
-      });
-      continue;
+  for (const searchQueries of buildSpotifySearchQueryGroups(spotifyTrack)) {
+    for (const searchQuery of searchQueries) {
+      const result = await searchTracks(player, searchQuery, requester);
+      const candidates = result?.tracks?.slice(0, SPOTIFY_SEARCH_RESULT_LIMIT) ?? [];
+      if (!candidates.length) {
+        warnSpotifyDebug(debugContext, "search-query-empty", {
+          index,
+          totalTracks,
+          searchQuery: formatSpotifyDebugQuery(searchQuery),
+        });
+        continue;
+      }
+
+      for (const candidate of candidates) {
+        const { score, reasons } = scoreSpotifySearchCandidate(
+          spotifyTrack,
+          candidate,
+          searchQuery,
+        );
+        scoredCandidates.push({
+          track: candidate,
+          query: searchQuery,
+          score,
+          reasons,
+        });
+      }
     }
 
-    for (const candidate of candidates) {
-      const { score, reasons } = scoreSpotifySearchCandidate(
-        spotifyTrack,
-        candidate,
-        searchQuery,
-      );
-      scoredCandidates.push({
-        track: candidate,
-        query: searchQuery,
-        score,
-        reasons,
-      });
+    const bestScore = scoredCandidates.reduce(
+      (currentBest, candidate) => Math.max(currentBest, candidate.score),
+      Number.NEGATIVE_INFINITY,
+    );
+    if (bestScore >= SPOTIFY_SEARCH_MIN_SCORE) {
+      break;
     }
   }
 
@@ -697,7 +758,53 @@ async function searchTracks(
 }
 
 function buildKeywordSearchQueries(query: string): readonly string[] {
-  return [`ytmsearch:${query}`, `ytsearch:${query}`];
+  const explicitSearchQuery = parseExplicitKeywordSearchQuery(query);
+  if (explicitSearchQuery) {
+    return [explicitSearchQuery];
+  }
+
+  return buildSearchQueries(query, PRIMARY_KEYWORD_SEARCH_PREFIXES);
+}
+
+function buildKeywordFallbackSearchQueries(query: string): readonly string[] {
+  const explicitSearchQuery = parseExplicitKeywordSearchQuery(query);
+  if (explicitSearchQuery) {
+    return [];
+  }
+
+  return buildSearchQueries(query, SECONDARY_KEYWORD_SEARCH_PREFIXES);
+}
+
+function mergeSearchCandidates(
+  mergedTracks: PendingTrack[],
+  seen: Set<string>,
+  tracksByQuery: readonly PendingTrack[][],
+  limit: number,
+): void {
+  const maxDepth = tracksByQuery.reduce(
+    (currentMax, tracks) => Math.max(currentMax, tracks.length),
+    0,
+  );
+
+  for (let index = 0; index < maxDepth && mergedTracks.length < limit; index += 1) {
+    for (const tracks of tracksByQuery) {
+      const track = tracks[index];
+      if (!track) {
+        continue;
+      }
+
+      const dedupKey = buildPendingTrackDedupKey(track);
+      if (seen.has(dedupKey)) {
+        continue;
+      }
+
+      seen.add(dedupKey);
+      mergedTracks.push(track);
+      if (mergedTracks.length >= limit) {
+        break;
+      }
+    }
+  }
 }
 
 function buildPendingTrackDedupKey(track: PendingTrack): string {
@@ -725,38 +832,23 @@ async function searchKeywordCandidates(
   requester: Message["author"],
   limit: number,
 ): Promise<PendingTrack[]> {
-  const results = await Promise.all(
-    buildKeywordSearchQueries(query).map((searchQuery) =>
-      searchTracks(player, searchQuery, requester),
-    ),
-  );
-  const tracksByQuery = results.map(
-    (result) => result?.tracks?.slice(0, limit) ?? [],
-  );
-  const maxDepth = tracksByQuery.reduce(
-    (currentMax, tracks) => Math.max(currentMax, tracks.length),
-    0,
-  );
   const mergedTracks: PendingTrack[] = [];
   const seen = new Set<string>();
+  const searchQueryGroups = [
+    buildKeywordSearchQueries(query),
+    buildKeywordFallbackSearchQueries(query),
+  ].filter((queries) => queries.length > 0);
 
-  for (let index = 0; index < maxDepth && mergedTracks.length < limit; index += 1) {
-    for (const tracks of tracksByQuery) {
-      const track = tracks[index];
-      if (!track) {
-        continue;
-      }
-
-      const dedupKey = buildPendingTrackDedupKey(track);
-      if (seen.has(dedupKey)) {
-        continue;
-      }
-
-      seen.add(dedupKey);
-      mergedTracks.push(track);
-      if (mergedTracks.length >= limit) {
-        break;
-      }
+  for (const searchQueries of searchQueryGroups) {
+    const results = await Promise.all(
+      searchQueries.map((searchQuery) => searchTracks(player, searchQuery, requester)),
+    );
+    const tracksByQuery = results.map(
+      (result) => result?.tracks?.slice(0, limit) ?? [],
+    );
+    mergeSearchCandidates(mergedTracks, seen, tracksByQuery, limit);
+    if (mergedTracks.length >= limit) {
+      break;
     }
   }
 

@@ -32,6 +32,16 @@ const DEFAULT_MODEL_AUTO_DETECT_NAMES = ["gemma3:27b", "gpt-oss:20b"] as const;
 const DEFAULT_MODEL_TIMEOUT_MS = 120_000;
 const DEFAULT_MAX_HISTORY_TURNS = 8;
 const DEFAULT_MAX_RESPONSE_CHARS = 8_000;
+const DEFAULT_AI_GUILD_MEMORY_ENABLED = true;
+const DEFAULT_AI_GUILD_MEMORY_CHANNEL_LIMIT = 4;
+const DEFAULT_AI_GUILD_MEMORY_MESSAGES_PER_CHANNEL = 30;
+const DEFAULT_AI_GUILD_MEMORY_MAX_INPUT_CHARS = 12_000;
+const DEFAULT_AI_GUILD_MEMORY_MAX_SUMMARY_CHARS = 1_200;
+const DEFAULT_AI_GUILD_MEMORY_REFRESH_HOURS = 12;
+const DEFAULT_AI_GUILD_MEMORY_LIVE_ENABLED = true;
+const DEFAULT_AI_GUILD_MEMORY_LIVE_MESSAGE_THRESHOLD = 12;
+const DEFAULT_AI_GUILD_MEMORY_LIVE_DEBOUNCE_MS = 60_000;
+const DEFAULT_AI_GUILD_MEMORY_LIVE_MIN_INTERVAL_MINUTES = 15;
 const DEFAULT_IMAGE_TIMEOUT_MS = 120_000;
 const DEFAULT_IMAGE_SIZE = "1024x1024";
 const DEFAULT_IMAGE_STEPS = 25;
@@ -75,6 +85,23 @@ function parseModelAutoDetectNames(raw: string | undefined): readonly string[] {
 
   const values = parseCsvValues(raw).filter((item) => !isDisabledTextValue(item));
   return values.length > 0 ? values : [...DEFAULT_MODEL_AUTO_DETECT_NAMES];
+}
+
+function parseModelAutoDetectNamesWithFallback(
+  raw: string | undefined,
+  fallback: readonly string[],
+): readonly string[] {
+  const value = parseText(raw);
+  if (!value) {
+    return [...fallback];
+  }
+
+  if (isDisabledTextValue(value)) {
+    return [];
+  }
+
+  const values = parseCsvValues(raw).filter((item) => !isDisabledTextValue(item));
+  return values.length > 0 ? values : [...fallback];
 }
 
 function isDisabledTextValue(value: string): boolean {
@@ -142,9 +169,28 @@ export type RuntimeConfig = Readonly<{
     autoDetectModelNames: readonly string[];
     modelApiKey?: string;
     modelTimeoutMs: number;
+    auxModel: Readonly<{
+      endpoint: string;
+      modelName: string;
+      autoDetectModelNames: readonly string[];
+      apiKey?: string;
+      timeoutMs: number;
+    }>;
     maxHistoryTurns: number;
     maxResponseChars: number;
     systemPrompt: string;
+    guildMemory: Readonly<{
+      enabled: boolean;
+      channelLimit: number;
+      messagesPerChannel: number;
+      maxInputChars: number;
+      maxSummaryChars: number;
+      refreshHours: number;
+      liveEnabled: boolean;
+      liveMessageThreshold: number;
+      liveDebounceMs: number;
+      liveMinIntervalMinutes: number;
+    }>;
     imageEndpoint?: string;
     imageModel?: string;
     imageApiKey?: string;
@@ -284,6 +330,18 @@ function buildRuntimeConfig(): RuntimeConfig {
     DEFAULT_MODEL_TIMEOUT_MS,
     { min: 1_000 },
   );
+  const auxModelEndpoint = parseText(process.env.AUX_MODEL_ENDPOINT) || modelEndpoint;
+  const auxModelName = parseText(process.env.AUX_MODEL_NAME) || modelName;
+  const auxModelAutoDetectNames = parseModelAutoDetectNamesWithFallback(
+    process.env.AUX_MODEL_AUTO_DETECT_NAMES,
+    [auxModelName],
+  );
+  const auxModelApiKey = parseOptionalText(process.env.AUX_MODEL_API_KEY) ?? modelApiKey;
+  const auxModelTimeoutMs = parseInteger(
+    process.env.AUX_MODEL_TIMEOUT_MS,
+    modelTimeoutMs,
+    { min: 1_000 },
+  );
   const maxHistoryTurns = parseInteger(
     process.env.MAX_HISTORY_TURNS,
     DEFAULT_MAX_HISTORY_TURNS,
@@ -293,6 +351,54 @@ function buildRuntimeConfig(): RuntimeConfig {
     process.env.MAX_RESPONSE_CHARS,
     DEFAULT_MAX_RESPONSE_CHARS,
     { min: 200, max: 32_000 },
+  );
+  const guildMemoryEnabled = parseBoolean(
+    process.env.AI_GUILD_MEMORY_ENABLED,
+    DEFAULT_AI_GUILD_MEMORY_ENABLED,
+  );
+  const guildMemoryChannelLimit = parseInteger(
+    process.env.AI_GUILD_MEMORY_CHANNEL_LIMIT,
+    DEFAULT_AI_GUILD_MEMORY_CHANNEL_LIMIT,
+    { min: 1, max: 20 },
+  );
+  const guildMemoryMessagesPerChannel = parseInteger(
+    process.env.AI_GUILD_MEMORY_MESSAGES_PER_CHANNEL,
+    DEFAULT_AI_GUILD_MEMORY_MESSAGES_PER_CHANNEL,
+    { min: 5, max: 100 },
+  );
+  const guildMemoryMaxInputChars = parseInteger(
+    process.env.AI_GUILD_MEMORY_MAX_INPUT_CHARS,
+    DEFAULT_AI_GUILD_MEMORY_MAX_INPUT_CHARS,
+    { min: 1_000, max: 100_000 },
+  );
+  const guildMemoryMaxSummaryChars = parseInteger(
+    process.env.AI_GUILD_MEMORY_MAX_SUMMARY_CHARS,
+    DEFAULT_AI_GUILD_MEMORY_MAX_SUMMARY_CHARS,
+    { min: 200, max: 8_000 },
+  );
+  const guildMemoryRefreshHours = parseInteger(
+    process.env.AI_GUILD_MEMORY_REFRESH_HOURS,
+    DEFAULT_AI_GUILD_MEMORY_REFRESH_HOURS,
+    { min: 1, max: 24 * 30 },
+  );
+  const guildMemoryLiveEnabled = parseBoolean(
+    process.env.AI_GUILD_MEMORY_LIVE_ENABLED,
+    DEFAULT_AI_GUILD_MEMORY_LIVE_ENABLED,
+  );
+  const guildMemoryLiveMessageThreshold = parseInteger(
+    process.env.AI_GUILD_MEMORY_LIVE_MESSAGE_THRESHOLD,
+    DEFAULT_AI_GUILD_MEMORY_LIVE_MESSAGE_THRESHOLD,
+    { min: 1, max: 500 },
+  );
+  const guildMemoryLiveDebounceMs = parseInteger(
+    process.env.AI_GUILD_MEMORY_LIVE_DEBOUNCE_MS,
+    DEFAULT_AI_GUILD_MEMORY_LIVE_DEBOUNCE_MS,
+    { min: 1_000, max: 60 * 60 * 1000 },
+  );
+  const guildMemoryLiveMinIntervalMinutes = parseInteger(
+    process.env.AI_GUILD_MEMORY_LIVE_MIN_INTERVAL_MINUTES,
+    DEFAULT_AI_GUILD_MEMORY_LIVE_MIN_INTERVAL_MINUTES,
+    { min: 1, max: 24 * 60 },
   );
   const systemPromptRaw = parseText(process.env.SYSTEM_PROMPT);
   const systemPrompt = (systemPromptRaw || DEFAULT_AI_SYSTEM_PROMPT)
@@ -341,11 +447,7 @@ function buildRuntimeConfig(): RuntimeConfig {
     upload: buildUploadUrlConfig(fileHost, filePort),
     music: {
       prefix: parseText(process.env.MUSIC_PREFIX) || DEFAULT_MUSIC_PREFIX,
-      fixedVolume: parseInteger(
-        process.env.MUSIC_FIXED_VOLUME,
-        DEFAULT_MUSIC_FIXED_VOLUME,
-        { min: 0, max: 20 },
-      ),
+      fixedVolume: DEFAULT_MUSIC_FIXED_VOLUME,
       maxTrackMinutes: musicMaxTrackMinutes,
       maxTrackMs: musicMaxTrackMinutes * 60 * 1000,
       pendingSearchTtlMs: parseInteger(
@@ -428,9 +530,28 @@ function buildRuntimeConfig(): RuntimeConfig {
       autoDetectModelNames,
       modelApiKey,
       modelTimeoutMs,
+      auxModel: {
+        endpoint: auxModelEndpoint,
+        modelName: auxModelName,
+        autoDetectModelNames: auxModelAutoDetectNames,
+        apiKey: auxModelApiKey,
+        timeoutMs: auxModelTimeoutMs,
+      },
       maxHistoryTurns,
       maxResponseChars,
       systemPrompt,
+      guildMemory: {
+        enabled: guildMemoryEnabled,
+        channelLimit: guildMemoryChannelLimit,
+        messagesPerChannel: guildMemoryMessagesPerChannel,
+        maxInputChars: guildMemoryMaxInputChars,
+        maxSummaryChars: guildMemoryMaxSummaryChars,
+        refreshHours: guildMemoryRefreshHours,
+        liveEnabled: guildMemoryLiveEnabled,
+        liveMessageThreshold: guildMemoryLiveMessageThreshold,
+        liveDebounceMs: guildMemoryLiveDebounceMs,
+        liveMinIntervalMinutes: guildMemoryLiveMinIntervalMinutes,
+      },
       imageEndpoint,
       imageModel,
       imageApiKey,

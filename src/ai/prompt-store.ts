@@ -1,17 +1,20 @@
-export class PromptStore {
-  private readonly prompts = new Map<string, string>();
+import { getAiCustomPrompt, setAiCustomPrompt } from "../data";
+import { getGuildIdFromConversationKey } from "./session-key";
 
+export class PromptStore {
   constructor(private readonly defaultPrompt: string) {}
 
   getPrompt(key: string): string {
-    return this.prompts.get(key) ?? this.defaultPrompt;
+    return (
+      getAiCustomPrompt(getGuildIdFromConversationKey(key), key) ?? this.defaultPrompt
+    );
   }
 
   setPrompt(key: string, prompt: string): void {
-    this.prompts.set(key, prompt);
+    setAiCustomPrompt(getGuildIdFromConversationKey(key), key, prompt);
   }
 
   resetPrompt(key: string): void {
-    this.prompts.delete(key);
+    setAiCustomPrompt(getGuildIdFromConversationKey(key), key, null);
   }
 }

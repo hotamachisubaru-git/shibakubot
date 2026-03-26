@@ -7,7 +7,7 @@ Discordサーバー向けの多機能Botです。
 - しばき回数の記録・ランキング・統計
 - `/menu` からの管理操作（回数設定、免除管理、ログ/バックアップ等）
 - VC操作（移動/切断/ミュート/解除）
-- 音楽再生（`s!` プレフィックス、アップロード再生、Spotify URL/URI、外部URL取り込み、NGワード管理）
+- 音楽再生（`s!` プレフィックス、YouTube Music / YouTube / SoundCloud / Bandcamp 検索、Spotify URL/URI、各種URL再生、アップロード再生、NGワード管理）
 - AIチャット（Ollama/OpenAI互換API）
 - AI画像生成（Stable Diffusion WebUI API）
 - 2択投票（`/menu` から作成）
@@ -63,9 +63,24 @@ MODEL_NAME=gpt-oss:20b
 MODEL_AUTO_DETECT_NAMES=gemma3:27b,gpt-oss:20b
 MODEL_API_KEY=
 MODEL_TIMEOUT_MS=120000
+AUX_MODEL_ENDPOINT=http://localhost:11434/api/chat
+AUX_MODEL_NAME=gemma3:27b
+AUX_MODEL_AUTO_DETECT_NAMES=gemma3:27b
+AUX_MODEL_API_KEY=
+AUX_MODEL_TIMEOUT_MS=120000
 SYSTEM_PROMPT=あなたは親切で実用的なAIアシスタントです。回答は日本語で行ってください。
 MAX_HISTORY_TURNS=8
 MAX_RESPONSE_CHARS=8000
+AI_GUILD_MEMORY_ENABLED=true
+AI_GUILD_MEMORY_CHANNEL_LIMIT=4
+AI_GUILD_MEMORY_MESSAGES_PER_CHANNEL=30
+AI_GUILD_MEMORY_MAX_INPUT_CHARS=12000
+AI_GUILD_MEMORY_MAX_SUMMARY_CHARS=1200
+AI_GUILD_MEMORY_REFRESH_HOURS=12
+AI_GUILD_MEMORY_LIVE_ENABLED=true
+AI_GUILD_MEMORY_LIVE_MESSAGE_THRESHOLD=12
+AI_GUILD_MEMORY_LIVE_DEBOUNCE_MS=60000
+AI_GUILD_MEMORY_LIVE_MIN_INTERVAL_MINUTES=15
 
 # AI image (optional / Stable Diffusion WebUI API)
 IMAGE_ENDPOINT=
@@ -106,6 +121,11 @@ CLEAR_GLOBAL=true
 - `IMAGE_ENDPOINT` 未設定時は `/ai image` は利用不可
 - `MODEL_AUTO_DETECT_NAMES` を設定すると、Ollama の実行中モデル一覧から先頭一致モデルを自動選択（`none` で無効化）
 - 検出に失敗した場合は `MODEL_NAME` に自動フォールバック
+- `AUX_MODEL_*` を設定すると、サーバー特徴メモなどの補助AI処理だけ別モデルに分離可能
+- 役割固定で使いたい場合は `MODEL_AUTO_DETECT_NAMES=none` と `AUX_MODEL_AUTO_DETECT_NAMES=none` を推奨
+- `AI_GUILD_MEMORY_ENABLED=true` で、起動時に各サーバーの最近ログを少量要約してサーバー特徴メモを更新
+- `AI_GUILD_MEMORY_LIVE_ENABLED=true` で、通常会話の増加に応じてもサーバー特徴メモを徐々に再更新
+- サーバー特徴メモは `data/guilds/<guildId>.db` に保存され、`/ai chat` などの応答で参照
 - `YT_DLP_ENABLED=true` で、Lavalink 未対応URLを `yt-dlp` 取り込みで再生可能
 - `YT_DLP_PATH` を指定するとその実行ファイルを優先使用
 - `YT_DLP_AUTO_DOWNLOAD=true` かつ `yt-dlp` が未導入なら、初回使用時に `YT_DLP_CACHE_DIR` へ公式バイナリを自動取得
@@ -165,14 +185,20 @@ CLEAR_GLOBAL=true
 
 対応アップロード形式: `mp3, wav, flac, m4a, aac, ogg`
 
+キーワード検索は YouTube Music / YouTube / SoundCloud / Bandcamp の候補を統合して表示します。
+`ytm:` / `yt:` / `sc:` / `bc:` を先頭につけると、検索先を固定できます。
+
 Spotify は公開 `track / album / playlist` URL と `spotify:track:...` / `spotify:album:...` / `spotify:playlist:...` を再生対象として扱います。
 Bot は Spotify の曲情報を参照して既存の再生ソースへ変換してキューに追加します。
-通常の URL 再生は Lavalink の対応ソースに依存しますが、未対応URLは `yt-dlp` フォールバックで取り込み再生を試みます。
+通常の URL 再生は Lavalink の対応ソースに依存します。
+Lavalink 側で有効なら、例として `YouTube / ニコニコ / SoundCloud / Bandcamp / Vimeo / Twitch / HTTP直リンク音声` などのURLを直接再生できます。
+未対応URLは `yt-dlp` フォールバックで取り込み再生を試みます。
 例: `TikTok / Bilibili / X / Instagram / Dailymotion` など。
 ただし、非公開・地域制限・要ログイン・ライブ配信・長さ不明・15分超のURLは再生できません。
 
 ## データ保存
 - ギルドDB: `data/guilds/<guildId>.db`
+  - しばき回数、設定、AI会話履歴、AIプロンプト/キャラ状態、返信再生成状態を保存
 - バックアップ: `backup/`
 - アップロード保存先: `files/`（`FILE_DIR` で変更可）
 

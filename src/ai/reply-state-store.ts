@@ -1,3 +1,6 @@
+import { clearAiReplyState, getAiReplyState, setAiReplyState } from "../data";
+import { getGuildIdFromConversationKey } from "./session-key";
+
 export interface ReplyState {
   targetMessageId: string;
   userMessage: string;
@@ -7,18 +10,15 @@ export interface ReplyState {
 }
 
 export class ReplyStateStore {
-  private readonly states = new Map<string, ReplyState>();
-
   getState(key: string): ReplyState | undefined {
-    const state = this.states.get(key);
-    return state ? { ...state } : undefined;
+    return getAiReplyState(getGuildIdFromConversationKey(key), key);
   }
 
   setState(key: string, state: ReplyState): void {
-    this.states.set(key, { ...state });
+    setAiReplyState(getGuildIdFromConversationKey(key), key, state);
   }
 
   clear(key: string): void {
-    this.states.delete(key);
+    clearAiReplyState(getGuildIdFromConversationKey(key), key);
   }
 }

@@ -1,3 +1,11 @@
+import {
+  appendAiConversationTurn,
+  getAiConversationHistory,
+  getAiConversationLastTurn,
+  removeAiConversationLastTurn,
+  resetAiConversation,
+} from "../data";
+import { getGuildIdFromConversationKey } from "./session-key";
 import { ChatMessage } from './model-client';
 
 export interface ConversationTurn {
@@ -6,58 +14,34 @@ export interface ConversationTurn {
 }
 
 export class ConversationStore {
-  private readonly sessions = new Map<string, ChatMessage[]>();
   private readonly locks = new Map<string, Promise<void>>();
 
   constructor(private readonly maxMessages: number) {}
 
   getHistory(key: string): ChatMessage[] {
-    const session = this.sessions.get(key);
-    return session ? [...session] : [];
+    return getAiConversationHistory(getGuildIdFromConversationKey(key), key);
   }
 
   appendTurn(key: string, userMessage: string, assistantMessage: string): void {
-    this.appendMessage(key, { role: 'user', content: userMessage });
-    this.appendMessage(key, { role: 'assistant', content: assistantMessage });
+    appendAiConversationTurn(
+      getGuildIdFromConversationKey(key),
+      key,
+      userMessage,
+      assistantMessage,
+      this.maxMessages,
+    );
   }
 
   getLastTurn(key: string): ConversationTurn | undefined {
-    const session = this.sessions.get(key);
-    if (!session || session.length < 2) {
-      return undefined;
-    }
-
-    const user = session[session.length - 2];
-    const assistant = session[session.length - 1];
-    if (!user || !assistant || user.role !== 'user' || assistant.role !== 'assistant') {
-      return undefined;
-    }
-
-    return {
-      userMessage: user.content,
-      assistantMessage: assistant.content
-    };
+    return getAiConversationLastTurn(getGuildIdFromConversationKey(key), key);
   }
 
   removeLastTurn(key: string): ConversationTurn | undefined {
-    const session = this.sessions.get(key);
-    const lastTurn = this.getLastTurn(key);
-    if (!session || !lastTurn) {
-      return undefined;
-    }
-
-    session.splice(-2, 2);
-    if (session.length === 0) {
-      this.sessions.delete(key);
-    } else {
-      this.sessions.set(key, session);
-    }
-
-    return lastTurn;
+    return removeAiConversationLastTurn(getGuildIdFromConversationKey(key), key);
   }
 
   reset(key: string): void {
-    this.sessions.delete(key);
+    resetAiConversation(getGuildIdFromConversationKey(key), key);
   }
 
   async runExclusive<T>(key: string, task: () => Promise<T>): Promise<T> {
@@ -78,16 +62,5 @@ export class ConversationStore {
         this.locks.delete(key);
       }
     }
-  }
-
-  private appendMessage(key: string, message: ChatMessage): void {
-    const session = this.sessions.get(key) ?? [];
-    session.push(message);
-
-    while (session.length > this.maxMessages) {
-      session.shift();
-    }
-
-    this.sessions.set(key, session);
   }
 }

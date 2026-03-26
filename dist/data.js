@@ -33,6 +33,21 @@ exports.setMusicEnabled = setMusicEnabled;
 exports.getMaintenanceEnabled = getMaintenanceEnabled;
 exports.setMaintenanceEnabled = setMaintenanceEnabled;
 exports.setSbkRange = setSbkRange;
+exports.getAiConversationHistory = getAiConversationHistory;
+exports.appendAiConversationTurn = appendAiConversationTurn;
+exports.getAiConversationLastTurn = getAiConversationLastTurn;
+exports.removeAiConversationLastTurn = removeAiConversationLastTurn;
+exports.resetAiConversation = resetAiConversation;
+exports.getAiCustomPrompt = getAiCustomPrompt;
+exports.setAiCustomPrompt = setAiCustomPrompt;
+exports.getAiCharacter = getAiCharacter;
+exports.setAiCharacter = setAiCharacter;
+exports.getAiReplyState = getAiReplyState;
+exports.setAiReplyState = setAiReplyState;
+exports.clearAiReplyState = clearAiReplyState;
+exports.getAiGuildMemory = getAiGuildMemory;
+exports.setAiGuildMemory = setAiGuildMemory;
+exports.clearAiGuildMemory = clearAiGuildMemory;
 exports.getGuildDbInfo = getGuildDbInfo;
 exports.checkpointGuildDb = checkpointGuildDb;
 exports.vacuumGuildDb = vacuumGuildDb;
@@ -134,6 +149,34 @@ function ensureSchema(db) {
       key    TEXT NOT NULL,
       value  TEXT,
       PRIMARY KEY (userId, key)
+    );
+
+    CREATE TABLE IF NOT EXISTS ai_sessions (
+      conversationKey TEXT PRIMARY KEY,
+      customPrompt    TEXT,
+      characterId     TEXT,
+      updatedAt       INTEGER NOT NULL DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS ai_messages (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      conversationKey TEXT NOT NULL,
+      role            TEXT NOT NULL,
+      content         TEXT NOT NULL,
+      createdAt       INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_ai_messages_conversation
+      ON ai_messages(conversationKey, id);
+
+    CREATE TABLE IF NOT EXISTS ai_reply_states (
+      conversationKey      TEXT PRIMARY KEY,
+      targetMessageId      TEXT NOT NULL,
+      userMessage          TEXT NOT NULL,
+      quickReplyInput      TEXT NOT NULL,
+      lastAssistantMessage TEXT NOT NULL,
+      isPrivate            INTEGER NOT NULL DEFAULT 0,
+      updatedAt            INTEGER NOT NULL DEFAULT 0
     );
   `);
     let cols = db.prepare(`PRAGMA table_info(counts)`).all();
@@ -247,6 +290,96 @@ function buildStatements(db) {
       INSERT INTO user_music_settings(userId, key, value) VALUES(?, ?, ?)
       ON CONFLICT(userId, key) DO UPDATE SET value = excluded.value
     `),
+        selectAiSession: db.prepare(`
+      SELECT customPrompt, characterId
+      FROM ai_sessions
+      WHERE conversationKey=?
+    `),
+        upsertAiSession: db.prepare(`
+      INSERT INTO ai_sessions(conversationKey, customPrompt, characterId, updatedAt)
+      VALUES(?, ?, ?, ?)
+      ON CONFLICT(conversationKey) DO UPDATE
+      SET customPrompt = excluded.customPrompt,
+          characterId = excluded.characterId,
+          updatedAt = excluded.updatedAt
+    `),
+        deleteAiSession: db.prepare(`
+      DELETE FROM ai_sessions
+      WHERE conversationKey=?
+    `),
+        selectAiMessages: db.prepare(`
+      SELECT role, content
+      FROM ai_messages
+      WHERE conversationKey=?
+      ORDER BY id ASC
+    `),
+        selectAiMessagesDescLimited: db.prepare(`
+      SELECT id, role, content
+      FROM ai_messages
+      WHERE conversationKey=?
+      ORDER BY id DESC
+      LIMIT ?
+    `),
+        insertAiMessage: db.prepare(`
+      INSERT INTO ai_messages(conversationKey, role, content, createdAt)
+      VALUES(?, ?, ?, ?)
+    `),
+        countAiMessages: db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM ai_messages
+      WHERE conversationKey=?
+    `),
+        deleteOldestAiMessages: db.prepare(`
+      DELETE FROM ai_messages
+      WHERE id IN (
+        SELECT id
+        FROM ai_messages
+        WHERE conversationKey=?
+        ORDER BY id ASC
+        LIMIT ?
+      )
+    `),
+        deleteAiMessagesByConversation: db.prepare(`
+      DELETE FROM ai_messages
+      WHERE conversationKey=?
+    `),
+        deleteAiMessageById: db.prepare(`
+      DELETE FROM ai_messages
+      WHERE id=?
+    `),
+        selectAiReplyState: db.prepare(`
+      SELECT
+        targetMessageId,
+        userMessage,
+        quickReplyInput,
+        lastAssistantMessage,
+        isPrivate
+      FROM ai_reply_states
+      WHERE conversationKey=?
+    `),
+        upsertAiReplyState: db.prepare(`
+      INSERT INTO ai_reply_states(
+        conversationKey,
+        targetMessageId,
+        userMessage,
+        quickReplyInput,
+        lastAssistantMessage,
+        isPrivate,
+        updatedAt
+      )
+      VALUES(?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(conversationKey) DO UPDATE
+      SET targetMessageId = excluded.targetMessageId,
+          userMessage = excluded.userMessage,
+          quickReplyInput = excluded.quickReplyInput,
+          lastAssistantMessage = excluded.lastAssistantMessage,
+          isPrivate = excluded.isPrivate,
+          updatedAt = excluded.updatedAt
+    `),
+        deleteAiReplyState: db.prepare(`
+      DELETE FROM ai_reply_states
+      WHERE conversationKey=?
+    `),
     };
 }
 // ---------- DB open ----------
@@ -295,6 +428,26 @@ function closeAllGuildDbContexts() {
 process.once("exit", () => {
     closeAllGuildDbContexts();
 });
+function getAiSessionRow(context, conversationKey) {
+    return context.statements.selectAiSession.get(conversationKey);
+}
+function saveAiSessionRow(context, conversationKey, customPrompt, characterId) {
+    if (customPrompt === null && characterId === null) {
+        context.statements.deleteAiSession.run(conversationKey);
+        return;
+    }
+    context.statements.upsertAiSession.run(conversationKey, customPrompt, characterId, Date.now());
+}
+function normalizeAiRole(role) {
+    if (role === "system" || role === "user" || role === "assistant") {
+        return role;
+    }
+    return undefined;
+}
+function getAiMessageCount(context, conversationKey) {
+    const row = context.statements.countAiMessages.get(conversationKey);
+    return row?.count ?? 0;
+}
 function loadCountsCache(context) {
     if (context.countsCache) {
         return context.countsCache;
@@ -578,6 +731,145 @@ function setSbkRange(gid, min, max) {
     context.settingsCache.set(settings_1.SETTING_KEYS.sbkMin, String(normalizedMin));
     context.settingsCache.set(settings_1.SETTING_KEYS.sbkMax, String(normalizedMax));
     return { min: normalizedMin, max: normalizedMax };
+}
+// ---------- AI 会話 ----------
+function getAiConversationHistory(gid, conversationKey) {
+    const context = getGuildDbContext(gid);
+    const rows = context.statements.selectAiMessages.all(conversationKey);
+    const messages = [];
+    for (const row of rows) {
+        const role = normalizeAiRole(row.role);
+        if (!role) {
+            continue;
+        }
+        messages.push({
+            role,
+            content: row.content,
+        });
+    }
+    return messages;
+}
+function appendAiConversationTurn(gid, conversationKey, userMessage, assistantMessage, maxMessages) {
+    const context = getGuildDbContext(gid);
+    const safeMaxMessages = Math.max(2, Math.floor(maxMessages));
+    context.db.transaction(() => {
+        const now = Date.now();
+        context.statements.insertAiMessage.run(conversationKey, "user", userMessage, now);
+        context.statements.insertAiMessage.run(conversationKey, "assistant", assistantMessage, now);
+        const overflow = getAiMessageCount(context, conversationKey) - safeMaxMessages;
+        if (overflow > 0) {
+            context.statements.deleteOldestAiMessages.run(conversationKey, overflow);
+        }
+    })();
+}
+function getAiConversationLastTurn(gid, conversationKey) {
+    const context = getGuildDbContext(gid);
+    const rows = context.statements.selectAiMessagesDescLimited.all(conversationKey, 2);
+    if (rows.length < 2) {
+        return undefined;
+    }
+    const [assistant, user] = rows;
+    if (assistant.role !== "assistant" || user.role !== "user") {
+        return undefined;
+    }
+    return {
+        userMessage: user.content,
+        assistantMessage: assistant.content,
+    };
+}
+function removeAiConversationLastTurn(gid, conversationKey) {
+    const context = getGuildDbContext(gid);
+    return context.db.transaction(() => {
+        const rows = context.statements.selectAiMessagesDescLimited.all(conversationKey, 2);
+        if (rows.length < 2) {
+            return undefined;
+        }
+        const [assistant, user] = rows;
+        if (assistant.role !== "assistant" || user.role !== "user") {
+            return undefined;
+        }
+        context.statements.deleteAiMessageById.run(assistant.id);
+        context.statements.deleteAiMessageById.run(user.id);
+        return {
+            userMessage: user.content,
+            assistantMessage: assistant.content,
+        };
+    })();
+}
+function resetAiConversation(gid, conversationKey) {
+    const context = getGuildDbContext(gid);
+    context.statements.deleteAiMessagesByConversation.run(conversationKey);
+}
+function getAiCustomPrompt(gid, conversationKey) {
+    return getAiSessionRow(getGuildDbContext(gid), conversationKey)?.customPrompt ?? null;
+}
+function setAiCustomPrompt(gid, conversationKey, prompt) {
+    const context = getGuildDbContext(gid);
+    const current = getAiSessionRow(context, conversationKey);
+    saveAiSessionRow(context, conversationKey, prompt, current?.characterId ?? null);
+}
+function getAiCharacter(gid, conversationKey) {
+    return getAiSessionRow(getGuildDbContext(gid), conversationKey)?.characterId ?? null;
+}
+function setAiCharacter(gid, conversationKey, characterId) {
+    const context = getGuildDbContext(gid);
+    const current = getAiSessionRow(context, conversationKey);
+    saveAiSessionRow(context, conversationKey, current?.customPrompt ?? null, characterId);
+}
+function getAiReplyState(gid, conversationKey) {
+    const context = getGuildDbContext(gid);
+    const row = context.statements.selectAiReplyState.get(conversationKey);
+    if (!row) {
+        return undefined;
+    }
+    return {
+        targetMessageId: row.targetMessageId,
+        userMessage: row.userMessage,
+        quickReplyInput: row.quickReplyInput,
+        lastAssistantMessage: row.lastAssistantMessage,
+        isPrivate: row.isPrivate !== 0,
+    };
+}
+function setAiReplyState(gid, conversationKey, state) {
+    const context = getGuildDbContext(gid);
+    context.statements.upsertAiReplyState.run(conversationKey, state.targetMessageId, state.userMessage, state.quickReplyInput, state.lastAssistantMessage, state.isPrivate ? 1 : 0, Date.now());
+}
+function clearAiReplyState(gid, conversationKey) {
+    const context = getGuildDbContext(gid);
+    context.statements.deleteAiReplyState.run(conversationKey);
+}
+function getAiGuildMemory(gid) {
+    const raw = getSetting(gid, settings_1.SETTING_KEYS.aiGuildMemory);
+    if (!raw) {
+        return undefined;
+    }
+    try {
+        const parsed = JSON.parse(raw);
+        if (typeof parsed.summary !== "string" ||
+            typeof parsed.updatedAt !== "number" ||
+            !Number.isFinite(parsed.updatedAt)) {
+            return undefined;
+        }
+        return {
+            summary: parsed.summary,
+            updatedAt: parsed.updatedAt,
+            sampledChannels: typeof parsed.sampledChannels === "number" && Number.isFinite(parsed.sampledChannels)
+                ? Math.max(0, Math.floor(parsed.sampledChannels))
+                : 0,
+            sampledMessages: typeof parsed.sampledMessages === "number" && Number.isFinite(parsed.sampledMessages)
+                ? Math.max(0, Math.floor(parsed.sampledMessages))
+                : 0,
+        };
+    }
+    catch {
+        return undefined;
+    }
+}
+function setAiGuildMemory(gid, memory) {
+    setSetting(gid, settings_1.SETTING_KEYS.aiGuildMemory, JSON.stringify(memory));
+}
+function clearAiGuildMemory(gid) {
+    setSetting(gid, settings_1.SETTING_KEYS.aiGuildMemory, null);
 }
 // ---------- 保守用 ----------
 function getGuildDbInfo(gid) {

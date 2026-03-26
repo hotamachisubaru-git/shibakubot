@@ -4,6 +4,7 @@ import {
   type Message,
 } from "discord.js";
 import { getRuntimeConfig } from "../config/runtime";
+import { getAiGuildMemory } from "../data";
 import { SLASH_COMMAND } from "../constants/commands";
 import {
   getCharacterQuickReply,
@@ -19,6 +20,7 @@ import {
 } from "./model-client";
 import { PromptStore } from "./prompt-store";
 import { ReplyStateStore } from "./reply-state-store";
+import { getGuildIdFromConversationKey } from "./session-key";
 import {
   buildConversationKey,
   buildReplyUserMessage,
@@ -557,8 +559,11 @@ async function generateReplyForConversation(
 
   const currentPrompt = promptStore.getPrompt(conversationKey);
   const history = conversationStore.getHistory(conversationKey);
+  const guildMemorySummary =
+    getAiGuildMemory(getGuildIdFromConversationKey(conversationKey))?.summary;
   const payload = buildConversationPayload(
     currentPrompt,
+    guildMemorySummary,
     history,
     userMessage,
   );
@@ -572,11 +577,15 @@ function isStaleReplyStateError(error: unknown): boolean {
 
 function buildConversationPayload(
   currentPrompt: string,
+  guildMemorySummary: string | undefined,
   history: readonly ChatMessage[],
   userMessage: string,
 ): ChatMessage[] {
   return [
-    { role: "system", content: buildEffectiveSystemPrompt(currentPrompt) },
+    {
+      role: "system",
+      content: buildEffectiveSystemPrompt(currentPrompt, guildMemorySummary),
+    },
     ...history,
     { role: "user", content: userMessage },
   ];

@@ -51,6 +51,10 @@ const CONSOLE_COMMAND_LINES = [
   "    指定ユーザーにロールを付与します。",
   "    例: addrole 111111111111111111 222222222222222222 444444444444444444",
   "",
+  "  delmsg <channelId> <messageId>",
+  "    指定チャンネル内のメッセージを1件削除します。",
+  "    例: delmsg 555555555555555555 666666666666666666",
+  "",
   "時間の書式: 10s = 10秒 / 5m = 5分 / 2h = 2時間 / 300 = 300秒",
   "help と入力するとコマンド一覧を表示します。",
   "------------------------------",
@@ -448,6 +452,37 @@ async function addRoleToUser(
   console.log(`✅ ${member.user.tag} にロール ${role.name} を付与しました。`);
 }
 
+async function deleteMessage(
+  client: Client,
+  channelId: string,
+  messageId: string,
+): Promise<void> {
+  if (!client.isReady()) {
+    console.log("クライアントの起動完了前です。ログイン完了後に再実行してください。");
+    return;
+  }
+
+  const channel = await client.channels.fetch(channelId).catch(() => null);
+  if (!channel || !channel.isTextBased() || !("messages" in channel)) {
+    console.log("指定されたチャンネルIDはテキストチャンネルではありません。");
+    return;
+  }
+
+  const message = await channel.messages.fetch(messageId).catch(() => null);
+  if (!message) {
+    console.log("メッセージが見つかりません。");
+    return;
+  }
+
+  if (!message.deletable) {
+    console.log("メッセージを削除できません。（権限不足の可能性）");
+    return;
+  }
+
+  await message.delete();
+  console.log(`✅ メッセージを削除しました。 id=${message.id}`);
+}
+
 async function executeConsoleCommand(
   client: Client,
   input: string,
@@ -527,6 +562,11 @@ async function executeConsoleCommand(
 
   if (command === "addrole" && args.length === 4) {
     await addRoleToUser(client, args[1], args[2], args[3]);
+    return;
+  }
+
+  if (command === "delmsg" && args.length === 3) {
+    await deleteMessage(client, args[1], args[2]);
     return;
   }
 

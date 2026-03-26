@@ -62,9 +62,12 @@ export function limitText(text: string, maxChars: number): string {
   return `${normalized.slice(0, maxChars)}\n\n[...省略: MAX_RESPONSE_CHARS を超過しました...]`;
 }
 
-export function buildEffectiveSystemPrompt(prompt: string): string {
+export function buildEffectiveSystemPrompt(
+  prompt: string,
+  guildMemorySummary?: string,
+): string {
   const trimmedPrompt = prompt.trim();
-  return [
+  const lines = [
     "あなたはロールプレイ会話を行うAIアシスタントです。",
     "以下の「キャラクター設定」を最優先で守って回答してください。",
     "口調・語尾・性格・テンションを毎回一貫させてください。",
@@ -73,7 +76,20 @@ export function buildEffectiveSystemPrompt(prompt: string): string {
     "",
     "キャラクター設定:",
     trimmedPrompt,
-  ].join("\n");
+  ];
+
+  if (guildMemorySummary && guildMemorySummary.trim().length > 0) {
+    lines.push(
+      "",
+      "サーバー特徴メモ:",
+      guildMemorySummary.trim(),
+      "",
+      "このメモは最近の会話ログから作成した参考情報です。",
+      "現在のユーザー発言と直近の会話履歴を優先し、合わない場合は無理に従わないでください。",
+    );
+  }
+
+  return lines.join("\n");
 }
 
 export function singleLine(value: string, maxLength: number): string {
