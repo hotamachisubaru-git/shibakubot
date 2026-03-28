@@ -1,7 +1,13 @@
 // src/lavalink.ts
 import { setTimeout as delay } from "node:timers/promises";
 import { Client } from "discord.js";
-import { LavalinkManager, type ManagerOptions, type Player } from "lavalink-client";
+import {
+  LavalinkManager,
+  type LavalinkNode,
+  type ManagerOptions,
+  type ModifyRequest,
+  type Player,
+} from "lavalink-client";
 import { getRuntimeConfig } from "./config/runtime";
 
 // このプロジェクト用の Client 型
@@ -31,6 +37,80 @@ const LAVALINK_READY_CHECK_TIMEOUT_MS = 2_000;
 const BOT_VOICE_STATE_RECENCY_MS = 5_000;
 
 class LavalinkNotReadyError extends Error {}
+
+type RawRequestOptions = RequestInit & {
+  path: string;
+  extraQueryUrlParams?: URLSearchParams;
+};
+
+type TraceToggleCapableNode = {
+  __shibakuTraceDisabled?: boolean;
+  restAddress: string;
+  version: string;
+  calls: number;
+  options: {
+    authorization: string;
+    requestSignalTimeoutMS?: number;
+  };
+  rawRequest(
+    endpoint: string,
+    modify?: ModifyRequest,
+  ): Promise<{
+    response: globalThis.Response;
+    options: RawRequestOptions;
+  }>;
+};
+
+function patchNodeRawRequestToDisableTrace(node: LavalinkNode): void {
+  if (getRuntimeConfig().lavalink.traceEnabled) {
+    return;
+  }
+
+  const patchedNode = node as unknown as TraceToggleCapableNode;
+  if (patchedNode.__shibakuTraceDisabled) {
+    return;
+  }
+
+  patchedNode.__shibakuTraceDisabled = true;
+  patchedNode.rawRequest = async (
+    endpoint: string,
+    modify?: ModifyRequest,
+  ): Promise<{
+    response: globalThis.Response;
+    options: RawRequestOptions;
+  }> => {
+    const options: RawRequestOptions = {
+      path: `/${patchedNode.version}/${endpoint.startsWith("/") ? endpoint.slice(1) : endpoint}`,
+      method: "GET",
+      headers: {
+        Authorization: patchedNode.options.authorization,
+      },
+      signal:
+        patchedNode.options.requestSignalTimeoutMS &&
+        patchedNode.options.requestSignalTimeoutMS > 0
+          ? AbortSignal.timeout(patchedNode.options.requestSignalTimeoutMS)
+          : undefined,
+    };
+
+    modify?.(options);
+    options.extraQueryUrlParams?.delete("trace");
+
+    const url = new URL(`${patchedNode.restAddress}${options.path}`);
+    if (options.extraQueryUrlParams && options.extraQueryUrlParams.size > 0) {
+      for (const [paramKey, paramValue] of options.extraQueryUrlParams.entries()) {
+        if (paramKey === "trace") {
+          continue;
+        }
+        url.searchParams.append(paramKey, paramValue);
+      }
+    }
+
+    const { path, extraQueryUrlParams, ...fetchOptions } = options;
+    const response = await fetch(url.toString(), fetchOptions);
+    patchedNode.calls += 1;
+    return { response, options };
+  };
+}
 
 function parseDiscordVoiceServerUpdate(
   data: LavalinkRawData,
@@ -169,6 +249,12 @@ export function initLavalink(client: Client): ShibakuClient {
   typedClient.lavalink = new LavalinkManager<Player>(
     createLavalinkOptions(typedClient),
   );
+  typedClient.lavalink.nodeManager.on("create", (node) => {
+    patchNodeRawRequestToDisableTrace(node);
+  });
+  for (const node of typedClient.lavalink.nodeManager.nodes.values()) {
+    patchNodeRawRequestToDisableTrace(node);
+  }
 
   async function forwardLavalinkRawData(data: LavalinkRawData): Promise<void> {
     const voiceStateUpdate = parseDiscordVoiceStateUpdate(data);

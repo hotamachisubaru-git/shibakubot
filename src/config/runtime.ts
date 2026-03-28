@@ -22,6 +22,7 @@ const DEFAULT_LAVALINK_PORT = 2333;
 const DEFAULT_LAVALINK_PASSWORD = "youshallnotpass";
 const DEFAULT_LAVALINK_USERNAME = "shibakubot";
 const DEFAULT_LAVALINK_SECURE = false;
+const DEFAULT_LAVALINK_TRACE_ENABLED = false;
 const DEFAULT_LAVALINK_MAX_PREVIOUS_TRACKS = 25;
 const DEFAULT_LAVALINK_EMPTY_QUEUE_DESTROY_MS = 60_000;
 const DEFAULT_LAVALINK_CLIENT_POSITION_UPDATE_INTERVAL = 150;
@@ -152,6 +153,7 @@ export type RuntimeConfig = Readonly<{
     port: number;
     authorization: string;
     secure: boolean;
+    traceEnabled: boolean;
     username: string;
     defaultSearchPlatform: SearchPlatform;
     maxPreviousTracks: number;
@@ -493,6 +495,10 @@ function buildRuntimeConfig(): RuntimeConfig {
       authorization:
         parseText(process.env.LAVALINK_PASSWORD) || DEFAULT_LAVALINK_PASSWORD,
       secure: parseBoolean(process.env.LAVALINK_SECURE, DEFAULT_LAVALINK_SECURE),
+      traceEnabled: parseBoolean(
+        process.env.LAVALINK_TRACE_ENABLED,
+        DEFAULT_LAVALINK_TRACE_ENABLED,
+      ),
       username:
         parseText(process.env.LAVALINK_USERNAME) || DEFAULT_LAVALINK_USERNAME,
       defaultSearchPlatform:

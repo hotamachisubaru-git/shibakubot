@@ -1,0 +1,20 @@
+# Copy to: /etc/systemd/system/shibakubot.service
+[Unit]
+Description=ShibakuBot Discord Bot
+After=network-online.target lavalink.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=shibakubot
+Group=shibakubot
+WorkingDirectory=/opt/shibakubot
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/env node dist/index.js
+Restart=always
+RestartSec=10
+TimeoutStopSec=30
+KillSignal=SIGTERM
+
+[Install]
+WantedBy=multi-user.target

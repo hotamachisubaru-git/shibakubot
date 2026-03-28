@@ -47,6 +47,15 @@ npm run register:prod
 npm run start
 ```
 
+## VPS運用
+Linux VPS に移す場合は、`systemd` と Lavalink 用のテンプレートを同梱しています。
+
+- 手順: [docs/vps.md](docs/vps.md)
+- Bot service: [deploy/systemd/shibakubot.service.example](deploy/systemd/shibakubot.service.example)
+- Lavalink service: [deploy/systemd/lavalink.service.example](deploy/systemd/lavalink.service.example)
+- nginx 例: [deploy/nginx/shibakubot-uploads.conf.example](deploy/nginx/shibakubot-uploads.conf.example)
+- Lavalink 設定例: [deploy/lavalink/application.yml.example](deploy/lavalink/application.yml.example)
+
 ## .env 設定例
 ```env
 TOKEN=your_bot_token
@@ -110,6 +119,7 @@ YT_DLP_CACHE_DIR=./data/yt-dlp
 LAVALINK_HOST=127.0.0.1
 LAVALINK_PORT=2333
 LAVALINK_PASSWORD=youshallnotpass
+LAVALINK_TRACE_ENABLED=false
 
 # コマンド登録
 CLEAR_GLOBAL=true
@@ -133,12 +143,14 @@ CLEAR_GLOBAL=true
 - Lavalinkの高度設定も利用可（任意）
   - `LAVALINK_NODE_ID`
   - `LAVALINK_SECURE`
+  - `LAVALINK_TRACE_ENABLED`
   - `LAVALINK_USERNAME`
   - `LAVALINK_DEFAULT_SEARCH_PLATFORM`
   - `LAVALINK_MAX_PREVIOUS_TRACKS`
   - `LAVALINK_EMPTY_QUEUE_DESTROY_MS`
   - `LAVALINK_CLIENT_POSITION_UPDATE_INTERVAL`
   - `LAVALINK_VOLUME_DECREMENTER`
+  - `LAVALINK_TRACE_ENABLED=false` で、`lavalink-client` の REST リクエストに付く `trace=true` を無効化
 
 ## 必要なBot権限
 - `View Channels`

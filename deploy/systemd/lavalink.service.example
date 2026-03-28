@@ -1,0 +1,19 @@
+# Copy to: /etc/systemd/system/lavalink.service
+[Unit]
+Description=Lavalink Audio Node
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=lavalink
+Group=lavalink
+WorkingDirectory=/opt/lavalink
+ExecStart=/usr/bin/java -Xms256M -Xmx512M -jar /opt/lavalink/Lavalink.jar
+Restart=always
+RestartSec=10
+SuccessExitStatus=143
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target
