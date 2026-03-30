@@ -87,6 +87,7 @@ const NOW_PLAYING_COLOR = 0x57f287;
 const SPOTIFY_DEBUG_TRACK_LOG_LIMIT = 5;
 const SPOTIFY_SEARCH_RESULT_LIMIT = 5;
 const SPOTIFY_SEARCH_MIN_SCORE = 45;
+const SPOTIFY_SEARCH_EARLY_EXIT_SCORE = 90;
 const PRIMARY_KEYWORD_SEARCH_PREFIXES = ["ytmsearch", "ytsearch"] as const;
 const SECONDARY_KEYWORD_SEARCH_PREFIXES = ["scsearch", "bcsearch"] as const;
 const EXPLICIT_KEYWORD_SEARCH_SOURCE_ALIASES: Readonly<
@@ -443,7 +444,8 @@ function buildSpotifySearchQueryGroups(
 ): readonly (readonly string[])[] {
   const query = buildSpotifySearchQuery(track);
   return [
-    buildSearchQueries(query, PRIMARY_KEYWORD_SEARCH_PREFIXES),
+    buildSearchQueries(query, ["ytmsearch"]),
+    buildSearchQueries(query, ["ytsearch"]),
     buildSearchQueries(query, SECONDARY_KEYWORD_SEARCH_PREFIXES),
   ];
 }
@@ -468,6 +470,29 @@ function splitSpotifyCandidateTerms(text: string | null | undefined): string[] {
     .map((term) => term.trim())
     .filter((term) => term.length >= 2);
 }
+
+const SPOTIFY_TITLE_NOISE_IGNORED_TERMS = new Set([
+  "official",
+  "music",
+  "video",
+  "audio",
+  "lyrics",
+  "lyric",
+  "mv",
+  "pv",
+  "ver",
+  "version",
+  "feat",
+  "featuring",
+  "ft",
+  "topic",
+  "provided",
+  "youtube",
+  "公式",
+  "原曲",
+  "本家",
+  "オリジナル",
+]);
 
 function scoreSpotifyTextMatch(expected: string, actual: string): number {
   if (!expected || !actual) {
@@ -495,6 +520,37 @@ function scoreSpotifyTextMatch(expected: string, actual: string): number {
   return Math.round((matchedTerms.length / expectedTerms.length) * 35);
 }
 
+function getSpotifyCandidateTitleNoisePenalty(
+  expectedTitle: string,
+  expectedArtist: string,
+  candidateTitle: string,
+): { score: number; reasons: string[] } {
+  const candidateTerms = splitSpotifyCandidateTerms(candidateTitle);
+  if (candidateTerms.length < 4) {
+    return { score: 0, reasons: [] };
+  }
+
+  const referenceTerms = new Set([
+    ...splitSpotifyCandidateTerms(expectedTitle),
+    ...splitSpotifyCandidateTerms(expectedArtist),
+  ]);
+  const extraTerms = candidateTerms.filter(
+    (term) =>
+      !referenceTerms.has(term) &&
+      !SPOTIFY_TITLE_NOISE_IGNORED_TERMS.has(term),
+  );
+
+  if (extraTerms.length >= 4) {
+    return { score: -25, reasons: ["title-noise:-25"] };
+  }
+
+  if (extraTerms.length >= 2) {
+    return { score: -12, reasons: ["title-noise:-12"] };
+  }
+
+  return { score: 0, reasons: [] };
+}
+
 function getSpotifyCandidatePenalty(
   candidateTitle: string,
   candidateAuthor: string,
@@ -511,6 +567,11 @@ function getSpotifyCandidatePenalty(
     "ミラティブ",
     "reaction",
     "react",
+    "歌い方",
+    "解説",
+    "tutorial",
+    "講座",
+    "ボイストレーナー",
   ];
   for (const keyword of heavyPenaltyKeywords) {
     if (haystack.includes(keyword)) {
@@ -531,6 +592,13 @@ function getSpotifyCandidatePenalty(
     "sped up",
     "instrumental",
     "karaoke",
+    "弾いてみた",
+    "叩いてみた",
+    "演奏してみた",
+    "弾き語り",
+    "歌ってみました",
+    "off vocal",
+    "オフボーカル",
   ];
   for (const keyword of mediumPenaltyKeywords) {
     if (haystack.includes(keyword)) {
@@ -567,13 +635,28 @@ function scoreSpotifySearchCandidate(
     reasons.push(`title:${titleScore}`);
   }
 
-  const artistScore = Math.max(
-    scoreSpotifyTextMatch(expectedArtistCompact, candidateAuthorCompact),
-    scoreSpotifyTextMatch(expectedArtistCompact, candidateTitleCompact),
+  const authorArtistScore = scoreSpotifyTextMatch(
+    expectedArtistCompact,
+    candidateAuthorCompact,
   );
-  score += artistScore;
-  if (artistScore > 0) {
-    reasons.push(`artist:${artistScore}`);
+  score += authorArtistScore;
+  if (authorArtistScore > 0) {
+    reasons.push(`artist-author:${authorArtistScore}`);
+  }
+
+  if (authorArtistScore === 0) {
+    const titleArtistScore = scoreSpotifyTextMatch(
+      expectedArtistCompact,
+      candidateTitleCompact,
+    );
+    const reducedTitleArtistScore = Math.min(
+      18,
+      Math.round(titleArtistScore * 0.35),
+    );
+    score += reducedTitleArtistScore;
+    if (reducedTitleArtistScore > 0) {
+      reasons.push(`artist-title:${reducedTitleArtistScore}`);
+    }
   }
 
   const durationMs = getTrackDurationMs(candidate);
@@ -613,6 +696,14 @@ function scoreSpotifySearchCandidate(
   );
   score += penalty.score;
   reasons.push(...penalty.reasons);
+
+  const titleNoisePenalty = getSpotifyCandidateTitleNoisePenalty(
+    spotifyTrack.title,
+    spotifyTrack.artist,
+    candidateTitleRaw,
+  );
+  score += titleNoisePenalty.score;
+  reasons.push(...titleNoisePenalty.reasons);
 
   return { score, reasons };
 }
@@ -664,7 +755,7 @@ async function resolveSpotifyTrackCandidate(
       (currentBest, candidate) => Math.max(currentBest, candidate.score),
       Number.NEGATIVE_INFINITY,
     );
-    if (bestScore >= SPOTIFY_SEARCH_MIN_SCORE) {
+    if (bestScore >= SPOTIFY_SEARCH_EARLY_EXIT_SCORE) {
       break;
     }
   }
