@@ -1,6 +1,13 @@
 import path from "node:path";
 import type { SearchPlatform } from "lavalink-client";
-import { parseBoolean, parseCsvSet, parseCsvValues, parseInteger, parseText } from "../utils/env";
+import {
+  parseBoolean,
+  parseCsvSet,
+  parseCsvValues,
+  parseGuildValueMap,
+  parseInteger,
+  parseText,
+} from "../utils/env";
 
 const DISCORD_SELECT_OPTION_LIMIT = 25;
 const DEFAULT_SBK_MIN = 1;
@@ -64,6 +71,8 @@ type UrlBaseConfig = Readonly<{
   publicBaseUrl: URL;
   internalBaseUrl: URL;
 }>;
+
+type GuildValueMap = ReadonlyMap<string, string>;
 
 function parseOptionalText(raw: string | undefined): string | undefined {
   const value = parseText(raw);
@@ -131,6 +140,7 @@ export type RuntimeConfig = Readonly<{
   upload: UrlBaseConfig;
   music: Readonly<{
     prefix: string;
+    spotifyDebugEnabled: boolean;
     fixedVolume: number;
     maxTrackMinutes: number;
     maxTrackMs: number;
@@ -169,13 +179,17 @@ export type RuntimeConfig = Readonly<{
     modelEndpoint: string;
     modelName: string;
     autoDetectModelNames: readonly string[];
+    googleSearchEnabled: boolean;
     modelApiKey?: string;
+    modelApiKeysByGuild: GuildValueMap;
     modelTimeoutMs: number;
     auxModel: Readonly<{
       endpoint: string;
       modelName: string;
       autoDetectModelNames: readonly string[];
       apiKey?: string;
+      apiKeysByGuild: GuildValueMap;
+      inheritsModelApiKey: boolean;
       timeoutMs: number;
     }>;
     maxHistoryTurns: number;
@@ -196,6 +210,7 @@ export type RuntimeConfig = Readonly<{
     imageEndpoint?: string;
     imageModel?: string;
     imageApiKey?: string;
+    imageApiKeysByGuild: GuildValueMap;
     imageTimeoutMs: number;
     imageDefaultSize: string;
     imageSteps: number;
@@ -287,6 +302,19 @@ function buildSbkRange(): RuntimeConfig["sbk"] {
   };
 }
 
+function resolveGuildValue(
+  valuesByGuild: GuildValueMap,
+  guildId: string | null | undefined,
+  fallback: string | undefined,
+): string | undefined {
+  const normalizedGuildId = guildId?.trim();
+  if (!normalizedGuildId) {
+    return fallback;
+  }
+
+  return valuesByGuild.get(normalizedGuildId) ?? fallback;
+}
+
 function buildRuntimeConfig(): RuntimeConfig {
   const filePort = parseInteger(process.env.FILE_PORT, DEFAULT_FILE_PORT, {
     min: 1,
@@ -326,7 +354,12 @@ function buildRuntimeConfig(): RuntimeConfig {
   const autoDetectModelNames = parseModelAutoDetectNames(
     process.env.MODEL_AUTO_DETECT_NAMES,
   );
+  const googleSearchEnabled = parseBoolean(
+    process.env.MODEL_GOOGLE_SEARCH_ENABLED,
+    false,
+  );
   const modelApiKey = parseOptionalText(process.env.MODEL_API_KEY);
+  const modelApiKeysByGuild = parseGuildValueMap(process.env.MODEL_API_KEY_BY_GUILD);
   const modelTimeoutMs = parseInteger(
     process.env.MODEL_TIMEOUT_MS,
     DEFAULT_MODEL_TIMEOUT_MS,
@@ -338,7 +371,9 @@ function buildRuntimeConfig(): RuntimeConfig {
     process.env.AUX_MODEL_AUTO_DETECT_NAMES,
     [auxModelName],
   );
-  const auxModelApiKey = parseOptionalText(process.env.AUX_MODEL_API_KEY) ?? modelApiKey;
+  const auxModelApiKeyRaw = parseOptionalText(process.env.AUX_MODEL_API_KEY);
+  const auxModelApiKey = auxModelApiKeyRaw ?? modelApiKey;
+  const auxModelApiKeysByGuild = parseGuildValueMap(process.env.AUX_MODEL_API_KEY_BY_GUILD);
   const auxModelTimeoutMs = parseInteger(
     process.env.AUX_MODEL_TIMEOUT_MS,
     modelTimeoutMs,
@@ -409,6 +444,7 @@ function buildRuntimeConfig(): RuntimeConfig {
   const imageEndpoint = parseOptionalText(process.env.IMAGE_ENDPOINT);
   const imageModel = parseOptionalText(process.env.IMAGE_MODEL);
   const imageApiKey = parseOptionalText(process.env.IMAGE_API_KEY);
+  const imageApiKeysByGuild = parseGuildValueMap(process.env.IMAGE_API_KEY_BY_GUILD);
   const imageTimeoutMs = parseInteger(
     process.env.IMAGE_TIMEOUT_MS,
     DEFAULT_IMAGE_TIMEOUT_MS,
@@ -449,6 +485,10 @@ function buildRuntimeConfig(): RuntimeConfig {
     upload: buildUploadUrlConfig(fileHost, filePort),
     music: {
       prefix: parseText(process.env.MUSIC_PREFIX) || DEFAULT_MUSIC_PREFIX,
+      spotifyDebugEnabled: parseBoolean(
+        process.env.SPOTIFY_DEBUG_ENABLED,
+        false,
+      ),
       fixedVolume: DEFAULT_MUSIC_FIXED_VOLUME,
       maxTrackMinutes: musicMaxTrackMinutes,
       maxTrackMs: musicMaxTrackMinutes * 60 * 1000,
@@ -534,13 +574,17 @@ function buildRuntimeConfig(): RuntimeConfig {
       modelEndpoint,
       modelName,
       autoDetectModelNames,
+      googleSearchEnabled,
       modelApiKey,
+      modelApiKeysByGuild,
       modelTimeoutMs,
       auxModel: {
         endpoint: auxModelEndpoint,
         modelName: auxModelName,
         autoDetectModelNames: auxModelAutoDetectNames,
         apiKey: auxModelApiKey,
+        apiKeysByGuild: auxModelApiKeysByGuild,
+        inheritsModelApiKey: auxModelApiKeyRaw === undefined,
         timeoutMs: auxModelTimeoutMs,
       },
       maxHistoryTurns,
@@ -561,6 +605,7 @@ function buildRuntimeConfig(): RuntimeConfig {
       imageEndpoint,
       imageModel,
       imageApiKey,
+      imageApiKeysByGuild,
       imageTimeoutMs,
       imageDefaultSize,
       imageSteps,
@@ -577,4 +622,28 @@ export function getRuntimeConfig(): RuntimeConfig {
   if (cachedRuntimeConfig) return cachedRuntimeConfig;
   cachedRuntimeConfig = buildRuntimeConfig();
   return cachedRuntimeConfig;
+}
+
+export function resolveAiModelApiKey(guildId: string | null | undefined): string | undefined {
+  const { ai } = getRuntimeConfig();
+  return resolveGuildValue(ai.modelApiKeysByGuild, guildId, ai.modelApiKey);
+}
+
+export function resolveAiAuxModelApiKey(guildId: string | null | undefined): string | undefined {
+  const { ai } = getRuntimeConfig();
+  const resolvedAuxApiKey = resolveGuildValue(
+    ai.auxModel.apiKeysByGuild,
+    guildId,
+    ai.auxModel.inheritsModelApiKey ? undefined : ai.auxModel.apiKey,
+  );
+  if (resolvedAuxApiKey !== undefined) {
+    return resolvedAuxApiKey;
+  }
+
+  return resolveAiModelApiKey(guildId);
+}
+
+export function resolveAiImageApiKey(guildId: string | null | undefined): string | undefined {
+  const { ai } = getRuntimeConfig();
+  return resolveGuildValue(ai.imageApiKeysByGuild, guildId, ai.imageApiKey);
 }

@@ -31,6 +31,7 @@ import {
   MAX_TRACK_MINUTES,
   MAX_TRACK_MS,
   OWNER_IDS,
+  SPOTIFY_DEBUG_ENABLED,
   PREFIX,
   UPLOAD_DIR,
 } from "./constants";
@@ -226,6 +227,10 @@ function logSpotifyDebug(
   event: string,
   details?: Record<string, unknown>,
 ): void {
+  if (!SPOTIFY_DEBUG_ENABLED) {
+    return;
+  }
+
   const prefix =
     `[spotify-debug] guild=${context.guildId} ` +
     `channel=${context.channelId} user=${context.userId} event=${event}`;
@@ -244,6 +249,10 @@ function warnSpotifyDebug(
   details?: Record<string, unknown>,
   error?: unknown,
 ): void {
+  if (!SPOTIFY_DEBUG_ENABLED) {
+    return;
+  }
+
   const prefix =
     `[spotify-debug] guild=${context.guildId} ` +
     `channel=${context.channelId} user=${context.userId} event=${event}`;
@@ -272,6 +281,10 @@ function errorSpotifyDebug(
   details?: Record<string, unknown>,
   error?: unknown,
 ): void {
+  if (!SPOTIFY_DEBUG_ENABLED) {
+    return;
+  }
+
   const prefix =
     `[spotify-debug] guild=${context.guildId} ` +
     `channel=${context.channelId} user=${context.userId} event=${event}`;

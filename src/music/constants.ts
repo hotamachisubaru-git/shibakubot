@@ -3,6 +3,7 @@ import { getRuntimeConfig } from "../config/runtime";
 const runtimeConfig = getRuntimeConfig();
 
 export const PREFIX = runtimeConfig.music.prefix;
+export const SPOTIFY_DEBUG_ENABLED = runtimeConfig.music.spotifyDebugEnabled;
 export const FIXED_VOLUME = runtimeConfig.music.fixedVolume;
 export const MAX_SELECTION_RESULTS = runtimeConfig.music.maxSelectionResults;
 export const PENDING_SEARCH_TTL_MS = runtimeConfig.music.pendingSearchTtlMs;

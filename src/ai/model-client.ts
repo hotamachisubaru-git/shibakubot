@@ -1,5 +1,13 @@
 export type ChatRole = "system" | "user" | "assistant";
 
+import {
+  ApiRateLimitError,
+  assertApiRequestAllowed,
+  buildApiRateLimitScopeKey,
+  buildRateLimitErrorFromResponse,
+  rememberApiRateLimit,
+} from "./rate-limit";
+
 export interface ChatMessage {
   role: ChatRole;
   content: string;
@@ -9,10 +17,21 @@ export interface ModelClient {
   generateReply(messages: readonly ChatMessage[]): Promise<string>;
 }
 
+export class ModelRequestError extends Error {
+  constructor(
+    message: string,
+    public readonly statusCode: number,
+  ) {
+    super(message);
+    this.name = "ModelRequestError";
+  }
+}
+
 export interface OllamaCompatibleClientOptions {
   endpoint: string;
   modelName: string;
   autoDetectModelNames?: readonly string[];
+  googleSearchEnabled?: boolean;
   apiKey?: string;
   timeoutMs: number;
 }
@@ -29,35 +48,27 @@ export class OllamaCompatibleClient implements ModelClient {
   private cachedResolvedModel:
     | Readonly<{ modelName: string; expiresAt: number }>
     | undefined;
+  private readonly rateLimitScopeKey: string;
+  private readonly configuredModelName: string;
 
-  constructor(private readonly options: OllamaCompatibleClientOptions) {}
+  constructor(private readonly options: OllamaCompatibleClientOptions) {
+    this.rateLimitScopeKey = buildApiRateLimitScopeKey(options.endpoint, options.apiKey);
+    this.configuredModelName = normalizeConfiguredModelName(
+      options.endpoint,
+      options.modelName,
+    );
+  }
 
   async generateReply(messages: readonly ChatMessage[]): Promise<string> {
     const abortController = new AbortController();
     const timeout = setTimeout(() => abortController.abort(), this.options.timeoutMs);
 
     try {
+      assertApiRequestAllowed(this.rateLimitScopeKey, "モデル API");
       const modelName = await this.resolveModelName();
-      const requestBody = JSON.stringify({
-        model: modelName,
-        messages,
-        stream: false,
-      });
-      const response = await fetch(this.options.endpoint, {
-        method: "POST",
-        headers: this.buildHeaders(),
-        body: requestBody,
-        signal: abortController.signal,
-      });
-
-      if (!response.ok) {
-        const body = truncateErrorBody(await response.text());
-        throw new Error(
-          `モデルへのリクエストに失敗しました: ${response.status} ${response.statusText}${body ? ` | ${body}` : ""}`,
-        );
-      }
-
-      const payload = (await response.json()) as unknown;
+      const payload = this.shouldUseGeminiGoogleSearch()
+        ? await this.generateGeminiGroundedReply(modelName, messages, abortController.signal)
+        : await this.generateChatCompletionReply(modelName, messages, abortController.signal);
       const reply = extractAssistantText(payload);
       if (!reply) {
         throw new Error("モデル応答にアシスタントのテキストが含まれていませんでした。");
@@ -65,6 +76,9 @@ export class OllamaCompatibleClient implements ModelClient {
 
       return reply.trim();
     } catch (error) {
+      if (error instanceof ApiRateLimitError) {
+        throw error;
+      }
       if (error instanceof Error && error.name === "AbortError") {
         throw new Error(`モデルへのリクエストがタイムアウトしました (${this.options.timeoutMs} ms)。`);
       }
@@ -74,10 +88,14 @@ export class OllamaCompatibleClient implements ModelClient {
     }
   }
 
+  private shouldUseGeminiGoogleSearch(): boolean {
+    return this.options.googleSearchEnabled === true && isGeminiApiEndpoint(this.options.endpoint);
+  }
+
   private async resolveModelName(): Promise<string> {
     const candidates = normalizeModelEntries(this.options.autoDetectModelNames);
     if (candidates.length === 0) {
-      return this.options.modelName;
+      return this.configuredModelName;
     }
 
     const now = Date.now();
@@ -86,7 +104,7 @@ export class OllamaCompatibleClient implements ModelClient {
     }
 
     const detectedModel = await this.detectRunningModel(candidates);
-    const resolvedModel = detectedModel ?? this.options.modelName;
+    const resolvedModel = detectedModel ?? this.configuredModelName;
     this.cachedResolvedModel = {
       modelName: resolvedModel,
       expiresAt: now + MODEL_DETECTION_CACHE_TTL_MS,
@@ -124,6 +142,56 @@ export class OllamaCompatibleClient implements ModelClient {
     return undefined;
   }
 
+  private async generateChatCompletionReply(
+    modelName: string,
+    messages: readonly ChatMessage[],
+    signal: AbortSignal,
+  ): Promise<unknown> {
+    const requestBody = JSON.stringify({
+      model: modelName,
+      messages,
+      stream: false,
+    });
+    const response = await fetch(this.options.endpoint, {
+      method: "POST",
+      headers: this.buildHeaders(),
+      body: requestBody,
+      signal,
+    });
+
+    return await parseModelResponse(response, this.rateLimitScopeKey);
+  }
+
+  private async generateGeminiGroundedReply(
+    modelName: string,
+    messages: readonly ChatMessage[],
+    signal: AbortSignal,
+  ): Promise<unknown> {
+    const endpoint = buildGeminiGenerateContentEndpoint(this.options.endpoint, modelName);
+    const systemInstruction = extractSystemInstruction(messages);
+    const contents = buildGeminiContents(messages);
+    const requestBody = JSON.stringify({
+      ...(systemInstruction
+        ? {
+            system_instruction: {
+              parts: [{ text: systemInstruction }],
+            },
+          }
+        : {}),
+      contents,
+      tools: [{ google_search: {} }],
+    });
+
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: this.buildGeminiHeaders(),
+      body: requestBody,
+      signal,
+    });
+
+    return await parseModelResponse(response, this.rateLimitScopeKey);
+  }
+
   private buildHeaders(): Record<string, string> {
     const headers: Record<string, string> = {
       "Content-Type": "application/json; charset=utf-8",
@@ -131,6 +199,18 @@ export class OllamaCompatibleClient implements ModelClient {
 
     if (this.options.apiKey) {
       headers.Authorization = `Bearer ${this.options.apiKey}`;
+    }
+
+    return headers;
+  }
+
+  private buildGeminiHeaders(): Record<string, string> {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json; charset=utf-8",
+    };
+
+    if (this.options.apiKey) {
+      headers["x-goog-api-key"] = this.options.apiKey;
     }
 
     return headers;
@@ -214,6 +294,18 @@ function extractAssistantText(payload: unknown): string | undefined {
     return undefined;
   }
 
+  const candidates = payload.candidates;
+  if (Array.isArray(candidates) && candidates.length > 0) {
+    const firstCandidate = candidates[0];
+    if (isRecord(firstCandidate)) {
+      const candidateContent = firstCandidate.content;
+      const candidateText = extractTextFromContent(candidateContent);
+      if (candidateText) {
+        return candidateText;
+      }
+    }
+  }
+
   const directMessage = payload.message;
   if (isRecord(directMessage) && typeof directMessage.content === "string") {
     return directMessage.content;
@@ -242,27 +334,7 @@ function extractAssistantText(payload: unknown): string | undefined {
     return undefined;
   }
 
-  const choiceContent = choiceMessage.content;
-  if (typeof choiceContent === "string") {
-    return choiceContent;
-  }
-
-  if (!Array.isArray(choiceContent)) {
-    return undefined;
-  }
-
-  const textParts: string[] = [];
-  for (const part of choiceContent) {
-    if (!isRecord(part)) {
-      continue;
-    }
-    if (typeof part.text === "string") {
-      textParts.push(part.text);
-    }
-  }
-
-  const merged = textParts.join("").trim();
-  return merged.length > 0 ? merged : undefined;
+  return extractTextFromContent(choiceMessage);
 }
 
 function extractRunningModelNames(payload: unknown): string[] {
@@ -353,6 +425,149 @@ function normalizeModelName(value: string): string {
   return value.trim().toLowerCase();
 }
 
+async function parseModelResponse(
+  response: Response,
+  rateLimitScopeKey: string,
+): Promise<unknown> {
+  if (!response.ok) {
+    const rawBody = await response.text();
+    if (response.status === 429) {
+      const rateLimitError = buildRateLimitErrorFromResponse(
+        response,
+        "モデル API",
+        rawBody,
+      );
+      rememberApiRateLimit(rateLimitScopeKey, rateLimitError.retryAfterMs);
+      throw rateLimitError;
+    }
+
+    const body = truncateErrorBody(rawBody);
+    throw new ModelRequestError(
+      `モデルへのリクエストに失敗しました: ${response.status} ${response.statusText}${body ? ` | ${body}` : ""}`,
+      response.status,
+    );
+  }
+
+  return (await response.json()) as unknown;
+}
+
+function isGeminiApiEndpoint(endpoint: string): boolean {
+  try {
+    return new URL(endpoint).hostname === "generativelanguage.googleapis.com";
+  } catch {
+    return false;
+  }
+}
+
+function normalizeConfiguredModelName(endpoint: string, modelName: string): string {
+  if (!isGeminiApiEndpoint(endpoint)) {
+    return modelName;
+  }
+
+  return normalizeGeminiModelName(modelName);
+}
+
+function normalizeGeminiModelName(modelName: string): string {
+  const trimmed = modelName.trim();
+  if (!trimmed) {
+    return trimmed;
+  }
+
+  const withoutPrefix = trimmed.replace(/^models\//iu, "");
+  const normalizedKey = withoutPrefix.toLowerCase();
+
+  const previewAliasMap: Readonly<Record<string, string>> = {
+    "gemini-3.1-pro": "gemini-3.1-pro-preview",
+    "gemini-3.1-flash-lite": "gemini-3.1-flash-lite-preview",
+    "gemini-3.1-flash-live": "gemini-3.1-flash-live-preview",
+  };
+
+  return previewAliasMap[normalizedKey] ?? withoutPrefix;
+}
+
+function buildGeminiGenerateContentEndpoint(endpoint: string, modelName: string): string {
+  const url = new URL(endpoint);
+  url.pathname = `/v1beta/models/${encodeURIComponent(modelName)}:generateContent`;
+  url.search = "";
+  url.hash = "";
+  return url.toString();
+}
+
+function extractSystemInstruction(messages: readonly ChatMessage[]): string | undefined {
+  const systemMessages = messages
+    .filter((message) => message.role === "system")
+    .map((message) => message.content.trim())
+    .filter((content) => content.length > 0);
+
+  if (systemMessages.length === 0) {
+    return undefined;
+  }
+
+  return systemMessages.join("\n\n");
+}
+
+function buildGeminiContents(messages: readonly ChatMessage[]): GeminiContent[] {
+  const contents: GeminiContent[] = [];
+
+  for (const message of messages) {
+    if (message.role === "system") {
+      continue;
+    }
+
+    const text = message.content.trim();
+    if (!text) {
+      continue;
+    }
+
+    const role = message.role === "assistant" ? "model" : "user";
+    const previous = contents[contents.length - 1];
+    if (previous && previous.role === role) {
+      previous.parts.push({ text });
+      continue;
+    }
+
+    contents.push({
+      role,
+      parts: [{ text }],
+    });
+  }
+
+  return contents;
+}
+
+function extractTextFromContent(content: unknown): string | undefined {
+  if (!isRecord(content)) {
+    return undefined;
+  }
+
+  const rawContent = content.content;
+  if (typeof rawContent === "string") {
+    return rawContent;
+  }
+
+  const parts = Array.isArray(content.parts)
+    ? content.parts
+    : Array.isArray(rawContent)
+      ? rawContent
+      : undefined;
+  if (!parts) {
+    return undefined;
+  }
+
+  const textParts: string[] = [];
+  for (const part of parts) {
+    if (!isRecord(part)) {
+      continue;
+    }
+    if (typeof part.text === "string") {
+      textParts.push(part.text);
+    }
+  }
+
+  const merged = textParts.join("").trim();
+  return merged.length > 0 ? merged : undefined;
+}
+
 function truncateErrorBody(value: string, maxLength = 300): string {
   const normalized = value.trim().replace(/\s+/g, " ");
   if (normalized.length <= maxLength) {
@@ -360,3 +575,8 @@ function truncateErrorBody(value: string, maxLength = 300): string {
   }
   return `${normalized.slice(0, maxLength)}...`;
 }
+
+type GeminiContent = {
+  role: "user" | "model";
+  parts: Array<{ text: string }>;
+};

@@ -1,3 +1,11 @@
+import {
+  ApiRateLimitError,
+  assertApiRequestAllowed,
+  buildApiRateLimitScopeKey,
+  buildRateLimitErrorFromResponse,
+  rememberApiRateLimit,
+} from "./rate-limit";
+
 export interface ImageGenerationRequest {
   prompt: string;
   size: string;
@@ -21,13 +29,18 @@ export interface SdxlImageClientOptions {
 }
 
 export class SdxlImageClient {
-  constructor(private readonly options: SdxlImageClientOptions) {}
+  private readonly rateLimitScopeKey: string;
+
+  constructor(private readonly options: SdxlImageClientOptions) {
+    this.rateLimitScopeKey = buildApiRateLimitScopeKey(options.endpoint, options.apiKey);
+  }
 
   async generateImage(request: ImageGenerationRequest): Promise<GeneratedImage> {
     const abortController = new AbortController();
     const timeout = setTimeout(() => abortController.abort(), this.options.timeoutMs);
 
     try {
+      assertApiRequestAllowed(this.rateLimitScopeKey, "画像生成 API");
       const { width, height } = parseImageSize(request.size);
       const response = await fetch(resolveTxt2ImgEndpoint(this.options.endpoint), {
         method: 'POST',
@@ -51,7 +64,18 @@ export class SdxlImageClient {
       });
 
       if (!response.ok) {
-        const body = truncateErrorBody(await response.text());
+        const rawBody = await response.text();
+        if (response.status === 429) {
+          const rateLimitError = buildRateLimitErrorFromResponse(
+            response,
+            "画像生成 API",
+            rawBody,
+          );
+          rememberApiRateLimit(this.rateLimitScopeKey, rateLimitError.retryAfterMs);
+          throw rateLimitError;
+        }
+
+        const body = truncateErrorBody(rawBody);
         throw new Error(
           `SDXL 画像生成リクエストに失敗しました: ${response.status} ${response.statusText}${body ? ` | ${body}` : ''}`
         );
@@ -65,6 +89,9 @@ export class SdxlImageClient {
         mimeType: 'image/png'
       };
     } catch (error) {
+      if (error instanceof ApiRateLimitError) {
+        throw error;
+      }
       if (error instanceof Error && error.name === 'AbortError') {
         throw new Error(`画像生成リクエストがタイムアウトしました (${this.options.timeoutMs} ms)。`);
       }

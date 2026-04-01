@@ -2,20 +2,20 @@ import type { Collection, Guild, GuildBasedChannel, Message } from "discord.js";
 import { PermissionFlagsBits } from "discord.js";
 import { getRuntimeConfig } from "../config/runtime";
 import { getAiGuildMemory, setAiGuildMemory } from "../data";
-import { type ChatMessage, OllamaCompatibleClient } from "./model-client";
+import {
+  getGuildMemoryAuxModelClient,
+  getGuildMemoryFallbackModelClient,
+  hasDistinctGuildMemoryFallbackModel,
+} from "./clientFactory";
+import {
+  type ChatMessage,
+  ModelRequestError,
+} from "./model-client";
 import { limitText, singleLine } from "./textUtils";
 
 const aiConfig = getRuntimeConfig().ai;
 const guildMemoryConfig = aiConfig.guildMemory;
 const auxModelConfig = aiConfig.auxModel;
-
-const guildMemoryModelClient = new OllamaCompatibleClient({
-  endpoint: auxModelConfig.endpoint,
-  modelName: auxModelConfig.modelName,
-  autoDetectModelNames: auxModelConfig.autoDetectModelNames,
-  apiKey: auxModelConfig.apiKey,
-  timeoutMs: auxModelConfig.timeoutMs,
-});
 
 type ReadableGuildTextChannel = GuildBasedChannel & {
   name: string;
@@ -343,5 +343,20 @@ async function summarizeGuildTranscript(
     },
   ];
 
-  return guildMemoryModelClient.generateReply(messages);
+  try {
+    return await getGuildMemoryAuxModelClient(guild.id).generateReply(messages);
+  } catch (error) {
+    if (
+      error instanceof ModelRequestError &&
+      error.statusCode === 404 &&
+      hasDistinctGuildMemoryFallbackModel(guild.id)
+    ) {
+      console.warn(
+        `[ai] guild memory aux model unavailable guild=${guild.id} auxModel=${auxModelConfig.modelName} fallbackModel=${aiConfig.modelName}`,
+      );
+      return await getGuildMemoryFallbackModelClient(guild.id).generateReply(messages);
+    }
+
+    throw error;
+  }
 }

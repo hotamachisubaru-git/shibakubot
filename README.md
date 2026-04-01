@@ -66,16 +66,21 @@ OWNER_IDS=111111111111111111
 IMMUNE_IDS=
 LOG_CHANNEL_ID=
 
-# AI chat (Ollama/OpenAI-compatible endpoint)
+# AI chat (Ollama/OpenAI-compatible endpoint / Gemini compatible)
 MODEL_ENDPOINT=http://localhost:11434/api/chat
 MODEL_NAME=gpt-oss:20b
 MODEL_AUTO_DETECT_NAMES=gemma3:27b,gpt-oss:20b
+MODEL_GOOGLE_SEARCH_ENABLED=false
 MODEL_API_KEY=
+# guildId:key をカンマ区切りで指定すると、guild ごとに API キーを上書きできます
+MODEL_API_KEY_BY_GUILD=
 MODEL_TIMEOUT_MS=120000
-AUX_MODEL_ENDPOINT=http://localhost:11434/api/chat
-AUX_MODEL_NAME=gemma3:27b
-AUX_MODEL_AUTO_DETECT_NAMES=gemma3:27b
+# Leave AUX_MODEL_* empty to reuse MODEL_*
+AUX_MODEL_ENDPOINT=
+AUX_MODEL_NAME=
+AUX_MODEL_AUTO_DETECT_NAMES=
 AUX_MODEL_API_KEY=
+AUX_MODEL_API_KEY_BY_GUILD=
 AUX_MODEL_TIMEOUT_MS=120000
 SYSTEM_PROMPT=あなたは親切で実用的なAIアシスタントです。回答は日本語で行ってください。
 MAX_HISTORY_TURNS=8
@@ -95,6 +100,7 @@ AI_GUILD_MEMORY_LIVE_MIN_INTERVAL_MINUTES=15
 IMAGE_ENDPOINT=
 IMAGE_MODEL=
 IMAGE_API_KEY=
+IMAGE_API_KEY_BY_GUILD=
 IMAGE_TIMEOUT_MS=120000
 IMAGE_DEFAULT_SIZE=1024x1024
 IMAGE_STEPS=25
@@ -125,12 +131,28 @@ LAVALINK_TRACE_ENABLED=false
 CLEAR_GLOBAL=true
 ```
 
+Gemini を使う場合の設定例:
+```env
+MODEL_ENDPOINT=https://generativelanguage.googleapis.com/v1beta/openai/chat/completions
+MODEL_NAME=gemini-3.1-flash-lite-preview
+MODEL_AUTO_DETECT_NAMES=none
+MODEL_GOOGLE_SEARCH_ENABLED=true
+MODEL_API_KEY=your_gemini_api_key
+AUX_MODEL_AUTO_DETECT_NAMES=none
+```
+
 ### 主な可変項目（補足）
 - `GUILD_IDS` はカンマ区切り（`GUILD_ID` 1件指定も可）
 - `UPLOAD_INTERNAL_URL` は Lavalink から到達できるURLを指定
 - `IMAGE_ENDPOINT` 未設定時は `/ai image` は利用不可
 - `MODEL_AUTO_DETECT_NAMES` を設定すると、Ollama の実行中モデル一覧から先頭一致モデルを自動選択（`none` で無効化）
 - 検出に失敗した場合は `MODEL_NAME` に自動フォールバック
+- `MODEL_GOOGLE_SEARCH_ENABLED=true` かつ Gemini API 利用時は、Google Search grounding を有効化して最新情報を確認
+- Gemini 3.1 系は `gemini-3.1-pro-preview` / `gemini-3.1-flash-lite-preview` などの正式名を推奨（`models/` 接頭辞や `-preview` 省略は bot 側で最低限補正）
+- `AUX_MODEL_*` を空欄にすると `MODEL_*` をそのまま再利用
+- `MODEL_API_KEY_BY_GUILD` / `AUX_MODEL_API_KEY_BY_GUILD` / `IMAGE_API_KEY_BY_GUILD` は `guildId:key` をカンマ区切りで指定
+- guild 別キーが未指定のサーバーは通常の `MODEL_API_KEY` / `AUX_MODEL_API_KEY` / `IMAGE_API_KEY` にフォールバック
+- `AUX_MODEL_API_KEY` 未設定時は、guild 別設定を含めて `MODEL_API_KEY` 側へフォールバック
 - `AUX_MODEL_*` を設定すると、サーバー特徴メモなどの補助AI処理だけ別モデルに分離可能
 - 役割固定で使いたい場合は `MODEL_AUTO_DETECT_NAMES=none` と `AUX_MODEL_AUTO_DETECT_NAMES=none` を推奨
 - `AI_GUILD_MEMORY_ENABLED=true` で、起動時に各サーバーの最近ログを少量要約してサーバー特徴メモを更新

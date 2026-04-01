@@ -12,13 +12,14 @@ import {
   type MainCharacterId,
 } from "./character-presets";
 import { CharacterStore } from "./character-store";
+import { getConversationModelClient, getImageClient } from "./clientFactory";
 import { ConversationStore } from "./conversation-store";
-import { SdxlImageClient } from "./image-client";
 import {
   type ChatMessage,
-  OllamaCompatibleClient,
+  ModelRequestError,
 } from "./model-client";
 import { PromptStore } from "./prompt-store";
+import { ApiRateLimitError } from "./rate-limit";
 import { ReplyStateStore } from "./reply-state-store";
 import { getGuildIdFromConversationKey } from "./session-key";
 import {
@@ -47,25 +48,6 @@ const conversationStore = new ConversationStore(
 const promptStore = new PromptStore(aiConfig.systemPrompt);
 const characterStore = new CharacterStore();
 const replyStateStore = new ReplyStateStore();
-const modelClient = new OllamaCompatibleClient({
-  endpoint: aiConfig.modelEndpoint,
-  modelName: aiConfig.modelName,
-  autoDetectModelNames: aiConfig.autoDetectModelNames,
-  apiKey: aiConfig.modelApiKey,
-  timeoutMs: aiConfig.modelTimeoutMs,
-});
-const imageClient = aiConfig.imageEndpoint
-  ? new SdxlImageClient({
-      endpoint: aiConfig.imageEndpoint,
-      modelName: aiConfig.imageModel,
-      apiKey: aiConfig.imageApiKey,
-      timeoutMs: aiConfig.imageTimeoutMs,
-      steps: aiConfig.imageSteps,
-      cfgScale: aiConfig.imageCfgScale,
-      samplerName: aiConfig.imageSamplerName,
-      negativePrompt: aiConfig.imageNegativePrompt,
-    })
-  : undefined;
 
 const STALE_REPLY_STATE_ERROR = "STALE_REPLY_STATE";
 
@@ -170,9 +152,10 @@ async function handleChatCommand(
     });
   } catch (error) {
     console.error("[chat] 失敗:", error);
-    await interaction.editReply(
-      "モデル応答の取得に失敗しました。`MODEL_ENDPOINT` / `MODEL_NAME` / `MODEL_API_KEY` を確認してください。",
-    );
+    await interaction.editReply(buildModelErrorMessage(
+      error,
+      "モデル応答の取得に失敗しました。`MODEL_ENDPOINT` / `MODEL_NAME` / `MODEL_API_KEY` / `MODEL_API_KEY_BY_GUILD` を確認してください。",
+    ));
   }
 }
 
@@ -255,9 +238,10 @@ async function handleReplyCommand(
     );
   } catch (error) {
     console.error("[reply] 失敗:", error);
-    await interaction.editReply(
-      "返信の作成に失敗しました。`MODEL_ENDPOINT` / `MODEL_NAME` / `MODEL_API_KEY` とチャンネル権限を確認してください。",
-    );
+    await interaction.editReply(buildModelErrorMessage(
+      error,
+      "返信の作成に失敗しました。`MODEL_ENDPOINT` / `MODEL_NAME` / `MODEL_API_KEY` / `MODEL_API_KEY_BY_GUILD` とチャンネル権限を確認してください。",
+    ));
   }
 }
 
@@ -351,9 +335,10 @@ async function handleRegenCommand(
     }
 
     console.error("[regen] 失敗:", error);
-    await interaction.editReply(
-      "返信の再生成に失敗しました。`MODEL_ENDPOINT` / `MODEL_NAME` / `MODEL_API_KEY` とチャンネル権限を確認してください。",
-    );
+    await interaction.editReply(buildModelErrorMessage(
+      error,
+      "返信の再生成に失敗しました。`MODEL_ENDPOINT` / `MODEL_NAME` / `MODEL_API_KEY` / `MODEL_API_KEY_BY_GUILD` とチャンネル権限を確認してください。",
+    ));
   }
 }
 
@@ -373,6 +358,7 @@ async function handleImageCommand(
     return;
   }
 
+  const imageClient = getImageClient(interaction.guildId ?? "dm");
   if (!imageClient) {
     await interaction.reply({
       content: "画像生成は未設定です。`IMAGE_ENDPOINT` を設定してください。",
@@ -416,7 +402,9 @@ async function handleImageCommand(
   } catch (error) {
     console.error("[image] 失敗:", error);
     await interaction.editReply(
-      "画像生成に失敗しました。`IMAGE_ENDPOINT` / `IMAGE_MODEL` / `IMAGE_API_KEY` / `IMAGE_STEPS` / `IMAGE_CFG_SCALE` / `IMAGE_SAMPLER_NAME` の設定を確認してください。",
+      error instanceof ApiRateLimitError
+        ? error.message
+        : "画像生成に失敗しました。`IMAGE_ENDPOINT` / `IMAGE_MODEL` / `IMAGE_API_KEY` / `IMAGE_API_KEY_BY_GUILD` / `IMAGE_STEPS` / `IMAGE_CFG_SCALE` / `IMAGE_SAMPLER_NAME` の設定を確認してください。",
     );
   }
 }
@@ -568,11 +556,25 @@ async function generateReplyForConversation(
     userMessage,
   );
 
-  return modelClient.generateReply(payload);
+  return getConversationModelClient(
+    getGuildIdFromConversationKey(conversationKey),
+  ).generateReply(payload);
 }
 
 function isStaleReplyStateError(error: unknown): boolean {
   return error instanceof Error && error.message === STALE_REPLY_STATE_ERROR;
+}
+
+function buildModelErrorMessage(error: unknown, fallbackMessage: string): string {
+  if (error instanceof ApiRateLimitError) {
+    return error.message;
+  }
+
+  if (error instanceof ModelRequestError && error.statusCode === 429) {
+    return "モデル API の利用枠を超過しました。しばらく待ってから再試行するか、ギルド別 API キー設定を含む課金・使用量を確認してください。";
+  }
+
+  return fallbackMessage;
 }
 
 function buildConversationPayload(

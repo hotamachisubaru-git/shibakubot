@@ -10,6 +10,27 @@ export function parseCsvSet(raw: string | undefined): ReadonlySet<string> {
   return new Set(parseCsvValues(raw));
 }
 
+export function parseGuildValueMap(raw: string | undefined): ReadonlyMap<string, string> {
+  const map = new Map<string, string>();
+
+  for (const entry of parseCsvValues(raw)) {
+    const separatorIndex = entry.indexOf(":");
+    if (separatorIndex <= 0) {
+      continue;
+    }
+
+    const guildId = entry.slice(0, separatorIndex).trim();
+    const value = entry.slice(separatorIndex + 1).trim();
+    if (!guildId || !value) {
+      continue;
+    }
+
+    map.set(guildId, value);
+  }
+
+  return map;
+}
+
 type IntRange = Readonly<{
   min?: number;
   max?: number;
