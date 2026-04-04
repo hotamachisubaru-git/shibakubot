@@ -26,6 +26,7 @@ import { getRuntimeConfig } from "../config/runtime";
 import { BACKUP_ROOT, GUILD_DB_ROOT } from "../constants/paths";
 import { COMMON_MESSAGES } from "../constants/messages";
 import {
+  getAiChatEnabled,
   addImmuneId,
   checkpointGuildDb,
   getGuildDbInfo,
@@ -38,6 +39,7 @@ import {
   getSetting,
   removeImmuneId,
   resetAllCounts,
+  setAiChatEnabled,
   setCountGuild,
   setMaintenanceEnabled,
   setSbkRange,
@@ -1490,6 +1492,74 @@ export async function handleMenu(
               content: nextEnabled
                 ? "✅ メンテナンスモードを有効化しました。"
                 : "✅ メンテナンスモードを無効化しました。",
+              components: [],
+            });
+            sub.stop("done");
+          });
+
+          bindPanelCleanup(sub, panel);
+          break;
+        }
+
+        /* --- AIチャット切替 --- */
+        case "menu_ai_chat": {
+          if (
+            !(await requireAdminGuildOwnerOrDev(
+              btn,
+              "AIチャット切替は管理者 / サーバーオーナー / 開発者のみ利用できます。",
+            ))
+          )
+            break;
+
+          const enabled = getAiChatEnabled(gid);
+          const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+            new ButtonBuilder()
+              .setCustomId("ai_chat_on")
+              .setLabel("ON")
+              .setStyle(ButtonStyle.Success)
+              .setDisabled(enabled),
+            new ButtonBuilder()
+              .setCustomId("ai_chat_off")
+              .setLabel("OFF")
+              .setStyle(ButtonStyle.Danger)
+              .setDisabled(!enabled),
+            new ButtonBuilder()
+              .setCustomId("ai_chat_cancel")
+              .setLabel("キャンセル")
+              .setStyle(ButtonStyle.Secondary),
+          );
+
+          await btn.reply({
+            content: `現在のAIチャット機能: **${enabled ? "ON" : "OFF"}**`,
+            components: [row],
+            flags: "Ephemeral",
+          });
+
+          const panel = await btn.fetchReply();
+          const sub = createPanelCollector(btn, panel);
+
+          sub.on("collect", async (i) => {
+            if (!i.isButton()) return;
+
+            if (i.customId === "ai_chat_cancel") {
+              await i.update({
+                content: "キャンセルしました。",
+                components: [],
+              });
+              sub.stop("cancel");
+              return;
+            }
+
+            if (i.customId !== "ai_chat_on" && i.customId !== "ai_chat_off") {
+              return;
+            }
+
+            const nextEnabled = i.customId === "ai_chat_on";
+            setAiChatEnabled(gid, nextEnabled);
+            await i.update({
+              content: nextEnabled
+                ? "✅ AIチャット機能を有効化しました。"
+                : "✅ AIチャット機能を無効化しました。",
               components: [],
             });
             sub.stop("done");

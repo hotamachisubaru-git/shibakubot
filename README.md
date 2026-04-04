@@ -107,6 +107,17 @@ IMAGE_STEPS=25
 IMAGE_CFG_SCALE=6.5
 IMAGE_SAMPLER_NAME=DPM++ 2M Karras
 IMAGE_NEGATIVE_PROMPT=
+TTS_ENDPOINT=
+TTS_MODEL=
+TTS_VOICE=
+# voice-models.com のページURLではなく、実際の Hugging Face ZIP URL を指定
+TTS_MODEL_URL=
+TTS_API_KEY=
+TTS_API_KEY_BY_GUILD=
+TTS_TIMEOUT_MS=120000
+TTS_RESPONSE_FORMAT=mp3
+TTS_SPEED=1.0
+TTS_PITCH=
 
 # 音楽/アップロード
 FILE_DIR=./files
@@ -145,6 +156,10 @@ AUX_MODEL_AUTO_DETECT_NAMES=none
 - `GUILD_IDS` はカンマ区切り（`GUILD_ID` 1件指定も可）
 - `UPLOAD_INTERNAL_URL` は Lavalink から到達できるURLを指定
 - `IMAGE_ENDPOINT` 未設定時は `/ai image` は利用不可
+- `TTS_ENDPOINT` 未設定時は `/ai tts` は利用不可
+- `voice-models.com` のURLはモデル一覧ページなので、そのままでは使えません。実際に使用するのはページ内の Hugging Face ZIP URL です
+- `TTS_MODEL_URL` に RVC モデル ZIP URL を入れると、対応バックエンド側へそのURLを渡します
+- `TTS_ENDPOINT` は TTS または TTS+RVC バックエンドのエンドポイントを想定しています
 - `MODEL_AUTO_DETECT_NAMES` を設定すると、Ollama の実行中モデル一覧から先頭一致モデルを自動選択（`none` で無効化）
 - 検出に失敗した場合は `MODEL_NAME` に自動フォールバック
 - `MODEL_GOOGLE_SEARCH_ENABLED=true` かつ Gemini API 利用時は、Google Search grounding を有効化して最新情報を確認
@@ -195,6 +210,7 @@ AUX_MODEL_AUTO_DETECT_NAMES=none
 - `/ai reply message_id instruction? new_session? private?` 指定メッセージ返信生成
 - `/ai regen private?` 直前 `/ai reply` を再生成
 - `/ai image prompt size? private?` 画像生成（`IMAGE_ENDPOINT` 設定時）
+- `/ai tts message private?` TTS音声生成（`TTS_ENDPOINT` 設定時）
 - `/ai history turns? private?` 会話履歴表示
 - `/ai setprompt content private? reset_history?` システムプロンプト更新
 - `/ai setcharacter character private? reset_history?` 口調プリセット適用

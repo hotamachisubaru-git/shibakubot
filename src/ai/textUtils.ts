@@ -151,6 +151,24 @@ export function extensionFromMimeType(mimeType: string): string {
   if (normalized.includes("webp")) {
     return "webp";
   }
+  if (normalized.includes("mpeg") || normalized.includes("mp3")) {
+    return "mp3";
+  }
+  if (normalized.includes("wav")) {
+    return "wav";
+  }
+  if (normalized.includes("flac")) {
+    return "flac";
+  }
+  if (normalized.includes("aac")) {
+    return "aac";
+  }
+  if (normalized.includes("ogg") || normalized.includes("opus")) {
+    return "ogg";
+  }
+  if (normalized.includes("mp4") || normalized.includes("m4a")) {
+    return "m4a";
+  }
   return "bin";
 }
 

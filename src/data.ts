@@ -954,6 +954,15 @@ export function setMaintenanceEnabled(gid: string, enabled: boolean): void {
   setSetting(gid, SETTING_KEYS.maintenanceEnabled, enabled ? "true" : "false");
 }
 
+// ---------- AIチャット有効化設定 ----------
+export function getAiChatEnabled(gid: string): boolean {
+  return parseSettingBoolean(getSetting(gid, SETTING_KEYS.aiChatEnabled), true);
+}
+
+export function setAiChatEnabled(gid: string, enabled: boolean): void {
+  setSetting(gid, SETTING_KEYS.aiChatEnabled, enabled ? "true" : "false");
+}
+
 export function setSbkRange(gid: string, min: number, max: number): SbkRange {
   const context = getGuildDbContext(gid);
   const normalizedMin =

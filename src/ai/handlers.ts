@@ -4,7 +4,7 @@ import {
   type Message,
 } from "discord.js";
 import { getRuntimeConfig } from "../config/runtime";
-import { getAiGuildMemory } from "../data";
+import { getAiChatEnabled, getAiGuildMemory } from "../data";
 import { SLASH_COMMAND } from "../constants/commands";
 import {
   getCharacterQuickReply,
@@ -12,7 +12,11 @@ import {
   type MainCharacterId,
 } from "./character-presets";
 import { CharacterStore } from "./character-store";
-import { getConversationModelClient, getImageClient } from "./clientFactory";
+import {
+  getConversationModelClient,
+  getImageClient,
+  getTtsClient,
+} from "./clientFactory";
 import { ConversationStore } from "./conversation-store";
 import {
   type ChatMessage,
@@ -60,6 +64,7 @@ const AI_SUBCOMMAND_HANDLERS: Readonly<Record<string, AiSlashHandler>> = {
   [SLASH_COMMAND.reply]: handleReplyCommand,
   [SLASH_COMMAND.regen]: handleRegenCommand,
   [SLASH_COMMAND.image]: handleImageCommand,
+  [SLASH_COMMAND.tts]: handleTtsCommand,
   [SLASH_COMMAND.history]: handleHistoryCommand,
   [SLASH_COMMAND.setPrompt]: handleSetPromptCommand,
   [SLASH_COMMAND.setCharacter]: handleSetCharacterCommand,
@@ -69,6 +74,16 @@ const AI_SUBCOMMAND_HANDLERS: Readonly<Record<string, AiSlashHandler>> = {
 const AI_SLASH_HANDLERS: Readonly<Record<string, AiSlashHandler>> = {
   [SLASH_COMMAND.ai]: handleAiCommand,
 };
+
+const AI_CHAT_RELATED_SUBCOMMANDS = new Set<string>([
+  SLASH_COMMAND.chat,
+  SLASH_COMMAND.reply,
+  SLASH_COMMAND.regen,
+  SLASH_COMMAND.history,
+  SLASH_COMMAND.setPrompt,
+  SLASH_COMMAND.setCharacter,
+  SLASH_COMMAND.chatReset,
+]);
 
 export function isAiSlashCommand(name: string): boolean {
   return Object.prototype.hasOwnProperty.call(AI_SLASH_HANDLERS, name);
@@ -106,6 +121,19 @@ async function handleAiCommand(
   if (!handler) {
     await interaction.reply({
       content: `未対応のAIサブコマンドです: \`${subcommand}\``,
+      flags: "Ephemeral",
+    });
+    return;
+  }
+
+  if (
+    interaction.guildId &&
+    AI_CHAT_RELATED_SUBCOMMANDS.has(subcommand) &&
+    !getAiChatEnabled(interaction.guildId)
+  ) {
+    await interaction.reply({
+      content:
+        "AIチャット機能はこのサーバーで無効化されています。管理者にメニューの「AIチャット切替」で有効化してもらってください。",
       flags: "Ephemeral",
     });
     return;
@@ -405,6 +433,60 @@ async function handleImageCommand(
       error instanceof ApiRateLimitError
         ? error.message
         : "画像生成に失敗しました。`IMAGE_ENDPOINT` / `IMAGE_MODEL` / `IMAGE_API_KEY` / `IMAGE_API_KEY_BY_GUILD` / `IMAGE_STEPS` / `IMAGE_CFG_SCALE` / `IMAGE_SAMPLER_NAME` の設定を確認してください。",
+    );
+  }
+}
+
+async function handleTtsCommand(
+  interaction: ChatInputCommandInteraction,
+): Promise<void> {
+  const message = interaction.options.getString("message", true).trim();
+  const isPrivate = interaction.options.getBoolean("private") ?? false;
+
+  if (message.length === 0) {
+    await interaction.reply({
+      content: "メッセージは空にできません。",
+      flags: "Ephemeral",
+    });
+    return;
+  }
+
+  const ttsClient = getTtsClient(interaction.guildId ?? "dm");
+  if (!ttsClient) {
+    await interaction.reply({
+      content:
+        "TTS は未設定です。`TTS_ENDPOINT` を設定してください。voice-models.com の RVC モデルを使う場合は、そのモデルを扱える TTS/RVC バックエンドが別途必要です。",
+      flags: "Ephemeral",
+    });
+    return;
+  }
+
+  await interaction.deferReply({ flags: isPrivate ? "Ephemeral" : undefined });
+
+  try {
+    const generated = await ttsClient.generateSpeech({ text: message });
+    const attachment = new AttachmentBuilder(generated.bytes, {
+      name: `tts.${extensionFromMimeType(generated.mimeType)}`,
+    });
+
+    const lines = [
+      `読み上げ: ${singleLine(message, 220)}`,
+      aiConfig.ttsVoice ? `音声: ${singleLine(aiConfig.ttsVoice, 80)}` : undefined,
+      aiConfig.ttsModelUrl
+        ? `RVCモデル: ${singleLine(aiConfig.ttsModelUrl, 140)}`
+        : undefined,
+    ].filter((line): line is string => typeof line === "string");
+
+    await interaction.editReply({
+      content: lines.join("\n"),
+      files: [attachment],
+    });
+  } catch (error) {
+    console.error("[tts] 失敗:", error);
+    await interaction.editReply(
+      error instanceof ApiRateLimitError
+        ? error.message
+        : "TTS 音声生成に失敗しました。`TTS_ENDPOINT` / `TTS_MODEL` / `TTS_VOICE` / `TTS_MODEL_URL` / `TTS_API_KEY` / `TTS_API_KEY_BY_GUILD` の設定を確認してください。",
     );
   }
 }

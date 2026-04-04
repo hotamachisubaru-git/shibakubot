@@ -32,6 +32,8 @@ exports.getMusicEnabled = getMusicEnabled;
 exports.setMusicEnabled = setMusicEnabled;
 exports.getMaintenanceEnabled = getMaintenanceEnabled;
 exports.setMaintenanceEnabled = setMaintenanceEnabled;
+exports.getAiChatEnabled = getAiChatEnabled;
+exports.setAiChatEnabled = setAiChatEnabled;
 exports.setSbkRange = setSbkRange;
 exports.getAiConversationHistory = getAiConversationHistory;
 exports.appendAiConversationTurn = appendAiConversationTurn;
@@ -718,6 +720,13 @@ function getMaintenanceEnabled(gid) {
 }
 function setMaintenanceEnabled(gid, enabled) {
     setSetting(gid, settings_1.SETTING_KEYS.maintenanceEnabled, enabled ? "true" : "false");
+}
+// ---------- AIチャット有効化設定 ----------
+function getAiChatEnabled(gid) {
+    return parseSettingBoolean(getSetting(gid, settings_1.SETTING_KEYS.aiChatEnabled), true);
+}
+function setAiChatEnabled(gid, enabled) {
+    setSetting(gid, settings_1.SETTING_KEYS.aiChatEnabled, enabled ? "true" : "false");
 }
 function setSbkRange(gid, min, max) {
     const context = getGuildDbContext(gid);

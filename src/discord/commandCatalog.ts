@@ -159,6 +159,23 @@ const aiCommandDefinitions: readonly CommandDefinition[] = [
         )
         .addSubcommand((subcommand) =>
           subcommand
+            .setName(SLASH_COMMAND.tts)
+            .setDescription("TTS音声を生成します")
+            .addStringOption((option) =>
+              option
+                .setName("message")
+                .setDescription("読み上げるメッセージ")
+                .setRequired(true)
+                .setMaxLength(1000),
+            )
+            .addBooleanOption((option) =>
+              option
+                .setName("private")
+                .setDescription("結果を自分だけに表示する (エフェメラル)"),
+            ),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
             .setName(SLASH_COMMAND.history)
             .setDescription("直近の会話履歴を表示します")
             .addIntegerOption((option) =>
@@ -236,6 +253,7 @@ const aiCommandDefinitions: readonly CommandDefinition[] = [
           description: "直前の /ai reply を同じ条件で再生成します",
         },
         { name: `/ai ${SLASH_COMMAND.image}`, description: "SDXLで画像を生成します" },
+        { name: `/ai ${SLASH_COMMAND.tts}`, description: "TTS音声を生成します" },
         {
           name: `/ai ${SLASH_COMMAND.history}`,
           description: "直近の会話履歴を表示します",

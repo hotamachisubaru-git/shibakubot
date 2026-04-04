@@ -6,5 +6,6 @@ export const SETTING_KEYS = {
   musicNgWords: "musicNgWords",
   musicEnabled: "musicEnabled",
   maintenanceEnabled: "maintenanceEnabled",
+  aiChatEnabled: "aiChatEnabled",
   aiGuildMemory: "aiGuildMemory",
 } as const;

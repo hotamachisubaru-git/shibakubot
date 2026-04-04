@@ -205,7 +205,7 @@ export const MENU_PAGE_DEFINITIONS: readonly MenuPageDefinition[] = [
     title: "便利機能",
     summary: "確認、投票、運用補助などをまとめています。",
     permissionNote:
-      "回数確認 / 月曜煽り / 投票は誰でも利用できます。メンテナンス切替は管理者 / サーバーオーナー / 開発者、リセットは管理者 / 開発者のみ利用できます。",
+      "回数確認 / 月曜煽り / 投票は誰でも利用できます。メンテナンス切替とAIチャット切替は管理者 / サーバーオーナー / 開発者、リセットは管理者 / 開発者のみ利用できます。",
     actions: [
       {
         customId: "menu_check",
@@ -230,6 +230,12 @@ export const MENU_PAGE_DEFINITIONS: readonly MenuPageDefinition[] = [
         label: "メンテ切替",
         style: ButtonStyle.Secondary,
         summary: "メンテナンスモードを切り替えます。",
+      },
+      {
+        customId: "menu_ai_chat",
+        label: "AIチャット切替",
+        style: ButtonStyle.Secondary,
+        summary: "AIチャット機能の有効/無効を切り替えます。",
       },
       {
         customId: "menu_vs",
@@ -615,15 +621,23 @@ function buildActionSummary(pageDefinition: MenuPageDefinition): string {
     .join("\n");
 }
 
-function buildActionRow(pageDefinition: MenuPageDefinition) {
-  return new ActionRowBuilder<ButtonBuilder>().addComponents(
-    ...pageDefinition.actions.map((action) =>
-      new ButtonBuilder()
-        .setCustomId(action.customId)
-        .setLabel(action.label)
-        .setStyle(action.style),
-    ),
-  );
+function buildActionRows(pageDefinition: MenuPageDefinition) {
+  const rows: ActionRowBuilder<ButtonBuilder>[] = [];
+
+  for (let start = 0; start < pageDefinition.actions.length; start += 5) {
+    rows.push(
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        ...pageDefinition.actions.slice(start, start + 5).map((action) =>
+          new ButtonBuilder()
+            .setCustomId(action.customId)
+            .setLabel(action.label)
+            .setStyle(action.style),
+        ),
+      ),
+    );
+  }
+
+  return rows;
 }
 
 export function buildMenuHelpEmbed(min: number, max: number): EmbedBuilder {
@@ -680,7 +694,7 @@ export function buildMenu(min: number, max: number, page: number = 1) {
 
   // ページごとに出す行を切り替える
   const rows: ActionRowBuilder<ButtonBuilder>[] = [];
-  rows.push(buildActionRow(currentPage));
+  rows.push(...buildActionRows(currentPage));
 
   const navButtons = [
     new ButtonBuilder()
