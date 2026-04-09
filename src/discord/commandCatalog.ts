@@ -65,6 +65,47 @@ const baseCommandDefinitions: readonly CommandDefinition[] = [
           .setRequired(false),
       );
   }),
+  defineCommand(
+    SLASH_COMMAND.ignore,
+    "bot が自動で無視するユーザーを管理する",
+    (builder) => {
+      builder
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName("add")
+            .setDescription("指定ユーザーを bot の ignore 対象に追加する")
+            .addUserOption((option) =>
+              option
+                .setName("user")
+                .setDescription("ignore するユーザー")
+                .setRequired(true),
+            ),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName("remove")
+            .setDescription("指定ユーザーを bot の ignore 対象から外す")
+            .addUserOption((option) =>
+              option
+                .setName("user")
+                .setDescription("ignore 解除するユーザー")
+                .setRequired(true),
+            ),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName("list")
+            .setDescription("現在の ignore 対象一覧を表示する"),
+        );
+    },
+    {
+      helpCommands: [
+        { name: `/ignore add`, description: "bot が無視するユーザーを追加します" },
+        { name: `/ignore remove`, description: "bot が無視するユーザーを解除します" },
+        { name: `/ignore list`, description: "bot の ignore 一覧を表示します" },
+      ],
+    },
+  ),
   defineCommand(SLASH_COMMAND.menu, "しばくbot メニューを表示する"),
   defineCommand(SLASH_COMMAND.help, "コマンド一覧を表示する"),
 ];
@@ -159,23 +200,6 @@ const aiCommandDefinitions: readonly CommandDefinition[] = [
         )
         .addSubcommand((subcommand) =>
           subcommand
-            .setName(SLASH_COMMAND.tts)
-            .setDescription("TTS音声を生成します")
-            .addStringOption((option) =>
-              option
-                .setName("message")
-                .setDescription("読み上げるメッセージ")
-                .setRequired(true)
-                .setMaxLength(1000),
-            )
-            .addBooleanOption((option) =>
-              option
-                .setName("private")
-                .setDescription("結果を自分だけに表示する (エフェメラル)"),
-            ),
-        )
-        .addSubcommand((subcommand) =>
-          subcommand
             .setName(SLASH_COMMAND.history)
             .setDescription("直近の会話履歴を表示します")
             .addIntegerOption((option) =>
@@ -253,7 +277,6 @@ const aiCommandDefinitions: readonly CommandDefinition[] = [
           description: "直前の /ai reply を同じ条件で再生成します",
         },
         { name: `/ai ${SLASH_COMMAND.image}`, description: "SDXLで画像を生成します" },
-        { name: `/ai ${SLASH_COMMAND.tts}`, description: "TTS音声を生成します" },
         {
           name: `/ai ${SLASH_COMMAND.history}`,
           description: "直近の会話履歴を表示します",

@@ -55,9 +55,6 @@ const DEFAULT_IMAGE_SIZE = "1024x1024";
 const DEFAULT_IMAGE_STEPS = 25;
 const DEFAULT_IMAGE_CFG_SCALE = 6.5;
 const DEFAULT_IMAGE_SAMPLER_NAME = "DPM++ 2M Karras";
-const DEFAULT_TTS_TIMEOUT_MS = 120_000;
-const DEFAULT_TTS_RESPONSE_FORMAT = "mp3";
-const DEFAULT_TTS_SPEED = 1;
 const DEFAULT_AI_SYSTEM_PROMPT = [
   "あなたはロールプレイ会話を行うAIアシスタントです。",
   "以下の「キャラクター設定」を最優先で守って回答してください。",
@@ -220,16 +217,6 @@ export type RuntimeConfig = Readonly<{
     imageCfgScale: number;
     imageSamplerName: string;
     imageNegativePrompt?: string;
-    ttsEndpoint?: string;
-    ttsModel?: string;
-    ttsVoice?: string;
-    ttsModelUrl?: string;
-    ttsApiKey?: string;
-    ttsApiKeysByGuild: GuildValueMap;
-    ttsTimeoutMs: number;
-    ttsResponseFormat: string;
-    ttsSpeed: number;
-    ttsPitch?: number;
   }>;
 }>;
 
@@ -479,33 +466,6 @@ function buildRuntimeConfig(): RuntimeConfig {
   const imageSamplerName =
     parseText(process.env.IMAGE_SAMPLER_NAME) || DEFAULT_IMAGE_SAMPLER_NAME;
   const imageNegativePrompt = parseOptionalText(process.env.IMAGE_NEGATIVE_PROMPT);
-  const ttsEndpoint = parseOptionalText(process.env.TTS_ENDPOINT);
-  const ttsModel = parseOptionalText(process.env.TTS_MODEL);
-  const ttsVoice = parseOptionalText(process.env.TTS_VOICE);
-  const ttsModelUrl = parseOptionalText(process.env.TTS_MODEL_URL);
-  const ttsApiKey = parseOptionalText(process.env.TTS_API_KEY);
-  const ttsApiKeysByGuild = parseGuildValueMap(process.env.TTS_API_KEY_BY_GUILD);
-  const ttsTimeoutMs = parseInteger(
-    process.env.TTS_TIMEOUT_MS,
-    DEFAULT_TTS_TIMEOUT_MS,
-    { min: 1_000 },
-  );
-  const ttsResponseFormat =
-    (parseText(process.env.TTS_RESPONSE_FORMAT) || DEFAULT_TTS_RESPONSE_FORMAT)
-      .trim()
-      .toLowerCase();
-  const ttsSpeedRaw = parseText(process.env.TTS_SPEED);
-  const ttsSpeedParsed = Number.parseFloat(ttsSpeedRaw);
-  const ttsSpeed =
-    Number.isFinite(ttsSpeedParsed) && ttsSpeedParsed > 0
-      ? ttsSpeedParsed
-      : DEFAULT_TTS_SPEED;
-  const ttsPitchRaw = parseOptionalText(process.env.TTS_PITCH);
-  const ttsPitchParsed = ttsPitchRaw === undefined
-    ? Number.NaN
-    : Number.parseFloat(ttsPitchRaw);
-  const ttsPitch = Number.isFinite(ttsPitchParsed) ? ttsPitchParsed : undefined;
-
   return {
     discord: {
       token: parseText(process.env.TOKEN),
@@ -651,16 +611,6 @@ function buildRuntimeConfig(): RuntimeConfig {
       imageCfgScale,
       imageSamplerName,
       imageNegativePrompt,
-      ttsEndpoint,
-      ttsModel,
-      ttsVoice,
-      ttsModelUrl,
-      ttsApiKey,
-      ttsApiKeysByGuild,
-      ttsTimeoutMs,
-      ttsResponseFormat,
-      ttsSpeed,
-      ttsPitch,
     },
   };
 }
@@ -695,9 +645,4 @@ export function resolveAiAuxModelApiKey(guildId: string | null | undefined): str
 export function resolveAiImageApiKey(guildId: string | null | undefined): string | undefined {
   const { ai } = getRuntimeConfig();
   return resolveGuildValue(ai.imageApiKeysByGuild, guildId, ai.imageApiKey);
-}
-
-export function resolveAiTtsApiKey(guildId: string | null | undefined): string | undefined {
-  const { ai } = getRuntimeConfig();
-  return resolveGuildValue(ai.ttsApiKeysByGuild, guildId, ai.ttsApiKey);
 }

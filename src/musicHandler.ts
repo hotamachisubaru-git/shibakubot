@@ -74,7 +74,14 @@ async function handlePlayMessageCommand(
   }
 
   clearPendingSearch(message);
-  await handlePlay(message, query, { selectedTrack: track });
+  await handlePlay(message, query, {
+    selectedTrack: track,
+    selectionContext: {
+      tracks: pending.tracks,
+      query: pending.query,
+      selectedIndex: index,
+    },
+  });
 }
 
 async function handleHelpMessageCommand(

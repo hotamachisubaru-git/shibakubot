@@ -3,14 +3,12 @@ import {
   resolveAiAuxModelApiKey,
   resolveAiImageApiKey,
   resolveAiModelApiKey,
-  resolveAiTtsApiKey,
 } from "../config/runtime";
 import { SdxlImageClient, type SdxlImageClientOptions } from "./image-client";
 import {
   OllamaCompatibleClient,
   type OllamaCompatibleClientOptions,
 } from "./model-client";
-import { TtsClient, type TtsClientOptions } from "./tts-client";
 
 const aiConfig = getRuntimeConfig().ai;
 
@@ -18,7 +16,6 @@ const conversationModelClientCache = new Map<string, OllamaCompatibleClient>();
 const guildMemoryAuxModelClientCache = new Map<string, OllamaCompatibleClient>();
 const guildMemoryFallbackModelClientCache = new Map<string, OllamaCompatibleClient>();
 const imageClientCache = new Map<string, SdxlImageClient>();
-const ttsClientCache = new Map<string, TtsClient>();
 
 export function getConversationModelClient(
   guildId: string | null | undefined,
@@ -100,28 +97,6 @@ export function getImageClient(
   return getOrCreateImageClient(options);
 }
 
-export function getTtsClient(
-  guildId: string | null | undefined,
-): TtsClient | undefined {
-  if (!aiConfig.ttsEndpoint) {
-    return undefined;
-  }
-
-  const options: TtsClientOptions = {
-    endpoint: aiConfig.ttsEndpoint,
-    modelName: aiConfig.ttsModel,
-    voice: aiConfig.ttsVoice,
-    modelUrl: aiConfig.ttsModelUrl,
-    apiKey: resolveAiTtsApiKey(guildId),
-    timeoutMs: aiConfig.ttsTimeoutMs,
-    responseFormat: aiConfig.ttsResponseFormat,
-    speed: aiConfig.ttsSpeed,
-    pitch: aiConfig.ttsPitch,
-  };
-
-  return getOrCreateTtsClient(options);
-}
-
 function getOrCreateModelClient(
   cache: Map<string, OllamaCompatibleClient>,
   options: OllamaCompatibleClientOptions,
@@ -162,27 +137,5 @@ function getOrCreateImageClient(options: SdxlImageClientOptions): SdxlImageClien
 
   const client = new SdxlImageClient(options);
   imageClientCache.set(cacheKey, client);
-  return client;
-}
-
-function getOrCreateTtsClient(options: TtsClientOptions): TtsClient {
-  const cacheKey = JSON.stringify({
-    endpoint: options.endpoint,
-    modelName: options.modelName ?? "",
-    voice: options.voice ?? "",
-    modelUrl: options.modelUrl ?? "",
-    apiKey: options.apiKey ?? "",
-    timeoutMs: options.timeoutMs,
-    responseFormat: options.responseFormat,
-    speed: options.speed,
-    pitch: options.pitch ?? null,
-  });
-  const existing = ttsClientCache.get(cacheKey);
-  if (existing) {
-    return existing;
-  }
-
-  const client = new TtsClient(options);
-  ttsClientCache.set(cacheKey, client);
   return client;
 }

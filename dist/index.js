@@ -12,6 +12,10 @@ const fileServer_1 = require("./fileserver/fileServer");
 const lavalink_1 = require("./lavalink");
 const music_1 = require("./music");
 const playbackRecovery_1 = require("./music/playbackRecovery");
+const state_1 = require("./music/state");
+const trackUtils_1 = require("./music/trackUtils");
+const constants_1 = require("./music/constants");
+const commands_1 = require("./constants/commands");
 const singleInstance_1 = require("./utils/singleInstance");
 const runtimeConfig = (0, runtime_1.getRuntimeConfig)();
 const TOKEN = runtimeConfig.discord.token;
@@ -39,6 +43,34 @@ function getBotVoiceDebugState(client, guildId) {
         streaming: voice.streaming,
         requestToSpeakTimestamp: voice.requestToSpeakTimestamp,
     };
+}
+async function promptRetrySelection(client, player, track) {
+    const guildId = player.guildId;
+    if (!track)
+        return;
+    const retry = (0, state_1.consumeRetrySelection)(guildId, track);
+    if (!retry || !retry.remainingTracks.length) {
+        return;
+    }
+    (0, state_1.setPendingSearchForUser)(guildId, retry.requesterId, retry.remainingTracks, retry.query);
+    const channel = client.channels.cache.get(retry.channelId) ??
+        (await client.channels.fetch(retry.channelId).catch(() => null));
+    if (!channel || !("send" in channel)) {
+        return;
+    }
+    const lines = retry.remainingTracks.map((candidate, index) => {
+        const title = (0, trackUtils_1.getTrackTitle)(candidate);
+        const author = candidate.info.author ? ` - ${candidate.info.author}` : "";
+        const duration = (0, trackUtils_1.formatTrackDuration)((0, trackUtils_1.getTrackDurationMs)(candidate));
+        const durationText = duration ? ` (${duration})` : "";
+        return `${index + 1}. ${title}${author}${durationText}`;
+    });
+    await channel.send({
+        content: `<@${retry.requesterId}> 選んだ候補の再生に失敗しました。別候補を選び直せます。\n` +
+            `${lines.join("\n")}\n\n` +
+            `\`${constants_1.PREFIX}${commands_1.MUSIC_TEXT_COMMAND.play} 1\`〜\`${constants_1.PREFIX}${commands_1.MUSIC_TEXT_COMMAND.play} ${lines.length}\``,
+        allowedMentions: { users: [retry.requesterId] },
+    });
 }
 function isNodeStatsPayload(payload) {
     return (typeof payload === "object" &&
@@ -137,7 +169,12 @@ client.once(discord_js_1.Events.ClientReady, async (readyClient) => {
             currentTitle: player.queue.current?.info?.title ?? null,
             botVoiceState: getBotVoiceDebugState(client, player.guildId),
         });
-        void (0, playbackRecovery_1.recoverPlaybackWithYtDlp)(client, player, track, payload);
+        void (async () => {
+            const recoveryResult = await (0, playbackRecovery_1.recoverPlaybackWithYtDlp)(client, player, track, payload);
+            if (recoveryResult !== "recovered") {
+                await promptRetrySelection(client, player, track);
+            }
+        })();
     });
     client.lavalink.on("trackStart", (player, track) => {
         const voiceState = player.voice;
@@ -154,6 +191,7 @@ client.once(discord_js_1.Events.ClientReady, async (readyClient) => {
             voiceEndpoint: voiceState.endpoint ?? null,
             botVoiceState: getBotVoiceDebugState(client, player.guildId),
         });
+        (0, state_1.clearRetrySelection)(player.guildId, track);
         void logImmediateNodeStats(player);
     });
     client.lavalink.on("trackEnd", (player, track, payload) => {
@@ -178,7 +216,12 @@ client.once(discord_js_1.Events.ClientReady, async (readyClient) => {
             currentTitle: player.queue.current?.info?.title ?? null,
             botVoiceState: getBotVoiceDebugState(client, player.guildId),
         });
-        void (0, playbackRecovery_1.recoverPlaybackWithYtDlp)(client, player, track, payload);
+        void (async () => {
+            const recoveryResult = await (0, playbackRecovery_1.recoverPlaybackWithYtDlp)(client, player, track, payload);
+            if (recoveryResult !== "recovered") {
+                await promptRetrySelection(client, player, track);
+            }
+        })();
     });
     await (0, lavalink_1.waitForLavalinkReady)();
     await client.lavalink.init({
@@ -188,6 +231,10 @@ client.once(discord_js_1.Events.ClientReady, async (readyClient) => {
     void (0, guild_memory_1.refreshGuildMemoriesOnStartup)(client.guilds.cache.values());
 });
 client.on(discord_js_1.Events.InteractionCreate, async (interaction) => {
+    if (interaction.isAutocomplete()) {
+        await (0, interactionRouter_1.handleAutocompleteInteraction)(interaction);
+        return;
+    }
     if (!interaction.isChatInputCommand())
         return;
     await (0, interactionRouter_1.handleChatInputInteraction)(interaction);
@@ -195,6 +242,8 @@ client.on(discord_js_1.Events.InteractionCreate, async (interaction) => {
 void client.login(TOKEN);
 client.on("messageCreate", async (message) => {
     if (message.guildId && (0, data_1.getMaintenanceEnabled)(message.guildId))
+        return;
+    if (message.guildId && (0, data_1.isIgnoredUser)(message.guildId, message.author.id))
         return;
     (0, guild_memory_1.notifyGuildMessage)(message);
     await (0, music_1.handleMusicMessage)(message);

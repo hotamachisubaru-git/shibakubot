@@ -92,14 +92,14 @@ export async function recoverPlaybackWithYtDlp(
   player: Player,
   track: PendingTrack | null,
   payload: TrackExceptionEvent | TrackStuckEvent,
-): Promise<boolean> {
+): Promise<"recovered" | "failed" | "not_applicable"> {
   if (!track) {
-    return false;
+    return "not_applicable";
   }
 
   const sourceUrl = getRecoverableTrackUrl(track);
   if (!sourceUrl) {
-    return false;
+    return "not_applicable";
   }
 
   const startedAt = Date.now();
@@ -107,7 +107,7 @@ export async function recoverPlaybackWithYtDlp(
 
   const recoveryKey = buildRecoveryKey(player, track, sourceUrl);
   if (recoveryLocks.has(recoveryKey) || recentRecoveryAttempts.has(recoveryKey)) {
-    return false;
+    return "not_applicable";
   }
 
   recoveryLocks.add(recoveryKey);
@@ -136,7 +136,7 @@ export async function recoverPlaybackWithYtDlp(
         player,
         `⚠️ **${trackTitle}** を復旧できませんでした。${detail}`,
       );
-      return true;
+      return "failed";
     }
 
     const blockedMessage = buildExternalTrackBlockedMessage(
@@ -151,7 +151,7 @@ export async function recoverPlaybackWithYtDlp(
         player,
         `⚠️ **${trackTitle}** を復旧できませんでした。\n${blockedMessage}`,
       );
-      return true;
+      return "failed";
     }
 
     const recoveredTrack = await resolveDownloadedTrack(
@@ -166,7 +166,7 @@ export async function recoverPlaybackWithYtDlp(
         player,
         `⚠️ **${trackTitle}** の取り込みには成功しましたが、Lavalink から再生トラックを作れませんでした。`,
       );
-      return true;
+      return "failed";
     }
 
     applyTrackDisplayOverrides(recoveredTrack, {
@@ -192,7 +192,7 @@ export async function recoverPlaybackWithYtDlp(
         player,
         `▶ **${downloadedTrack.title}** を外部URL取り込みで復旧して再生します。`,
       );
-      return true;
+      return "recovered";
     }
 
     await player.queue.add(recoveredTrack, 0);
@@ -201,7 +201,7 @@ export async function recoverPlaybackWithYtDlp(
       player,
       `⏱ **${downloadedTrack.title}** を外部URL取り込みで復旧し、次に再生するようキュー先頭へ戻しました。`,
     );
-    return true;
+    return "recovered";
   } catch (error) {
     console.warn("[music] playback recovery error", error);
     logRecoveryMessage(
@@ -209,7 +209,7 @@ export async function recoverPlaybackWithYtDlp(
       player,
       `⚠️ **${trackTitle}** の自動復旧中にエラーが発生しました。`,
     );
-    return true;
+    return "failed";
   } finally {
     recoveryLocks.delete(recoveryKey);
   }

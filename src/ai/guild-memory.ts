@@ -1,7 +1,7 @@
 import type { Collection, Guild, GuildBasedChannel, Message } from "discord.js";
 import { PermissionFlagsBits } from "discord.js";
 import { getRuntimeConfig } from "../config/runtime";
-import { getAiGuildMemory, setAiGuildMemory } from "../data";
+import { getAiGuildMemory, getIgnoredUserList, setAiGuildMemory } from "../data";
 import {
   getGuildMemoryAuxModelClient,
   getGuildMemoryFallbackModelClient,
@@ -186,6 +186,7 @@ async function collectGuildTranscript(guild: Guild): Promise<SampledGuildTranscr
   let totalChars = 0;
   let sampledChannels = 0;
   let sampledMessages = 0;
+  const ignoredUserIds = new Set(getIgnoredUserList(guild.id));
 
   for (const channel of channels) {
     if (totalChars >= guildMemoryConfig.maxInputChars) {
@@ -204,6 +205,7 @@ async function collectGuildTranscript(guild: Guild): Promise<SampledGuildTranscr
     const messages = [...fetched.values()]
       .sort((left, right) => left.createdTimestamp - right.createdTimestamp)
       .filter((message) => !message.author.bot)
+      .filter((message) => !ignoredUserIds.has(message.author.id))
       .map((message) => formatMessageLine(channel.name, message))
       .filter((line): line is string => typeof line === "string");
 

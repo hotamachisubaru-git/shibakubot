@@ -1,6 +1,7 @@
 export const SLASH_COMMAND = {
   ping: "ping", //ping
   sbk: "sbk", //しばく
+  ignore: "ignore", // 自動無視
   menu: "menu", //メニュー
   help: "help", //ヘルプ
   ai: "ai", // AI総合
@@ -8,7 +9,6 @@ export const SLASH_COMMAND = {
   reply: "reply", // AIチャット返信
   regen: "regen", // AIチャット再生成
   image: "image", //  AI画像生成
-  tts: "tts", // AI音声生成
   history: "history", // チャット履歴
   setPrompt: "setprompt", //  プロンプト設定
   setCharacter: "setcharacter", // キャラクター設定
