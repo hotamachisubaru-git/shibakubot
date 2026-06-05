@@ -28,11 +28,8 @@ export const MUSIC_TEXT_COMMAND = {
   help: "help",
   remove: "remove",
   removeAlias: "delete",
-  limit: "limit",
-  limitAlias: "max",
   disable: "disable",
   disableAlias: "d",
   enable: "enable",
   enableAlias: "e",
-  repeat: "repeat",
 } as const;

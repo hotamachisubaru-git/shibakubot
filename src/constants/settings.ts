@@ -5,8 +5,6 @@ export const SETTING_KEYS = {
   musicVolume: "musicVolume",
   musicNgWords: "musicNgWords",
   musicEnabled: "musicEnabled",
-  musicMaxTrackMinutes: "musicMaxTrackMinutes",
-  musicRepeat: "musicRepeat",
   maintenanceEnabled: "maintenanceEnabled",
   aiChatEnabled: "aiChatEnabled",
   aiGuildMemory: "aiGuildMemory",

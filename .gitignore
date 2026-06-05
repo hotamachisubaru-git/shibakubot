@@ -6,9 +6,9 @@
 
 # Data files
 *.json
-/data/
+data/
 *.db
-/backup/
+backup/
 !package.json
 !package-lock.json
 !tsconfig.json
@@ -19,7 +19,6 @@ dist/
 release/
 
 # Other
-SYNAPTIC.md
 logs/
 *.zip
 *.js

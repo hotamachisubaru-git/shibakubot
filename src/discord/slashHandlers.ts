@@ -1,9 +1,9 @@
 import type { ChatInputCommandInteraction } from "discord.js";
-import { handleHelp } from "../commands/system/help";
-import { handleIgnore } from "../commands/sbk/ignore";
-import { handleMenu } from "../commands/system/menu";
-import { handlePing } from "../commands/system/ping";
-import { handleSbk } from "../commands/sbk/sbk";
+import { handleHelp } from "../commands/help";
+import { handleIgnore } from "../commands/ignore";
+import { handleMenu } from "../commands/menu";
+import { handlePing } from "../commands/ping";
+import { handleSbk } from "../commands/sbk";
 import { SLASH_COMMAND } from "../constants/commands";
 
 export type SlashHandler = (

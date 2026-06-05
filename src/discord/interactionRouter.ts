@@ -1,5 +1,5 @@
 import type { AutocompleteInteraction, ChatInputCommandInteraction } from "discord.js";
-import { getAiSlashHandler } from "../ai/ai-slash";
+import { getAiSlashHandler } from "../ai/handlers";
 import { getRuntimeConfig } from "../config/runtime";
 import { SLASH_COMMAND } from "../constants/commands";
 import { getMaintenanceEnabled, isIgnoredUser } from "../data";
