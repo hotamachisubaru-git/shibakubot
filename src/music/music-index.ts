@@ -1,0 +1,1 @@
+export { handleMusicMessage } from "./musicHandler";

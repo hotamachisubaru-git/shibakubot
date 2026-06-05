@@ -114,6 +114,7 @@ FILE_HOST=0.0.0.0
 FILE_PORT=3001
 UPLOAD_INTERNAL_URL=http://127.0.0.1:3001/uploads
 UPLOAD_BASE_URL=http://localhost:3001/uploads
+# サーバー別の上書きは s!limit set <分> で設定できます
 MUSIC_MAX_MINUTES=15
 YT_DLP_ENABLED=true
 YT_DLP_PATH=
@@ -159,6 +160,7 @@ AUX_MODEL_AUTO_DETECT_NAMES=none
 - `AI_GUILD_MEMORY_LIVE_ENABLED=true` で、通常会話の増加に応じてもサーバー特徴メモを徐々に再更新
 - サーバー特徴メモは `data/guilds/<guildId>.db` に保存され、`/ai chat` などの応答で参照
 - `YT_DLP_ENABLED=true` で、Lavalink 未対応URLを `yt-dlp` 取り込みで再生可能
+- `MUSIC_MAX_MINUTES` は全体の既定最大再生時間。サーバー別の上書きは `s!limit set <分>` で `data/guilds/<guildId>.db` に保存
 - `YT_DLP_PATH` を指定するとその実行ファイルを優先使用
 - `YT_DLP_AUTO_DOWNLOAD=true` かつ `yt-dlp` が未導入なら、初回使用時に `YT_DLP_CACHE_DIR` へ公式バイナリを自動取得
 - `CLEAR_GLOBAL=true` で `register` 時にグローバルコマンドを削除
@@ -216,6 +218,7 @@ AUX_MODEL_AUTO_DETECT_NAMES=none
 - `s!upload [表示名]` 音源アップロード再生
 - `s!remove <番号>` / `s!delete <番号>` キュー削除
 - `s!ng add|remove|list|clear` NGワード管理（管理者）
+- `s!limit [set <分>|reset]` / `s!max` 最大再生時間を表示/変更（変更は管理者）
 - `s!disable` / `s!d` 音楽機能を無効化（管理者）
 - `s!enable` / `s!e` 音楽機能を有効化（管理者）
 - `s!help` ヘルプ
@@ -231,11 +234,12 @@ Bot は Spotify の曲情報を参照して既存の再生ソースへ変換し�
 Lavalink 側で有効なら、例として `YouTube / ニコニコ / SoundCloud / Bandcamp / Vimeo / Twitch / HTTP直リンク音声` などのURLを直接再生できます。
 未対応URLは `yt-dlp` フォールバックで取り込み再生を試みます。
 例: `TikTok / Bilibili / X / Instagram / Dailymotion` など。
-ただし、非公開・地域制限・要ログイン・ライブ配信・長さ不明・15分超のURLは再生できません。
+ただし、非公開・地域制限・要ログイン・ライブ配信・長さ不明・サーバー設定の最大再生時間超過URLは再生できません。
 
 ## データ保存
 - ギルドDB: `data/guilds/<guildId>.db`
   - しばき回数、設定、AI会話履歴、AIプロンプト/キャラ状態、返信再生成状態を保存
+  - 音楽の有効/無効、NGワード、サーバー別最大再生時間も保存
 - バックアップ: `backup/`
 - アップロード保存先: `files/`（`FILE_DIR` で変更可）
 
