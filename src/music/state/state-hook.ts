@@ -1,7 +1,6 @@
-import { LavalinkManager, Player, type TrackEndEvent, type TrackStuckEvent, type TrackExceptionEvent } from "lavalink-client";
-import { clearAutoStop } from "./state-autoStop";
-import { reapplyMusicRepeatOnQueueEnd, clearRepeatTimer } from "./state-repeat";
-import type { PendingTrack } from "../misc/trackUtils";
+import { LavalinkManager, Player } from "lavalink-client";
+import { clearAutoStop, refreshAutoStopForPlayer } from "./state-autoStop";
+import { replayMusicRepeatIfNeeded, clearRepeatTimer, syncMusicRepeatForPlayer } from "./state-repeat";
 
 const hookedManagers = new WeakSet<LavalinkManager<Player>>();
 
@@ -9,16 +8,20 @@ export function hookManagerAutoStopOnce(lavalink: LavalinkManager<Player>): void
   if (hookedManagers.has(lavalink)) return;
   hookedManagers.add(lavalink);
 
-  lavalink.on("trackStart", (player, track) => {
+  lavalink.on("playerCreate", (player) => {
+    syncMusicRepeatForPlayer(player);
+  });
+
+  lavalink.on("trackStart", (player) => {
+    clearRepeatTimer(player.guildId);
     clearAutoStop(player.guildId);
-    if (track) {
-      // trackStart で autoStop をリセットし、後続の armAutoStopForTrack で再設定される
-    }
+    syncMusicRepeatForPlayer(player);
+    refreshAutoStopForPlayer(player);
   });
 
   lavalink.on("queueEnd", (player, track, payload) => {
     clearAutoStop(player.guildId);
-    reapplyMusicRepeatOnQueueEnd(player, track, payload);
+    replayMusicRepeatIfNeeded(player, track, payload);
   });
 
   lavalink.on("playerDestroy", (player) => {
@@ -26,7 +29,8 @@ export function hookManagerAutoStopOnce(lavalink: LavalinkManager<Player>): void
     clearRepeatTimer(player.guildId);
   });
 
-  lavalink.on("trackEnd", (player) => {
+  lavalink.on("trackEnd", (player, track, payload) => {
     clearAutoStop(player.guildId);
+    replayMusicRepeatIfNeeded(player, track, payload);
   });
 }

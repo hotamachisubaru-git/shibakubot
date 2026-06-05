@@ -1,7 +1,7 @@
 import { Message } from "discord.js";
 import { PREFIX } from "../misc/constants";
 import { getLavalink, getTrackTitle } from "../misc/trackUtils";
-import { clearAutoStop } from "../state/state";
+import { clearAutoStop, clearRepeatTimer } from "../state/state";
 import { MUSIC_TEXT_COMMAND } from "../../constants/commands";
 
 // ---------------------------------------------------------------------------
@@ -24,6 +24,7 @@ export async function handleSkip(message: Message): Promise<void> {
   }
 
   clearAutoStop(guildId);
+  clearRepeatTimer(guildId);
   await player.skip(0, false);
   await message.reply("⏭ 曲をスキップしました。");
 }
@@ -44,6 +45,7 @@ export async function handleStop(message: Message): Promise<void> {
   }
 
   clearAutoStop(guildId);
+  clearRepeatTimer(guildId);
   await player.destroy();
   await message.reply("⏹ 再生を停止し、VCから退出しました。");
 }

@@ -62,13 +62,23 @@ export async function handleRepeatCommand(
   }
 
   const player = getLavalink(message)?.players.get(guildId);
+  let syncFailed = false;
   if (player) {
-    await applyMusicRepeatForPlayer(player);
+    try {
+      await applyMusicRepeatForPlayer(player);
+      refreshAutoStopForPlayer(player);
+    } catch (error) {
+      syncFailed = true;
+      console.warn("[music] repeat command sync error", error);
+    }
   }
 
   await message.reply(
-    nextEnabled
+    (nextEnabled
       ? "🔁 1曲リピートを有効化しました。"
-      : "➡️ 1曲リピートを無効化しました。",
+      : "➡️ 1曲リピートを無効化しました。") +
+      (syncFailed
+        ? "\n⚠️ 再生中プレイヤーへの即時反映に失敗しました。次の再生開始時に再同期します。"
+        : ""),
   );
 }

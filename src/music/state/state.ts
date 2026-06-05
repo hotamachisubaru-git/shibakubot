@@ -18,7 +18,7 @@ export {
   clearRepeatTimer,
   setRepeatTimer,
   applyMusicRepeatForPlayer,
-  reapplyMusicRepeatOnQueueEnd,
+  replayMusicRepeatIfNeeded,
 } from "./state-repeat";
 
 export {

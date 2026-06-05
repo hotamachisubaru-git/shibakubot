@@ -4,7 +4,7 @@ import { getMusicRepeat } from "../../data";
 import { getTrackId, type PendingTrack } from "../misc/trackUtils";
 
 const repeatTimers = new Map<string, NodeJS.Timeout>();
-const REPEAT_REPLAY_DELAY_MS = 250;
+const REPEAT_REPLAY_DELAY_MS = 750;
 
 export function clearRepeatTimer(guildId: string): void {
   const timer = repeatTimers.get(guildId);
@@ -27,7 +27,7 @@ export async function applyMusicRepeatForPlayer(player: Player): Promise<void> {
   await player.setRepeatMode(repeatMode);
 }
 
-function syncMusicRepeatForPlayer(player: Player): void {
+export function syncMusicRepeatForPlayer(player: Player): void {
   void applyMusicRepeatForPlayer(player).catch((error) => {
     console.warn("[music] repeat sync error", error);
   });
@@ -37,7 +37,7 @@ function isFinishedTrackEndPayload(payload: TrackEndEvent | TrackStuckEvent | Tr
   return payload.type === "TrackEndEvent" && payload.reason === "finished";
 }
 
-export function reapplyMusicRepeatOnQueueEnd(
+export function replayMusicRepeatIfNeeded(
   player: Player,
   track: PendingTrack | null,
   payload: TrackEndEvent | TrackStuckEvent | TrackExceptionEvent,
@@ -48,13 +48,28 @@ export function reapplyMusicRepeatOnQueueEnd(
   }
 
   const guildId = player.guildId;
+  const repeatedTrackId = getTrackId(track);
   const timer = setTimeout(() => {
     void (async () => {
       if (!getMusicRepeat(guildId)) return;
       if (player.LavalinkManager.players.get(guildId) !== player) return;
-      if (player.queue.current || player.queue.tracks.length > 0) return;
 
       await applyMusicRepeatForPlayer(player);
+
+      const currentTrack = player.queue.current;
+      if (currentTrack) {
+        const currentTrackId = getTrackId(currentTrack);
+        if (repeatedTrackId && currentTrackId && currentTrackId !== repeatedTrackId) {
+          return;
+        }
+        if (!player.playing && !player.paused) {
+          await player.play({ noReplace: false, paused: false });
+        }
+        return;
+      }
+
+      if (player.queue.tracks.length > 0) return;
+
       await player.queue.add(track, 0);
       await player.play({ noReplace: false, paused: false });
     })().catch((error) => {

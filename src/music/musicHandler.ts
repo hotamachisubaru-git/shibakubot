@@ -117,6 +117,7 @@ const MUSIC_MESSAGE_COMMAND_DEFINITIONS: readonly MusicMessageCommandDefinition[
   },
   {
     name: MUSIC_TEXT_COMMAND.repeat,
+    requiresEnabled: false,
     handler: async (message, args) => handleRepeatCommand(message, args),
   },
   {
@@ -246,8 +247,9 @@ export async function handleMusicMessage(message: Message): Promise<void> {
   if (!message.content.startsWith(PREFIX)) return;
 
   const lavalink = getLavalink(message);
-  if (!lavalink) return;
-  hookManagerAutoStopOnce(lavalink);
+  if (lavalink) {
+    hookManagerAutoStopOnce(lavalink);
+  }
 
   const guildId = message.guildId;
   if (!guildId) return;
@@ -270,5 +272,10 @@ export async function handleMusicMessage(message: Message): Promise<void> {
     await definition.handler(message, parsedCommand.args);
   } catch (error) {
     console.error("[music] command error", error);
+    try {
+      await message.reply("⚠️ コマンド処理中にエラーが発生しました。");
+    } catch {
+      // noop
+    }
   }
 }
