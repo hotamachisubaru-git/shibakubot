@@ -19,6 +19,8 @@ dist/
 release/
 
 # Other
+SYNAPTIC.md
+PROJECT.md
 logs/
 *.zip
 *.js

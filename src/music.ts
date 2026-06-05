@@ -1,1 +1,1 @@
-export { handleMusicMessage } from "./musicHandler";
+export * from "./music/music-index";
