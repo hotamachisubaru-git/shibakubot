@@ -9,6 +9,6 @@
     "skipLibCheck": true,
     "verbatimModuleSyntax": false
   },
-  "include": ["src/**/*.ts"],
+  "include": ["src/index.ts", "src/deploy-commands.ts"],
   "exclude": ["node_modules", "dist"]
 }

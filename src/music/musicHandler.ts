@@ -253,14 +253,14 @@ function buildMusicHelpMessage(): string {
     `\`${PREFIX}${MUSIC_TEXT_COMMAND.limit} [set <分>|reset]\` (${PREFIX}${MUSIC_TEXT_COMMAND.limitAlias}) - サーバー別の最大再生時間を表示/変更（変更は管理者のみ）\n` +
     `\`${PREFIX}${MUSIC_TEXT_COMMAND.disable}\` (${PREFIX}${MUSIC_TEXT_COMMAND.disableAlias}) - 音楽機能を無効化（管理者のみ）\n` +
     `\`${PREFIX}${MUSIC_TEXT_COMMAND.enable}\` (${PREFIX}${MUSIC_TEXT_COMMAND.enableAlias}) - 音楽機能を有効化（管理者のみ）\n` +
-    `\`s!vol <1-100>\` - 音量を設定（現在再生中の曲の音量を変更）\n` +
-    `\`s!pause\` - 一時停止/再開を切り替え`
+    `\`${PREFIX}${MUSIC_TEXT_COMMAND.volume} <1-100>\` - 音量を設定（現在再生中の曲の音量を変更）\n` +
+    `\`${PREFIX}${MUSIC_TEXT_COMMAND.pause}\` - 一時停止/再開を切り替え`
   );
 }
 
 /**
  * メッセージコマンドのルーター
- *  p!play / p!np / p!skip / p!s / p!stop / p!queue / p!repeat / p!upload / p!ng / p!limit
+ *  p!play / p!np / p!skip / p!s / p!vol / p!pause / p!stop / p!queue / p!repeat / p!upload / p!ng / p!limit
  */
 export async function handleMusicMessage(message: Message): Promise<void> {
   if (!message.guild) return;
