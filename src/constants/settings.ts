@@ -8,6 +8,5 @@ export const SETTING_KEYS = {
   musicMaxTrackMinutes: "musicMaxTrackMinutes",
   musicRepeat: "musicRepeat",
   maintenanceEnabled: "maintenanceEnabled",
-  aiChatEnabled: "aiChatEnabled",
-  aiGuildMemory: "aiGuildMemory",
+  managedUsers: "managedUsers",
 } as const;

@@ -33,7 +33,7 @@ import {
   shouldAttemptYtDlpFallback,
   YtDlpUserError,
 } from "../ytDlp/ytDlpUtils";
-import { getOrCreatePlayer, waitForVoiceConnection } from "./player-connection";
+import { enforceFixedVolume, getOrCreatePlayer, waitForVoiceConnection } from "./player-connection";
 import { FIXED_VOLUME, MAX_SELECTION_RESULTS } from "../misc/constants";
 import { buildExternalTrackBlockedMessage, validateTrackForQueue } from "../misc/trackValidation";
 import { handleExternalUrlFallback } from "../misc/external-url";
@@ -108,11 +108,7 @@ export async function handlePlay(
     return;
   }
 
-  try {
-    await player.setVolume(FIXED_VOLUME);
-  } catch (error) {
-    console.warn("[music] setVolume error (play)", error);
-  }
+  await enforceFixedVolume(player, "play");
   await applyMusicRepeatForPlayer(player);
 
   let track: PendingTrack | undefined = options?.selectedTrack;

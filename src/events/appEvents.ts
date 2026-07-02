@@ -1,15 +1,9 @@
 import { Events, Client, VoiceState } from "discord.js";
-import { refreshGuildMemoriesOnStartup, notifyGuildMessage } from "../ai/guild-memory";
 import { getMaintenanceEnabled, isIgnoredUser } from "../data";
 import { handleMusicMessage } from "../music";
 import { handleAutocompleteInteraction, handleChatInputInteraction } from "../discord/interactionRouter";
 
 export function setupAppEventHandlers(client: Client): void {
-  client.once(Events.ClientReady, async (readyClient) => {
-    console.log(`✅ ログイン完了: ${readyClient.user.tag}`);
-    void refreshGuildMemoriesOnStartup(readyClient.guilds.cache.values());
-  });
-
   client.on(Events.InteractionCreate, async (interaction) => {
     if (interaction.isAutocomplete()) {
       await handleAutocompleteInteraction(interaction);
@@ -22,7 +16,6 @@ export function setupAppEventHandlers(client: Client): void {
   client.on("messageCreate", async (message) => {
     if (message.guildId && getMaintenanceEnabled(message.guildId)) return;
     if (message.guildId && isIgnoredUser(message.guildId, message.author.id)) return;
-    notifyGuildMessage(message);
     await handleMusicMessage(message);
   });
 

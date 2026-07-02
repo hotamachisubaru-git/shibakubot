@@ -3,9 +3,16 @@ import { Player } from "lavalink-client";
 import { FIXED_VOLUME } from "../misc/constants";
 import { getLavalink } from "../misc/trackUtils";
 
-// ---------------------------------------------------------------------------
-// getOrCreatePlayer
-// ---------------------------------------------------------------------------
+export async function enforceFixedVolume(
+  player: Player,
+  context: string,
+): Promise<void> {
+  try {
+    await player.setVolume(FIXED_VOLUME, true);
+  } catch (error) {
+    console.warn(`[music] setVolume error (${context})`, error);
+  }
+}
 
 export async function getOrCreatePlayer(
   message: Message,
@@ -37,12 +44,9 @@ export async function getOrCreatePlayer(
     }
   }
 
+  await enforceFixedVolume(player, "player-connection");
   return player;
 }
-
-// ---------------------------------------------------------------------------
-// waitForVoiceConnection
-// ---------------------------------------------------------------------------
 
 export async function waitForVoiceConnection(
   player: Player,

@@ -1,5 +1,4 @@
 import type { AutocompleteInteraction, ChatInputCommandInteraction } from "discord.js";
-import { getAiSlashHandler } from "../ai/ai-slash";
 import { getRuntimeConfig } from "../config/runtime";
 import { SLASH_COMMAND } from "../constants/commands";
 import { getMaintenanceEnabled, isIgnoredUser } from "../data";
@@ -20,15 +19,14 @@ export async function handleChatInputInteraction(
     interaction.guildId !== null &&
     commandName === SLASH_COMMAND.ignore &&
     hasAdminOrDevPermission(interaction, OWNER_IDS);
+  const canOpenMaintenanceMenu =
+    commandName === SLASH_COMMAND.menu &&
+    hasAdminGuildOwnerOrDevPermission(interaction, OWNER_IDS);
 
   if (
     interaction.guildId &&
     getMaintenanceEnabled(interaction.guildId) &&
-    !(
-      canManageIgnore ||
-      (commandName === SLASH_COMMAND.menu &&
-        hasAdminGuildOwnerOrDevPermission(interaction, OWNER_IDS))
-    )
+    !(canManageIgnore || canOpenMaintenanceMenu)
   ) {
     await interaction.reply({
       content: "⚠️ 現在メンテナンス中です。しばらくお待ちください。",
@@ -49,8 +47,7 @@ export async function handleChatInputInteraction(
     return;
   }
 
-  const handler =
-    getAiSlashHandler(commandName) ?? ROOT_SLASH_HANDLERS[commandName];
+  const handler = ROOT_SLASH_HANDLERS[commandName];
   if (!handler) {
     return;
   }

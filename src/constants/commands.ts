@@ -1,18 +1,10 @@
 export const SLASH_COMMAND = {
-  ping: "ping", //ping
-  sbk: "sbk", //しばく
-  ignore: "ignore", // 自動無視
-  menu: "menu", //メニュー
-  help: "help", //ヘルプ
-  ai: "ai", // AI総合
-  chat: "chat", //AIチャット
-  reply: "reply", // AIチャット返信
-  regen: "regen", // AIチャット再生成
-  image: "image", //  AI画像生成
-  history: "history", // チャット履歴
-  setPrompt: "setprompt", //  プロンプト設定
-  setCharacter: "setcharacter", // キャラクター設定
-  chatReset: "chatreset", // チャット履歴リセット
+  sbk: "sbk",
+  check: "check",
+  immune: "immune",
+  ignore: "ignore",
+  reset: "reset",
+  menu: "menu",
 } as const;
 
 export const MUSIC_TEXT_COMMAND = {
@@ -35,4 +27,7 @@ export const MUSIC_TEXT_COMMAND = {
   enable: "enable",
   enableAlias: "e",
   repeat: "repeat",
+  manage: "manage",
+  volume: "vol",
+  pause: "pause",
 } as const;

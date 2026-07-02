@@ -1,16 +1,12 @@
 # しばくbot / ShibakuBot
 
-Discordサーバー向けの多機能Botです。  
-しばきカウント、メニューUI、VC操作、音楽再生（Lavalink）、AIチャット/画像生成に対応しています。
+Discordサーバー向けのBotです。  
+しばきカウント、メンテナンス用メニューUI、音楽再生（Lavalink）、データ保存に対応しています。
 
 ## 主な機能
 - しばき回数の記録・ランキング・統計
-- `/menu` からの管理操作（回数設定、免除管理、ログ/バックアップ等）
-- VC操作（移動/切断/ミュート/解除）
-- 音楽再生（`s!` プレフィックス、YouTube Music / YouTube / SoundCloud / Bandcamp 検索、Spotify URL/URI、各種URL再生、アップロード再生、NGワード管理）
-- AIチャット（Ollama/OpenAI互換API）
-- AI画像生成（Stable Diffusion WebUI API）
-- 2択投票（`/menu` から作成）
+- `/menu` からの保守操作（回数設定、免除管理、ログ/バックアップ、メンテナンス切替、Bot権限確認等）
+- 音楽再生（`p!` プレフィックス、YouTube Music / YouTube / SoundCloud / Bandcamp 検索、Spotify URL/URI、各種URL再生、アップロード再生、NGワード管理）
 
 ## 前提
 - Node.js `>= 20`
@@ -66,54 +62,14 @@ OWNER_IDS=111111111111111111
 IMMUNE_IDS=
 LOG_CHANNEL_ID=
 
-# AI chat (Ollama/OpenAI-compatible endpoint / Gemini compatible)
-MODEL_ENDPOINT=http://localhost:11434/api/chat
-MODEL_NAME=gpt-oss:20b
-MODEL_AUTO_DETECT_NAMES=gemma3:27b,gpt-oss:20b
-MODEL_GOOGLE_SEARCH_ENABLED=false
-MODEL_API_KEY=
-# guildId:key をカンマ区切りで指定すると、guild ごとに API キーを上書きできます
-MODEL_API_KEY_BY_GUILD=
-MODEL_TIMEOUT_MS=120000
-# Leave AUX_MODEL_* empty to reuse MODEL_*
-AUX_MODEL_ENDPOINT=
-AUX_MODEL_NAME=
-AUX_MODEL_AUTO_DETECT_NAMES=
-AUX_MODEL_API_KEY=
-AUX_MODEL_API_KEY_BY_GUILD=
-AUX_MODEL_TIMEOUT_MS=120000
-SYSTEM_PROMPT=あなたは親切で実用的なAIアシスタントです。回答は日本語で行ってください。
-MAX_HISTORY_TURNS=8
-MAX_RESPONSE_CHARS=8000
-AI_GUILD_MEMORY_ENABLED=true
-AI_GUILD_MEMORY_CHANNEL_LIMIT=4
-AI_GUILD_MEMORY_MESSAGES_PER_CHANNEL=30
-AI_GUILD_MEMORY_MAX_INPUT_CHARS=12000
-AI_GUILD_MEMORY_MAX_SUMMARY_CHARS=1200
-AI_GUILD_MEMORY_REFRESH_HOURS=12
-AI_GUILD_MEMORY_LIVE_ENABLED=true
-AI_GUILD_MEMORY_LIVE_MESSAGE_THRESHOLD=12
-AI_GUILD_MEMORY_LIVE_DEBOUNCE_MS=60000
-AI_GUILD_MEMORY_LIVE_MIN_INTERVAL_MINUTES=15
-
-# AI image (optional / Stable Diffusion WebUI API)
-IMAGE_ENDPOINT=
-IMAGE_MODEL=
-IMAGE_API_KEY=
-IMAGE_API_KEY_BY_GUILD=
-IMAGE_TIMEOUT_MS=120000
-IMAGE_DEFAULT_SIZE=1024x1024
-IMAGE_STEPS=25
-IMAGE_CFG_SCALE=6.5
-IMAGE_SAMPLER_NAME=DPM++ 2M Karras
-IMAGE_NEGATIVE_PROMPT=
-
 # 音楽/アップロード
 FILE_DIR=./files
 FILE_HOST=0.0.0.0
 FILE_PORT=3001
 UPLOAD_INTERNAL_URL=http://127.0.0.1:3001/uploads
 UPLOAD_BASE_URL=http://localhost:3001/uploads
+MUSIC_PREFIX=p!
+MUSIC_FIXED_VOLUME=20
 MUSIC_MAX_MINUTES=15
 YT_DLP_ENABLED=true
 YT_DLP_PATH=
@@ -131,33 +87,10 @@ LAVALINK_TRACE_ENABLED=false
 CLEAR_GLOBAL=true
 ```
 
-Gemini を使う場合の設定例:
-```env
-MODEL_ENDPOINT=https://generativelanguage.googleapis.com/v1beta/openai/chat/completions
-MODEL_NAME=gemini-3.1-flash-lite-preview
-MODEL_AUTO_DETECT_NAMES=none
-MODEL_GOOGLE_SEARCH_ENABLED=true
-MODEL_API_KEY=your_gemini_api_key
-AUX_MODEL_AUTO_DETECT_NAMES=none
-```
-
 ### 主な可変項目（補足）
 - `GUILD_IDS` はカンマ区切り（`GUILD_ID` 1件指定も可）
 - `UPLOAD_INTERNAL_URL` は Lavalink から到達できるURLを指定
-- `IMAGE_ENDPOINT` 未設定時は `/ai image` は利用不可
-- `MODEL_AUTO_DETECT_NAMES` を設定すると、Ollama の実行中モデル一覧から先頭一致モデルを自動選択（`none` で無効化）
-- 検出に失敗した場合は `MODEL_NAME` に自動フォールバック
-- `MODEL_GOOGLE_SEARCH_ENABLED=true` かつ Gemini API 利用時は、Google Search grounding を有効化して最新情報を確認
-- Gemini 3.1 系は `gemini-3.1-pro-preview` / `gemini-3.1-flash-lite-preview` などの正式名を推奨（`models/` 接頭辞や `-preview` 省略は bot 側で最低限補正）
-- `AUX_MODEL_*` を空欄にすると `MODEL_*` をそのまま再利用
-- `MODEL_API_KEY_BY_GUILD` / `AUX_MODEL_API_KEY_BY_GUILD` / `IMAGE_API_KEY_BY_GUILD` は `guildId:key` をカンマ区切りで指定
-- guild 別キーが未指定のサーバーは通常の `MODEL_API_KEY` / `AUX_MODEL_API_KEY` / `IMAGE_API_KEY` にフォールバック
-- `AUX_MODEL_API_KEY` 未設定時は、guild 別設定を含めて `MODEL_API_KEY` 側へフォールバック
-- `AUX_MODEL_*` を設定すると、サーバー特徴メモなどの補助AI処理だけ別モデルに分離可能
-- 役割固定で使いたい場合は `MODEL_AUTO_DETECT_NAMES=none` と `AUX_MODEL_AUTO_DETECT_NAMES=none` を推奨
-- `AI_GUILD_MEMORY_ENABLED=true` で、起動時に各サーバーの最近ログを少量要約してサーバー特徴メモを更新
-- `AI_GUILD_MEMORY_LIVE_ENABLED=true` で、通常会話の増加に応じてもサーバー特徴メモを徐々に再更新
-- サーバー特徴メモは `data/guilds/<guildId>.db` に保存され、`/ai chat` などの応答で参照
+- `MUSIC_FIXED_VOLUME` はLavalinkへ送る固定音量です（0〜100）
 - `YT_DLP_ENABLED=true` で、Lavalink 未対応URLを `yt-dlp` 取り込みで再生可能
 - `YT_DLP_PATH` を指定するとその実行ファイルを優先使用
 - `YT_DLP_AUTO_DOWNLOAD=true` かつ `yt-dlp` が未導入なら、初回使用時に `YT_DLP_CACHE_DIR` へ公式バイナリを自動取得
@@ -171,7 +104,6 @@ AUX_MODEL_AUTO_DETECT_NAMES=none
   - `LAVALINK_MAX_PREVIOUS_TRACKS`
   - `LAVALINK_EMPTY_QUEUE_DESTROY_MS`
   - `LAVALINK_CLIENT_POSITION_UPDATE_INTERVAL`
-  - `LAVALINK_VOLUME_DECREMENTER`
   - `LAVALINK_TRACE_ENABLED=false` で、`lavalink-client` の REST リクエストに付く `trace=true` を無効化
 
 ## 必要なBot権限
@@ -182,43 +114,37 @@ AUX_MODEL_AUTO_DETECT_NAMES=none
 - `Read Message History`
 - `Connect`
 - `Speak`
-- `Move Members`
-- `Mute Members`
 
 ## スラッシュコマンド
-- 登録されるトップレベルコマンドは `/ping` `/sbk` `/ignore` `/menu` `/help` `/ai` の6個です
-- `/ping` 生存確認
+- 登録されるトップレベルコマンドは `/sbk` `/check` `/immune` `/ignore` `/reset` `/menu` の6個です
 - `/sbk user count? reason?` しばく
+- `/check user` しばかれ回数を確認
+- `/immune add user` しばき免除ユーザーを追加（管理者/開発者）
+- `/immune remove user` しばき免除ユーザーを解除（管理者/開発者）
+- `/immune list` しばき免除一覧を表示（管理者/開発者）
 - `/ignore add user` bot が自動で無視するユーザーを追加（管理者/開発者）
 - `/ignore remove user` bot の ignore 対象を解除（管理者/開発者）
 - `/ignore list` bot の ignore 一覧を表示（管理者/開発者）
+- `/reset user? all?` しばき回数をリセット（管理者/開発者）
 - `/menu` メニュー表示
-- `/help` コマンド一覧
-- `/ai chat message new_session? private?` AI会話
-- `/ai reply message_id instruction? new_session? private?` 指定メッセージ返信生成
-- `/ai regen private?` 直前 `/ai reply` を再生成
-- `/ai image prompt size? private?` 画像生成（`IMAGE_ENDPOINT` 設定時）
-- `/ai history turns? private?` 会話履歴表示
-- `/ai setprompt content private? reset_history?` システムプロンプト更新
-- `/ai setcharacter character private? reset_history?` 口調プリセット適用
-- `/ai chatreset` AI会話履歴とプロンプトをリセット
-- ランキング、VC操作、ログ設定、免除管理、投票などの運用系機能は `/menu` から利用
+- ランキング、ログ設定、免除管理、DB保守、バックアップ、メンテナンス切替、Bot権限確認は `/menu` から利用
 
 ## 音楽コマンド（メッセージ）
-プレフィックスは既定で `s!` です。
+プレフィックスは既定で `p!` です。
 
-- `s!play <URL / Spotify URI / キーワード>` 再生/キュー追加
-- `s!play 1` など 検索結果の番号選択
-- `s!np` 再生中表示
-- `s!skip` / `s!s` スキップ
-- `s!stop` 停止してVC退出
-- `s!queue` キュー表示
-- `s!upload [表示名]` 音源アップロード再生
-- `s!remove <番号>` / `s!delete <番号>` キュー削除
-- `s!ng add|remove|list|clear` NGワード管理（管理者）
-- `s!disable` / `s!d` 音楽機能を無効化（管理者）
-- `s!enable` / `s!e` 音楽機能を有効化（管理者）
-- `s!help` ヘルプ
+- `p!play <URL / Spotify URI / キーワード>` 再生/キュー追加
+- `p!play 1` など 検索結果の番号選択
+- `p!np` 再生中表示
+- `p!skip` / `p!s` スキップ
+- `p!stop` 停止してVC退出
+- `p!queue` キュー表示
+- `p!upload [表示名]` 音源アップロード再生
+- `p!remove <番号>` / `p!delete <番号>` キュー削除
+- `p!ng add|remove|list|clear` NGワード管理（管理者）
+- `p!manage <username> [内容]` ユーザー別の管理内容を保存/確認（管理者）
+- `p!disable` / `p!d` 音楽機能を無効化（管理者）
+- `p!enable` / `p!e` 音楽機能を有効化（管理者）
+- `p!help` ヘルプ
 
 対応アップロード形式: `mp3, wav, flac, m4a, aac, ogg`
 
@@ -235,7 +161,7 @@ Lavalink 側で有効なら、例として `YouTube / ニコニコ / SoundCloud 
 
 ## データ保存
 - ギルドDB: `data/guilds/<guildId>.db`
-  - しばき回数、設定、AI会話履歴、AIプロンプト/キャラ状態、返信再生成状態を保存
+  - しばき回数、免除/ignore、ログ、音楽設定、メンテナンス設定を保存
 - バックアップ: `backup/`
 - アップロード保存先: `files/`（`FILE_DIR` で変更可）
 

@@ -1,3 +1,3 @@
 export * from "./data/store";
 export * from "./data/settings";
-export * from "./data/ai";
+export * from "./data/manage";

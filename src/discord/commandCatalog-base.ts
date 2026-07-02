@@ -4,7 +4,6 @@ import type { CommandDefinition } from "./commandCatalog-types";
 import { defineCommand } from "./commandCatalog-utils";
 
 export const baseCommandDefinitions: readonly CommandDefinition[] = [
-  defineCommand(SLASH_COMMAND.ping, "BOTが生きているか確認する"),
   defineCommand(SLASH_COMMAND.sbk, "ユーザーをしばく", (builder) => {
     builder
       .addUserOption((opt) =>
@@ -26,6 +25,59 @@ export const baseCommandDefinitions: readonly CommandDefinition[] = [
           .setRequired(false),
       );
   }),
+  defineCommand(
+    SLASH_COMMAND.check,
+    "ユーザーのしばかれ回数を確認する",
+    (builder) => {
+      builder.addUserOption((opt) =>
+        opt
+          .setName("user")
+          .setDescription("確認するユーザー")
+          .setRequired(true),
+      );
+    },
+  ),
+  defineCommand(
+    SLASH_COMMAND.immune,
+    "しばき免除ユーザーを管理する",
+    (builder) => {
+      builder
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName("add")
+            .setDescription("指定ユーザーをしばき免除に追加する")
+            .addUserOption((option) =>
+              option
+                .setName("user")
+                .setDescription("免除するユーザー")
+                .setRequired(true),
+            ),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName("remove")
+            .setDescription("指定ユーザーをしばき免除から外す")
+            .addUserOption((option) =>
+              option
+                .setName("user")
+                .setDescription("免除解除するユーザー")
+                .setRequired(true),
+            ),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName("list")
+            .setDescription("現在のしばき免除一覧を表示する"),
+        );
+    },
+    {
+      helpCommands: [
+        { name: `/immune add`, description: "しばき免除ユーザーを追加します" },
+        { name: `/immune remove`, description: "しばき免除ユーザーを解除します" },
+        { name: `/immune list`, description: "しばき免除一覧を表示します" },
+      ],
+    },
+  ),
   defineCommand(
     SLASH_COMMAND.ignore,
     "bot が自動で無視するユーザーを管理する",
@@ -67,6 +119,24 @@ export const baseCommandDefinitions: readonly CommandDefinition[] = [
       ],
     },
   ),
+  defineCommand(
+    SLASH_COMMAND.reset,
+    "しばき回数をリセットする",
+    (builder) => {
+      builder
+        .addUserOption((opt) =>
+          opt
+            .setName("user")
+            .setDescription("リセットするユーザー")
+            .setRequired(false),
+        )
+        .addBooleanOption((opt) =>
+          opt
+            .setName("all")
+            .setDescription("全員のしばき回数をリセットする")
+            .setRequired(false),
+        );
+    },
+  ),
   defineCommand(SLASH_COMMAND.menu, "しばくbot メニューを表示する"),
-  defineCommand(SLASH_COMMAND.help, "コマンド一覧を表示する"),
 ];

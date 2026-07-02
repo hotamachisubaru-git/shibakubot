@@ -32,12 +32,12 @@ export function buildMenuHelpEmbed(min: number, max: number): EmbedBuilder {
     .setTitle("メニューガイド")
     .setDescription(
       [
-        "コマンドが多いので、`/menu` は用途ごとにページを分けています。",
-        "迷ったらまず `基本` を開き、下の矢印ボタンで `VC操作` や `管理設定` に移動してください。",
+        "`/menu` はしばき管理と保守作業を用途ごとに分けています。",
+        "迷ったらまず `基本` を開き、下の矢印ボタンで各ページへ移動してください。",
         `現在のしばく回数レンジ: **${safeCount(BigInt(min))}〜${safeCount(BigInt(max))}回**`,
       ].join("\n"),
     )
-    .setFooter({ text: "全スラッシュコマンドの一覧は /help で確認できます。" });
+    .setFooter({ text: "搭載コマンドは /sbk 関連と /menu に限定されています。" });
 
   embed.addFields(
     ...MENU_PAGE_DEFINITIONS.map((pageDefinition) => ({
