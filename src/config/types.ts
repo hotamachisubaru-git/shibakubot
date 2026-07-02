@@ -64,47 +64,4 @@ export type RuntimeConfig = Readonly<{
     clearGlobalCommandsOnRegister: boolean;
     maxLogReasonLength: number;
   }>;
-  ai: Readonly<{
-    modelEndpoint: string;
-    modelName: string;
-    autoDetectModelNames: readonly string[];
-    googleSearchEnabled: boolean;
-    modelApiKey?: string;
-    modelApiKeysByGuild: GuildValueMap;
-    modelTimeoutMs: number;
-    auxModel: Readonly<{
-      endpoint: string;
-      modelName: string;
-      autoDetectModelNames: readonly string[];
-      apiKey?: string;
-      apiKeysByGuild: GuildValueMap;
-      inheritsModelApiKey: boolean;
-      timeoutMs: number;
-    }>;
-    maxHistoryTurns: number;
-    maxResponseChars: number;
-    systemPrompt: string;
-    guildMemory: Readonly<{
-      enabled: boolean;
-      channelLimit: number;
-      messagesPerChannel: number;
-      maxInputChars: number;
-      maxSummaryChars: number;
-      refreshHours: number;
-      liveEnabled: boolean;
-      liveMessageThreshold: number;
-      liveDebounceMs: number;
-      liveMinIntervalMinutes: number;
-    }>;
-    imageEndpoint?: string;
-    imageModel?: string;
-    imageApiKey?: string;
-    imageApiKeysByGuild: GuildValueMap;
-    imageTimeoutMs: number;
-    imageDefaultSize: string;
-    imageSteps: number;
-    imageCfgScale: number;
-    imageSamplerName: string;
-    imageNegativePrompt?: string;
-  }>;
 }>;

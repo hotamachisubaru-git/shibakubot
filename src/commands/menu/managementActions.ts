@@ -1,34 +1,22 @@
-import { handleAiChatToggle } from "./aiChatToggleHandler";
+import {
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  UserSelectMenuBuilder,
+} from "discord.js";
+import { getUserCount } from "../../data";
+import { displayNameFrom } from "../../utils/displayNameUtil";
+import {
+  bindPanelCleanup,
+  createPanelCollector,
+  formatCountWithReading,
+} from "./common";
 import { openControlModal } from "./controlHandler";
 import { handleImmuneMenu } from "./immuneHandler";
 import { openLimitModal } from "./limitHandler";
 import { handleMaintenanceToggle } from "./maintenanceHandler";
 import { handleResetMenu } from "./resetHandler";
-import { handleVoteAction } from "./voteHandler";
 import type { MenuActionHandler } from "./context";
-
-const NOT_SUNDAY_MESSAGE =
-  "おまえら～ｗｗｗ曜日感覚大丈夫～～～？？？ｗｗｗ";
-const MONDAY_TAUNT_MESSAGE = [
-  "# 明日は月曜日♪",
-  "# 月曜日♪",
-  "# ルンルンルンルン月曜日♪",
-  "# やったね！",
-  "# 月曜日だ！",
-  "# みんな元気に月曜日やっていこうね！",
-  "# ムカムカしてもしょうがないよ！",
-  "# だって明日は月曜日だもん！",
-  "# ヤッター！",
-  "# やったね！",
-].join("\n");
-
-function isSundayInJst(date: Date = new Date()): boolean {
-  const weekday = new Intl.DateTimeFormat("en-US", {
-    timeZone: "Asia/Tokyo",
-    weekday: "short",
-  }).format(date);
-  return weekday === "Sun";
-}
 
 const handleLimitAction: MenuActionHandler = async (context, button) => {
   if (button.customId !== "menu_limit") return false;
@@ -55,12 +43,70 @@ const handleControlAction: MenuActionHandler = async (context, button) => {
   return openControlModal(button, context.gid, context.refreshMenu);
 };
 
-const handleMondayAction: MenuActionHandler = async (_context, button) => {
-  if (button.customId !== "menu_monday") return false;
-  await button.deferUpdate();
-  await button.followUp({
-    content: isSundayInJst() ? MONDAY_TAUNT_MESSAGE : NOT_SUNDAY_MESSAGE,
+const handleCheckAction: MenuActionHandler = async (context, button) => {
+  if (button.customId !== "menu_check") return false;
+
+  const rowUser = new ActionRowBuilder<UserSelectMenuBuilder>().addComponents(
+    new UserSelectMenuBuilder()
+      .setCustomId("check_user")
+      .setPlaceholder("回数を確認するユーザー")
+      .setMaxValues(1),
+  );
+  const rowExec = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId("check_exec")
+      .setLabel("確認")
+      .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
+      .setCustomId("check_cancel")
+      .setLabel("キャンセル")
+      .setStyle(ButtonStyle.Secondary),
+  );
+
+  await button.reply({
+    content: "回数を確認するユーザーを選んでください。",
+    components: [rowUser, rowExec],
+    flags: "Ephemeral",
   });
+
+  const panel = await button.fetchReply();
+  let targetUserId: string | null = null;
+  const sub = createPanelCollector(button, panel);
+
+  sub.on("collect", async (component) => {
+    if (component.isUserSelectMenu() && component.customId === "check_user") {
+      targetUserId = component.values[0] ?? null;
+      await component.deferUpdate();
+      return;
+    }
+
+    if (component.isButton() && component.customId === "check_cancel") {
+      await component.update({ content: "キャンセルしました。", components: [] });
+      sub.stop("cancel");
+      return;
+    }
+
+    if (component.isButton() && component.customId === "check_exec") {
+      if (!targetUserId) {
+        await component.reply({
+          content: "対象ユーザーを選んでください。",
+          flags: "Ephemeral",
+        });
+        return;
+      }
+
+      const count = getUserCount(context.gid, targetUserId);
+      const displayName = await displayNameFrom(component, targetUserId);
+      await component.update({
+        content: `**${displayName}** は今までに ${formatCountWithReading(count)} しばかれました。`,
+        components: [],
+        allowedMentions: { parse: [] },
+      });
+      sub.stop("done");
+    }
+  });
+
+  bindPanelCleanup(sub, panel);
   return true;
 };
 
@@ -74,28 +120,13 @@ const handleMaintenanceAction: MenuActionHandler = async (context, button) => {
   return handleMaintenanceToggle(button, context.gid);
 };
 
-const handleAiChatToggleAction: MenuActionHandler = async (
-  context,
-  button,
-) => {
-  if (button.customId !== "menu_ai_chat") return false;
-  return handleAiChatToggle(button, context.gid);
-};
-
-const handleVoteMenuAction: MenuActionHandler = async (_context, button) => {
-  if (button.customId !== "menu_vs") return false;
-  return handleVoteAction(button);
-};
-
 const MANAGEMENT_HANDLERS: readonly MenuActionHandler[] = [
   handleLimitAction,
   handleImmuneAction,
   handleControlAction,
-  handleMondayAction,
+  handleCheckAction,
   handleResetAction,
   handleMaintenanceAction,
-  handleAiChatToggleAction,
-  handleVoteMenuAction,
 ];
 
 export const handleMenuManagementAction: MenuActionHandler = async (

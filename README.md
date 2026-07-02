@@ -211,6 +211,8 @@ AUX_MODEL_AUTO_DETECT_NAMES=none
 - `s!play 1` など 検索結果の番号選択
 - `s!np` 再生中表示
 - `s!skip` / `s!s` スキップ
+- `s!pause` 一時停止/再開
+- `s!vol [0-100]` / `s!volume [0-100]` 音量表示/変更
 - `s!stop` 停止してVC退出
 - `s!queue` キュー表示
 - `s!upload [表示名]` 音源アップロード再生

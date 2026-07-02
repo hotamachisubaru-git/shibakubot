@@ -19,14 +19,12 @@ import {
 import type { MenuActionContext, MenuRuntimeState } from "../menu/context";
 import { handleMenuAdminAction } from "../menu/adminActions";
 import { handleMenuManagementAction } from "../menu/managementActions";
-import { handleMenuMedalsAction } from "../menu/medals";
-import { handleMenuVoiceAction } from "../menu/voiceActions";
+import { handlePermissionsAction } from "../menu/permissionsAction";
 
 const EXTERNAL_MENU_HANDLERS = [
   handleMenuAdminAction,
   handleMenuManagementAction,
-  handleMenuVoiceAction,
-  handleMenuMedalsAction,
+  handlePermissionsAction,
 ] as const;
 
 export async function handleMenu(

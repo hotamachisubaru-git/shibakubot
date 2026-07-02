@@ -5,14 +5,17 @@ import {
   handleDisable,
   handleEnable,
   handleLimitCommand,
+  handleManageCommand,
   handleNgWordCommand,
   handleNowPlaying,
+  handlePauseCommand,
   handlePlay,
   handleQueue,
   handleRemoveCommand,
   handleRepeatCommand,
   handleSkip,
   handleStop,
+  handleVolumeCommand,
 } from "./misc/commandHandlers";
 import { handleUpload } from "./misc/upload-handler";
 import { ALLOWED_EXTENSIONS_LABEL, PREFIX } from "./misc/constants";
@@ -121,6 +124,11 @@ const MUSIC_MESSAGE_COMMAND_DEFINITIONS: readonly MusicMessageCommandDefinition[
     handler: async (message, args) => handleRepeatCommand(message, args),
   },
   {
+    name: MUSIC_TEXT_COMMAND.manage,
+    requiresEnabled: false,
+    handler: async (message, args) => handleManageCommand(message, args),
+  },
+  {
     name: MUSIC_TEXT_COMMAND.upload,
     handler: async (message, args) => handleUpload(message, args.join(" ").trim()),
   },
@@ -155,6 +163,16 @@ const MUSIC_MESSAGE_COMMAND_DEFINITIONS: readonly MusicMessageCommandDefinition[
     aliases: [MUSIC_TEXT_COMMAND.enableAlias],
     requiresEnabled: false,
     handler: async (message) => handleEnable(message),
+  },
+  {
+    name: MUSIC_TEXT_COMMAND.volume,
+    requiresEnabled: false,
+    handler: async (message, args) => handleVolumeCommand(message, args),
+  },
+  {
+    name: MUSIC_TEXT_COMMAND.pause,
+    requiresEnabled: false,
+    handler: async (message, args) => handlePauseCommand(message, args),
   },
 ];
 
@@ -231,15 +249,18 @@ function buildMusicHelpMessage(): string {
     "未対応URLは yt-dlp フォールバックで取り込み再生を試みます（例: TikTok / Bilibili / X / Instagram / Dailymotion など）\n" +
     `\`${PREFIX}${MUSIC_TEXT_COMMAND.ng} <サブコマンド>\` - 音楽NGワード管理コマンド（管理者のみ）\n` +
     `（例: \`${PREFIX}${MUSIC_TEXT_COMMAND.ng} add <ワード>\` / \`${PREFIX}${MUSIC_TEXT_COMMAND.ng} remove <ワード>\` / \`${PREFIX}${MUSIC_TEXT_COMMAND.ng} list\` / \`${PREFIX}${MUSIC_TEXT_COMMAND.ng} clear\`）\n` +
+    `\`${PREFIX}${MUSIC_TEXT_COMMAND.manage} <ユーザー> [内容]\` - ユーザー別の管理内容を保存/確認（管理者のみ）\n` +
     `\`${PREFIX}${MUSIC_TEXT_COMMAND.limit} [set <分>|reset]\` (${PREFIX}${MUSIC_TEXT_COMMAND.limitAlias}) - サーバー別の最大再生時間を表示/変更（変更は管理者のみ）\n` +
     `\`${PREFIX}${MUSIC_TEXT_COMMAND.disable}\` (${PREFIX}${MUSIC_TEXT_COMMAND.disableAlias}) - 音楽機能を無効化（管理者のみ）\n` +
-    `\`${PREFIX}${MUSIC_TEXT_COMMAND.enable}\` (${PREFIX}${MUSIC_TEXT_COMMAND.enableAlias}) - 音楽機能を有効化（管理者のみ）`
+    `\`${PREFIX}${MUSIC_TEXT_COMMAND.enable}\` (${PREFIX}${MUSIC_TEXT_COMMAND.enableAlias}) - 音楽機能を有効化（管理者のみ）\n` +
+    `\`s!vol <1-100>\` - 音量を設定（現在再生中の曲の音量を変更）\n` +
+    `\`s!pause\` - 一時停止/再開を切り替え`
   );
 }
 
 /**
  * メッセージコマンドのルーター
- *  s!play / s!np / s!skip / s!s / s!stop / s!queue / s!repeat / s!upload / s!ng / s!limit
+ *  p!play / p!np / p!skip / p!s / p!stop / p!queue / p!repeat / p!upload / p!ng / p!limit
  */
 export async function handleMusicMessage(message: Message): Promise<void> {
   if (!message.guild) return;

@@ -22,9 +22,16 @@ export { handleRepeatCommand, parseRepeatEnabledArg } from "./repeat";
 export { handleNgWordCommand } from "./ng-words";
 export { handleLimitCommand, buildMusicLimitStatusMessage } from "./duration-limit";
 export { handleDisable, handleEnable } from "./music-toggle";
+export { handleManageCommand } from "./manage";
 
 // Now playing
 export { handleNowPlaying } from "../playback/now-playing";
+
+// Volume
+export { handleVolumeCommand } from "./volume";
+
+// Pause
+export { handlePauseCommand } from "./pause";
 
 // Permissions
 export { canManageMusic } from "./music-permissions";

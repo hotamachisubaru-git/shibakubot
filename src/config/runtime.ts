@@ -31,8 +31,8 @@ import {
   CONTENT_TYPE_TO_EXTENSION,
 } from "./constants";
 import { parseBoolean, parseInteger, parseText } from "../utils/env";
-import { buildUploadUrlConfig, resolveGuildValue } from "./helpers";
-import { buildAiConfig, buildSbkRange } from "./builders";
+import { buildUploadUrlConfig } from "./helpers";
+import { buildSbkRange } from "./builders";
 import type { RuntimeConfig } from "./types";
 
 function buildDiscordConfig(): RuntimeConfig["discord"] {
@@ -57,7 +57,7 @@ function buildMusicConfig(): RuntimeConfig["music"] {
   return {
     prefix: parseText(process.env.MUSIC_PREFIX) || DEFAULT_MUSIC_PREFIX,
     spotifyDebugEnabled: parseBoolean(process.env.SPOTIFY_DEBUG_ENABLED, false),
-    fixedVolume: DEFAULT_MUSIC_FIXED_VOLUME,
+    fixedVolume: parseInteger(process.env.MUSIC_FIXED_VOLUME, DEFAULT_MUSIC_FIXED_VOLUME, { min: 0, max: 100 }),
     maxTrackMinutes: musicMaxTrackMinutes,
     maxTrackMs: musicMaxTrackMinutes * 60 * 1000,
     pendingSearchTtlMs: parseInteger(
@@ -135,7 +135,6 @@ export function buildRuntimeConfig(): RuntimeConfig {
     ytdlp: buildYtdlpConfig(),
     lavalink: buildLavalinkConfig(),
     app: buildAppConfig(),
-    ai: buildAiConfig(),
   };
   return cachedRuntimeConfig;
 }
@@ -144,27 +143,4 @@ export function getRuntimeConfig(): RuntimeConfig {
   if (cachedRuntimeConfig) return cachedRuntimeConfig;
   cachedRuntimeConfig = buildRuntimeConfig();
   return cachedRuntimeConfig;
-}
-
-export function resolveAiModelApiKey(guildId: string | null | undefined): string | undefined {
-  const { ai } = getRuntimeConfig();
-  return resolveGuildValue(ai.modelApiKeysByGuild, guildId, ai.modelApiKey);
-}
-
-export function resolveAiAuxModelApiKey(guildId: string | null | undefined): string | undefined {
-  const { ai } = getRuntimeConfig();
-  const resolvedAuxApiKey = resolveGuildValue(
-    ai.auxModel.apiKeysByGuild,
-    guildId,
-    ai.auxModel.inheritsModelApiKey ? undefined : ai.auxModel.apiKey,
-  );
-  if (resolvedAuxApiKey !== undefined) {
-    return resolvedAuxApiKey;
-  }
-  return resolveAiModelApiKey(guildId);
-}
-
-export function resolveAiImageApiKey(guildId: string | null | undefined): string | undefined {
-  const { ai } = getRuntimeConfig();
-  return resolveGuildValue(ai.imageApiKeysByGuild, guildId, ai.imageApiKey);
 }

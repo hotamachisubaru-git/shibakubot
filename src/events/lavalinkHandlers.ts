@@ -3,6 +3,7 @@ import { nodeStatsLogCounters } from "../index";
 import { isNodeStatsPayload, getBotVoiceDebugState, promptRetrySelection, logImmediateNodeStats } from "./helpers";
 import { clearRetrySelection } from "../music/state";
 import { recoverPlaybackWithYtDlp } from "../music/playbackRecovery";
+import { enforceFixedVolume } from "../music/playback/player-connection";
 
 export function setupLavalinkEventHandlers(client: ShibakuClient): void {
   client.lavalink.nodeManager.on("connect", (node) => {
@@ -62,6 +63,7 @@ export function setupLavalinkEventHandlers(client: ShibakuClient): void {
   });
 
   client.lavalink.on("trackStart", (player, track) => {
+    void enforceFixedVolume(player, "trackStart");
     const voiceState = player.voice as { endpoint?: string; ping?: number; connected?: boolean };
     console.log(
       `[music] track start guild=${player.guildId} title=${track?.info?.title ?? "unknown"} source=${track?.info?.sourceName ?? "unknown"} identifier=${track?.info?.identifier ?? "unknown"} uri=${track?.info?.uri ?? "unknown"}`,

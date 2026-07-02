@@ -5,7 +5,6 @@ import {
   GatewayIntentBits,
 } from "discord.js";
 import { getRuntimeConfig } from "./config/runtime";
-import { registerConsoleCommands } from "./consoleCommands/index.js";
 import { startFileServer } from "./fileserver/fileServer";
 import { initLavalink, waitForLavalinkReady } from "./lavalink";
 import { setupLavalinkEventHandlers } from "./events/lavalinkHandlers";
@@ -25,6 +24,10 @@ startFileServer();
 
 const client = initLavalink(
   new Client({
+    allowedMentions: {
+      parse: [],
+      repliedUser: false,
+    },
     intents: [
       GatewayIntentBits.Guilds,
       GatewayIntentBits.GuildMembers,
@@ -34,7 +37,6 @@ const client = initLavalink(
     ],
   }),
 );
-registerConsoleCommands(client);
 
 client.once(Events.ClientReady, async (readyClient) => {
   console.log(`✅ ログイン完了: ${readyClient.user.tag}`);

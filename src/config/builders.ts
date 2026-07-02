@@ -27,33 +27,10 @@ import {
   DEFAULT_LAVALINK_EMPTY_QUEUE_DESTROY_MS,
   DEFAULT_LAVALINK_CLIENT_POSITION_UPDATE_INTERVAL,
   DEFAULT_LAVALINK_VOLUME_DECREMENTER,
-  DEFAULT_MODEL_ENDPOINT,
-  DEFAULT_MODEL_NAME,
-  DEFAULT_MODEL_AUTO_DETECT_NAMES,
-  DEFAULT_MODEL_TIMEOUT_MS,
-  DEFAULT_MAX_HISTORY_TURNS,
-  DEFAULT_MAX_RESPONSE_CHARS,
-  DEFAULT_AI_GUILD_MEMORY_ENABLED,
-  DEFAULT_AI_GUILD_MEMORY_CHANNEL_LIMIT,
-  DEFAULT_AI_GUILD_MEMORY_MESSAGES_PER_CHANNEL,
-  DEFAULT_AI_GUILD_MEMORY_MAX_INPUT_CHARS,
-  DEFAULT_AI_GUILD_MEMORY_MAX_SUMMARY_CHARS,
-  DEFAULT_AI_GUILD_MEMORY_REFRESH_HOURS,
-  DEFAULT_AI_GUILD_MEMORY_LIVE_ENABLED,
-  DEFAULT_AI_GUILD_MEMORY_LIVE_MESSAGE_THRESHOLD,
-  DEFAULT_AI_GUILD_MEMORY_LIVE_DEBOUNCE_MS,
-  DEFAULT_AI_GUILD_MEMORY_LIVE_MIN_INTERVAL_MINUTES,
-  DEFAULT_IMAGE_TIMEOUT_MS,
-  DEFAULT_IMAGE_SIZE,
-  DEFAULT_IMAGE_STEPS,
-  DEFAULT_IMAGE_CFG_SCALE,
-  DEFAULT_IMAGE_SAMPLER_NAME,
-  DEFAULT_AI_SYSTEM_PROMPT,
   ALLOWED_EXTENSIONS,
   CONTENT_TYPE_TO_EXTENSION,
 } from "./constants";
-import { parseBoolean, parseInteger, parseText, parseGuildValueMap } from "../utils/env";
-import { buildUploadUrlConfig, resolveGuildValue, parseOptionalText, parseModelAutoDetectNames, parseModelAutoDetectNamesWithFallback } from "./helpers";
+import { parseBoolean, parseInteger, parseText } from "../utils/env";
 import type { RuntimeConfig } from "./types";
 
 export function buildSbkRange(): RuntimeConfig["sbk"] {
@@ -80,7 +57,7 @@ export function buildMusicConfig(): RuntimeConfig["music"] {
   return {
     prefix: parseText(process.env.MUSIC_PREFIX) || DEFAULT_MUSIC_PREFIX,
     spotifyDebugEnabled: parseBoolean(process.env.SPOTIFY_DEBUG_ENABLED, false),
-    fixedVolume: DEFAULT_MUSIC_FIXED_VOLUME,
+    fixedVolume: parseInteger(process.env.MUSIC_FIXED_VOLUME, DEFAULT_MUSIC_FIXED_VOLUME, { min: 0, max: 100 }),
     maxTrackMinutes: musicMaxTrackMinutes,
     maxTrackMs: musicMaxTrackMinutes * 60 * 1000,
     pendingSearchTtlMs: parseInteger(
@@ -128,92 +105,5 @@ export function buildLavalinkConfig(): RuntimeConfig["lavalink"] {
     emptyQueueDestroyMs: parseInteger(process.env.LAVALINK_EMPTY_QUEUE_DESTROY_MS, DEFAULT_LAVALINK_EMPTY_QUEUE_DESTROY_MS, { min: 1_000 }),
     clientPositionUpdateInterval: parseInteger(process.env.LAVALINK_CLIENT_POSITION_UPDATE_INTERVAL, DEFAULT_LAVALINK_CLIENT_POSITION_UPDATE_INTERVAL, { min: 50 }),
     volumeDecrementer,
-  };
-}
-
-export function buildAiConfig(): RuntimeConfig["ai"] {
-  const modelEndpoint = parseText(process.env.MODEL_ENDPOINT) || DEFAULT_MODEL_ENDPOINT;
-  const modelName = parseText(process.env.MODEL_NAME) || DEFAULT_MODEL_NAME;
-  const autoDetectModelNames = parseModelAutoDetectNames(process.env.MODEL_AUTO_DETECT_NAMES, [...DEFAULT_MODEL_AUTO_DETECT_NAMES]);
-  const googleSearchEnabled = parseBoolean(process.env.MODEL_GOOGLE_SEARCH_ENABLED, false);
-  const modelApiKey = parseOptionalText(process.env.MODEL_API_KEY);
-  const modelApiKeysByGuild = parseGuildValueMap(process.env.MODEL_API_KEY_BY_GUILD);
-  const modelTimeoutMs = parseInteger(process.env.MODEL_TIMEOUT_MS, DEFAULT_MODEL_TIMEOUT_MS, { min: 1_000 });
-
-  const auxModelEndpoint = parseText(process.env.AUX_MODEL_ENDPOINT) || modelEndpoint;
-  const auxModelName = parseText(process.env.AUX_MODEL_NAME) || modelName;
-  const auxModelAutoDetectNames = parseModelAutoDetectNamesWithFallback(
-    process.env.AUX_MODEL_AUTO_DETECT_NAMES,
-    [auxModelName],
-  );
-  const auxModelApiKeyRaw = parseOptionalText(process.env.AUX_MODEL_API_KEY);
-  const auxModelApiKey = auxModelApiKeyRaw ?? modelApiKey;
-  const auxModelApiKeysByGuild = parseGuildValueMap(process.env.AUX_MODEL_API_KEY_BY_GUILD);
-  const auxModelTimeoutMs = parseInteger(process.env.AUX_MODEL_TIMEOUT_MS, modelTimeoutMs, { min: 1_000 });
-
-  const maxHistoryTurns = parseInteger(process.env.MAX_HISTORY_TURNS, DEFAULT_MAX_HISTORY_TURNS, { min: 1, max: 100 });
-  const maxResponseChars = parseInteger(process.env.MAX_RESPONSE_CHARS, DEFAULT_MAX_RESPONSE_CHARS, { min: 200, max: 32_000 });
-
-  const systemPromptRaw = parseText(process.env.SYSTEM_PROMPT);
-  const systemPrompt = (systemPromptRaw || DEFAULT_AI_SYSTEM_PROMPT).replace(/\\n/g, "\n").trim();
-
-  const imageEndpoint = parseOptionalText(process.env.IMAGE_ENDPOINT);
-  const imageModel = parseOptionalText(process.env.IMAGE_MODEL);
-  const imageApiKey = parseOptionalText(process.env.IMAGE_API_KEY);
-  const imageApiKeysByGuild = parseGuildValueMap(process.env.IMAGE_API_KEY_BY_GUILD);
-  const imageTimeoutMs = parseInteger(process.env.IMAGE_TIMEOUT_MS, DEFAULT_IMAGE_TIMEOUT_MS, { min: 1_000 });
-  const imageDefaultSizeRaw = parseText(process.env.IMAGE_DEFAULT_SIZE) || DEFAULT_IMAGE_SIZE;
-  const imageDefaultSize = /^\d+x\d+$/.test(imageDefaultSizeRaw) ? imageDefaultSizeRaw : DEFAULT_IMAGE_SIZE;
-  const imageSteps = parseInteger(process.env.IMAGE_STEPS, DEFAULT_IMAGE_STEPS, { min: 1 });
-  const imageCfgScaleRaw = parseText(process.env.IMAGE_CFG_SCALE);
-  const imageCfgScaleParsed = Number.parseFloat(imageCfgScaleRaw);
-  const imageCfgScale = Number.isFinite(imageCfgScaleParsed) && imageCfgScaleParsed > 0
-    ? imageCfgScaleParsed
-    : DEFAULT_IMAGE_CFG_SCALE;
-  const imageSamplerName = parseText(process.env.IMAGE_SAMPLER_NAME) || DEFAULT_IMAGE_SAMPLER_NAME;
-  const imageNegativePrompt = parseOptionalText(process.env.IMAGE_NEGATIVE_PROMPT);
-
-  return {
-    modelEndpoint,
-    modelName,
-    autoDetectModelNames,
-    googleSearchEnabled,
-    modelApiKey,
-    modelApiKeysByGuild,
-    modelTimeoutMs,
-    auxModel: {
-      endpoint: auxModelEndpoint,
-      modelName: auxModelName,
-      autoDetectModelNames: auxModelAutoDetectNames,
-      apiKey: auxModelApiKey,
-      apiKeysByGuild: auxModelApiKeysByGuild,
-      inheritsModelApiKey: auxModelApiKeyRaw === undefined,
-      timeoutMs: auxModelTimeoutMs,
-    },
-    maxHistoryTurns,
-    maxResponseChars,
-    systemPrompt,
-    guildMemory: {
-      enabled: parseBoolean(process.env.AI_GUILD_MEMORY_ENABLED, DEFAULT_AI_GUILD_MEMORY_ENABLED),
-      channelLimit: parseInteger(process.env.AI_GUILD_MEMORY_CHANNEL_LIMIT, DEFAULT_AI_GUILD_MEMORY_CHANNEL_LIMIT, { min: 1, max: 20 }),
-      messagesPerChannel: parseInteger(process.env.AI_GUILD_MEMORY_MESSAGES_PER_CHANNEL, DEFAULT_AI_GUILD_MEMORY_MESSAGES_PER_CHANNEL, { min: 5, max: 100 }),
-      maxInputChars: parseInteger(process.env.AI_GUILD_MEMORY_MAX_INPUT_CHARS, DEFAULT_AI_GUILD_MEMORY_MAX_INPUT_CHARS, { min: 1_000, max: 100_000 }),
-      maxSummaryChars: parseInteger(process.env.AI_GUILD_MEMORY_MAX_SUMMARY_CHARS, DEFAULT_AI_GUILD_MEMORY_MAX_SUMMARY_CHARS, { min: 200, max: 8_000 }),
-      refreshHours: parseInteger(process.env.AI_GUILD_MEMORY_REFRESH_HOURS, DEFAULT_AI_GUILD_MEMORY_REFRESH_HOURS, { min: 1, max: 24 * 30 }),
-      liveEnabled: parseBoolean(process.env.AI_GUILD_MEMORY_LIVE_ENABLED, DEFAULT_AI_GUILD_MEMORY_LIVE_ENABLED),
-      liveMessageThreshold: parseInteger(process.env.AI_GUILD_MEMORY_LIVE_MESSAGE_THRESHOLD, DEFAULT_AI_GUILD_MEMORY_LIVE_MESSAGE_THRESHOLD, { min: 1, max: 500 }),
-      liveDebounceMs: parseInteger(process.env.AI_GUILD_MEMORY_LIVE_DEBOUNCE_MS, DEFAULT_AI_GUILD_MEMORY_LIVE_DEBOUNCE_MS, { min: 1_000, max: 60 * 60 * 1000 }),
-      liveMinIntervalMinutes: parseInteger(process.env.AI_GUILD_MEMORY_LIVE_MIN_INTERVAL_MINUTES, DEFAULT_AI_GUILD_MEMORY_LIVE_MIN_INTERVAL_MINUTES, { min: 1, max: 24 * 60 }),
-    },
-    imageEndpoint,
-    imageModel,
-    imageApiKey,
-    imageApiKeysByGuild,
-    imageTimeoutMs,
-    imageDefaultSize,
-    imageSteps,
-    imageCfgScale,
-    imageSamplerName,
-    imageNegativePrompt,
   };
 }

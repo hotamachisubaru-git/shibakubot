@@ -1,7 +1,6 @@
 import path from "node:path";
 import {
   DEFAULT_FILE_HOST,
-  DEFAULT_AI_SYSTEM_PROMPT,
   DISABLED_TEXT_VALUES,
 } from "./constants";
 import { parseText } from "../utils/env";
