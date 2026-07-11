@@ -22,7 +22,13 @@ export function startFileServer(options: FileServerOptions = {}): Server {
   app.use("/uploads", express.static(uploadDir));
 
   return app.listen(port, host, () => {
-    const labelHost = host === "0.0.0.0" ? "localhost" : host;
+    const publiclyBound = host === "0.0.0.0" || host === "::";
+    const labelHost = publiclyBound ? "localhost" : host;
     console.log(`[file-server] http://${labelHost}:${port}/uploads/`);
+    if (publiclyBound) {
+      console.warn(
+        `[file-server] WARNING: /uploads is unauthenticated and bound to all interfaces (${host}).`,
+      );
+    }
   });
 }

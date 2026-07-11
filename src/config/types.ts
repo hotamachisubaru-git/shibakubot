@@ -30,9 +30,11 @@ export type RuntimeConfig = Readonly<{
   music: Readonly<{
     prefix: string;
     spotifyDebugEnabled: boolean;
-    fixedVolume: number;
+    initialVolume: number;
     maxTrackMinutes: number;
     maxTrackMs: number;
+    uploadMaxMb: number;
+    uploadMaxBytes: number;
     pendingSearchTtlMs: number;
     maxSelectionResults: number;
     allowedExtensions: readonly string[];
@@ -45,6 +47,12 @@ export type RuntimeConfig = Readonly<{
     autoDownload: boolean;
     timeoutMs: number;
     cacheDir: string;
+    version: string;
+    sha256?: string;
+    maxFileSizeMb: number;
+    maxFileSizeBytes: number;
+    tempFileMaxAgeMs: number;
+    cleanupIntervalMs: number;
   }>;
   lavalink: Readonly<{
     nodeId: string;

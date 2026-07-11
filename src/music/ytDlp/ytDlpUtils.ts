@@ -27,6 +27,18 @@ export type DownloadedExternalTrack = Readonly<
   }
 >;
 
+export type YtDlpCleanupResult = Readonly<{
+  scanned: number;
+  deleted: number;
+}>;
+
+function isMaxFileSizeError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    /max[- ]filesize|larger than.*filesize|file is larger/i.test(error.message)
+  );
+}
+
 export function shouldAttemptYtDlpFallback(inputUrl: string): boolean {
   if (!/^https?:\/\//i.test(inputUrl)) return false;
   const runtimeConfig = getRuntimeConfig();
@@ -115,6 +127,8 @@ export async function downloadExternalTrack(
       "--no-warnings",
       "--no-part",
       "--no-playlist",
+      "--max-filesize",
+      `${runtimeConfig.ytdlp.maxFileSizeMb}M`,
       "-I",
       "1",
       "-f",
@@ -125,10 +139,26 @@ export async function downloadExternalTrack(
       inputUrl,
     ];
 
-    await runYtDlp(downloadArgs);
+    try {
+      await runYtDlp(downloadArgs);
+    } catch (error) {
+      if (isMaxFileSizeError(error)) {
+        throw new YtDlpUserError(
+          `外部URLから取得できるファイルは最大 ${runtimeConfig.ytdlp.maxFileSizeMb} MBです。`,
+        );
+      }
+      throw error;
+    }
     const filePath = await findDownloadedFile(prefix);
     if (!filePath) {
       throw new Error("yt-dlp download completed, but no media file was found");
+    }
+
+    const fileStats = await fs.promises.stat(filePath);
+    if (fileStats.size > runtimeConfig.ytdlp.maxFileSizeBytes) {
+      throw new YtDlpUserError(
+        `外部URLから取得できるファイルは最大 ${runtimeConfig.ytdlp.maxFileSizeMb} MBです。`,
+      );
     }
 
     const filename = path.basename(filePath);
@@ -143,6 +173,51 @@ export async function downloadExternalTrack(
     await deleteDownloadedArtifacts(prefix);
     throw error;
   }
+}
+
+export async function cleanupExpiredYtDlpDownloads(
+  now = Date.now(),
+): Promise<YtDlpCleanupResult> {
+  const maxAgeMs = getRuntimeConfig().ytdlp.tempFileMaxAgeMs;
+  let entries: fs.Dirent[];
+  try {
+    entries = await fs.promises.readdir(UPLOAD_DIR, { withFileTypes: true });
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      "code" in error &&
+      (error as NodeJS.ErrnoException).code === "ENOENT"
+    ) {
+      return { scanned: 0, deleted: 0 };
+    }
+    throw error;
+  }
+
+  const targets = entries.filter(
+    (entry) => entry.isFile() && entry.name.startsWith("remote-"),
+  );
+  let deleted = 0;
+
+  for (const entry of targets) {
+    const filePath = path.join(UPLOAD_DIR, entry.name);
+    try {
+      const stats = await fs.promises.stat(filePath);
+      if (now - stats.mtimeMs < maxAgeMs) continue;
+      await fs.promises.unlink(filePath);
+      deleted += 1;
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        "code" in error &&
+        (error as NodeJS.ErrnoException).code === "ENOENT"
+      ) {
+        continue;
+      }
+      console.warn(`[music] failed to clean temporary file: ${entry.name}`, error);
+    }
+  }
+
+  return { scanned: targets.length, deleted };
 }
 
 async function findDownloadedFile(prefix: string): Promise<string | null> {

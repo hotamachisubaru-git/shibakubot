@@ -8,6 +8,7 @@ import { getGuildStatsSnapshot, getSbkRange } from "../../data";
 import {
   buildMenu,
   buildMenuHelpEmbed,
+  bindPanelCollect,
   disabledCopyOfRows,
   formatCountWithReading,
   getMenuPageByNavCustomId,
@@ -101,7 +102,7 @@ export async function handleMenu(
       component.message.id === menuMessage.id,
   });
 
-  collector.on("collect", async (button) => {
+  bindPanelCollect(collector, "main-menu", async (button) => {
     try {
       if (
         button.customId === "menu_page_prev" ||
@@ -206,7 +207,7 @@ export async function handleMenu(
 
       await button.deferUpdate().catch(() => {});
     } catch (error) {
-      console.error("[menu] error", error);
+      throw error;
     }
   });
 

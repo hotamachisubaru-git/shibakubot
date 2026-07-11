@@ -4,7 +4,7 @@ const runtimeConfig = getRuntimeConfig();
 
 export const PREFIX = runtimeConfig.music.prefix;
 export const SPOTIFY_DEBUG_ENABLED = runtimeConfig.music.spotifyDebugEnabled;
-export const FIXED_VOLUME = runtimeConfig.music.fixedVolume;
+export const INITIAL_VOLUME = runtimeConfig.music.initialVolume;
 export const MAX_SELECTION_RESULTS = runtimeConfig.music.maxSelectionResults;
 export const PENDING_SEARCH_TTL_MS = runtimeConfig.music.pendingSearchTtlMs;
 export const OWNER_IDS = runtimeConfig.discord.ownerIds;

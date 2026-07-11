@@ -26,22 +26,24 @@ Discord Voice の仕様変更により、古い音声クライアントは接続
    npm install
    ```
 2. `.env.example` を参考に `.env` を作成
-3. Lavalink を起動（音楽機能を使う場合）
-4. スラッシュコマンド登録
-   ```bash
-   npm run register
-   ```
-5. 起動
+3. Lavalink を起動（音楽機能を使う場合。未起動でもBot本体は起動します）
+4. 起動（ログイン後、スラッシュコマンドを登録してからLavalink接続を開始します）
    ```bash
    npm run dev
    ```
 
+スラッシュコマンドだけを手動で登録する場合:
+```bash
+npm run register
+```
+
 本番実行:
 ```bash
 npm run build
-npm run register:prod
 npm run start
 ```
+
+`npm run start` はログイン後にスラッシュコマンドを登録します。手動登録する場合は、先に `npm run register:prod` を実行してください。
 
 ## VPS運用
 Linux VPS に移す場合は、`systemd` と Lavalink 用のテンプレートを同梱しています。
@@ -57,25 +59,30 @@ Linux VPS に移す場合は、`systemd` と Lavalink 用のテンプレート�
 TOKEN=your_bot_token
 CLIENT_ID=your_client_id
 GUILD_IDS=111111111111111111,222222222222222222
-# GUILD_ID=111111111111111111
 OWNER_IDS=111111111111111111
 IMMUNE_IDS=
 LOG_CHANNEL_ID=
 
 # 音楽/アップロード
 FILE_DIR=./files
-FILE_HOST=0.0.0.0
+FILE_HOST=127.0.0.1
 FILE_PORT=3001
 UPLOAD_INTERNAL_URL=http://127.0.0.1:3001/uploads
 UPLOAD_BASE_URL=http://localhost:3001/uploads
 MUSIC_PREFIX=p!
 MUSIC_FIXED_VOLUME=20
 MUSIC_MAX_MINUTES=15
+MUSIC_UPLOAD_MAX_MB=25
 YT_DLP_ENABLED=true
 YT_DLP_PATH=
 YT_DLP_AUTO_DOWNLOAD=true
 YT_DLP_TIMEOUT_MS=180000
 YT_DLP_CACHE_DIR=./data/yt-dlp
+YT_DLP_VERSION=2026.07.04
+# YT_DLP_SHA256=custom_version_asset_sha256
+YT_DLP_MAX_FILESIZE_MB=100
+YT_DLP_TEMP_MAX_AGE_HOURS=24
+YT_DLP_CLEANUP_INTERVAL_MINUTES=360
 
 # Lavalink
 LAVALINK_HOST=127.0.0.1
@@ -88,12 +95,19 @@ CLEAR_GLOBAL=true
 ```
 
 ### 主な可変項目（補足）
-- `GUILD_IDS` はカンマ区切り（`GUILD_ID` 1件指定も可）
+- `GUILD_IDS` はカンマ区切りで1件以上指定
+- ファイルサーバーはデフォルトで `127.0.0.1` のみに公開されます
+- `/uploads` には認証がありません。外部公開する場合は、ファイルサーバーのポートを直接公開せず nginx 経由にすることを推奨します
 - `UPLOAD_INTERNAL_URL` は Lavalink から到達できるURLを指定
-- `MUSIC_FIXED_VOLUME` はLavalinkへ送る固定音量です（0〜100）
+- Lavalinkが別ホストにある場合は、`FILE_HOST=0.0.0.0` とし、`UPLOAD_INTERNAL_URL` にBotホストの実際のIPアドレスまたはホスト名を明示してください
+- `MUSIC_UPLOAD_MAX_MB` は添付ファイルの保存上限です。レスポンスヘッダーとストリームの実測値の両方を検査します
+- `MUSIC_FIXED_VOLUME` は新規プレイヤーの初期音量です（1〜100）。`p!vol` で変更した値は次のトラックでも維持されます
 - `YT_DLP_ENABLED=true` で、Lavalink 未対応URLを `yt-dlp` 取り込みで再生可能
 - `YT_DLP_PATH` を指定するとその実行ファイルを優先使用
-- `YT_DLP_AUTO_DOWNLOAD=true` かつ `yt-dlp` が未導入なら、初回使用時に `YT_DLP_CACHE_DIR` へ公式バイナリを自動取得
+- `YT_DLP_AUTO_DOWNLOAD=true` かつ `yt-dlp` が未導入なら、`YT_DLP_VERSION` の公式バイナリを `YT_DLP_CACHE_DIR` へ取得し、SHA-256検証後に使用
+- デフォルト以外の `YT_DLP_VERSION` に変更する場合は、そのOS向けリリース資産の `YT_DLP_SHA256` も指定してください
+- `YT_DLP_MAX_FILESIZE_MB` は外部URLから取得するファイルの上限です。yt-dlp実行時とダウンロード後の両方で検査します
+- `YT_DLP_TEMP_MAX_AGE_HOURS` を超えた `remote-*` ファイルは、起動時および `YT_DLP_CLEANUP_INTERVAL_MINUTES` 間隔で削除されます
 - `CLEAR_GLOBAL=true` で `register` 時にグローバルコマンドを削除
 - Lavalinkの高度設定も利用可（任意）
   - `LAVALINK_NODE_ID`
@@ -184,8 +198,11 @@ Lavalink 側で有効なら、例として `YouTube / ニコニコ / SoundCloud 
   - 非公開・地域制限・要ログイン・ライブ配信URLは取り込みできない場合あり
 
 ## 開発補助コマンド
+- `npm test` 環境変数・検索クエリ・曲長判定のユニットテスト
 - `npm run migrate` 旧データ移行
 - `npm run release:bundle` 配布バンドル作成（`release/shibakubot-v<version>` と `release/<version>` を生成）
+
+Pull Requestおよび `main` / `master` へのpushでは、GitHub ActionsがNode.js 20で `npm ci`、`npm test`、`npm run build` を実行します。
 
 ## リリース
 - `main` / `master` に push されたとき、`package.json` の `version` が未リリースなら GitHub Release を自動作成

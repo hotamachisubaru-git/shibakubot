@@ -13,9 +13,6 @@ export type SbkRange = { min: number; max: number };
 const runtimeConfig = getRuntimeConfig();
 const SBK_MIN_DEFAULT = runtimeConfig.sbk.min;
 const SBK_MAX_DEFAULT = runtimeConfig.sbk.max;
-const MUSIC_VOL_DEFAULT = runtimeConfig.music.fixedVolume;
-const MUSIC_VOL_MIN = 0;
-const MUSIC_VOL_MAX = 20;
 const MUSIC_MAX_TRACK_MINUTES_DEFAULT = runtimeConfig.music.maxTrackMinutes;
 export const MUSIC_MAX_TRACK_MINUTES_MIN = 1;
 export const MUSIC_MAX_TRACK_MINUTES_MAX = Math.floor(2_147_483_647 / 60_000);
@@ -91,40 +88,6 @@ export function setSbkRange(
   context.settingsCache.set(SETTING_KEYS.sbkMax, String(normalizedMax));
 
   return { min: normalizedMin, max: normalizedMax };
-}
-
-export function getUserMusicVolume(gid: string, userId: string): number {
-  const row = getGuildDbContext(gid).statements.selectMusicVolume.get(
-    userId,
-    SETTING_KEYS.musicVolume,
-  ) as { value: string } | undefined;
-
-  const value = Number(row?.value ?? MUSIC_VOL_DEFAULT);
-  if (!Number.isFinite(value)) {
-    return MUSIC_VOL_DEFAULT;
-  }
-
-  return Math.min(MUSIC_VOL_MAX, Math.max(MUSIC_VOL_MIN, Math.round(value)));
-}
-
-export function setUserMusicVolume(
-  gid: string,
-  userId: string,
-  volume: number,
-): number {
-  const context = getGuildDbContext(gid);
-  const clamped = Math.min(
-    MUSIC_VOL_MAX,
-    Math.max(MUSIC_VOL_MIN, Math.round(volume)),
-  );
-
-  context.statements.upsertMusicVolume.run(
-    userId,
-    SETTING_KEYS.musicVolume,
-    String(clamped),
-  );
-
-  return clamped;
 }
 
 function normalizeMusicMaxTrackMinutes(value: unknown): number | null {

@@ -14,6 +14,7 @@ import {
   clearPanelComponents,
   createPanelCollector,
   bindPanelCleanup,
+  bindPanelCollect,
   formatBytes,
   formatDuration,
   OWNER_IDS,
@@ -68,7 +69,7 @@ const handleDevtoolsAction: MenuActionHandler = async (context, button) => {
   let act: (typeof DEV_ACTIONS)[number] | null = null;
   const sub = createPanelCollector(button, panel);
 
-  sub.on("collect", async (component) => {
+  bindPanelCollect(sub, "devtools", async (component) => {
     if (component.isStringSelectMenu() && component.customId === "dev_act") {
       act = pickUnionValue(component.values[0], DEV_ACTIONS);
       await component.deferUpdate();

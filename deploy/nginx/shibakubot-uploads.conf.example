@@ -3,6 +3,7 @@ server {
     server_name bot.example.com;
 
     location /uploads/ {
+        # このパスは認証なしで配信されます。必要に応じてnginx側でアクセス制限を追加してください。
         proxy_pass http://127.0.0.1:3001/uploads/;
         proxy_http_version 1.1;
         proxy_set_header Host $host;

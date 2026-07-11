@@ -7,8 +7,9 @@ import {
   DEFAULT_FILE_HOST,
   DEFAULT_FILE_DIR,
   DEFAULT_MUSIC_PREFIX,
-  DEFAULT_MUSIC_FIXED_VOLUME,
+  DEFAULT_MUSIC_INITIAL_VOLUME,
   DEFAULT_MUSIC_MAX_TRACK_MINUTES,
+  DEFAULT_MUSIC_UPLOAD_MAX_MB,
   MAX_MUSIC_MAX_TRACK_MINUTES,
   DEFAULT_PENDING_SEARCH_TTL_MS,
   DEFAULT_MAX_SELECTION_RESULTS,
@@ -16,6 +17,10 @@ import {
   DEFAULT_YT_DLP_AUTO_DOWNLOAD,
   DEFAULT_YT_DLP_TIMEOUT_MS,
   DEFAULT_YT_DLP_CACHE_DIR,
+  DEFAULT_YT_DLP_VERSION,
+  DEFAULT_YT_DLP_MAX_FILESIZE_MB,
+  DEFAULT_YT_DLP_TEMP_MAX_AGE_HOURS,
+  DEFAULT_YT_DLP_CLEANUP_INTERVAL_MINUTES,
   DEFAULT_LAVALINK_NODE_ID,
   DEFAULT_LAVALINK_HOST,
   DEFAULT_LAVALINK_PORT,
@@ -54,12 +59,19 @@ export function buildMusicConfig(): RuntimeConfig["music"] {
     DEFAULT_MUSIC_MAX_TRACK_MINUTES,
     { min: 1, max: MAX_MUSIC_MAX_TRACK_MINUTES },
   );
+  const uploadMaxMb = parseInteger(
+    process.env.MUSIC_UPLOAD_MAX_MB,
+    DEFAULT_MUSIC_UPLOAD_MAX_MB,
+    { min: 1 },
+  );
   return {
     prefix: parseText(process.env.MUSIC_PREFIX) || DEFAULT_MUSIC_PREFIX,
     spotifyDebugEnabled: parseBoolean(process.env.SPOTIFY_DEBUG_ENABLED, false),
-    fixedVolume: parseInteger(process.env.MUSIC_FIXED_VOLUME, DEFAULT_MUSIC_FIXED_VOLUME, { min: 0, max: 100 }),
+    initialVolume: parseInteger(process.env.MUSIC_FIXED_VOLUME, DEFAULT_MUSIC_INITIAL_VOLUME, { min: 1, max: 100 }),
     maxTrackMinutes: musicMaxTrackMinutes,
     maxTrackMs: musicMaxTrackMinutes * 60 * 1000,
+    uploadMaxMb,
+    uploadMaxBytes: uploadMaxMb * 1024 * 1024,
     pendingSearchTtlMs: parseInteger(
       process.env.MUSIC_PENDING_SEARCH_TTL_MS,
       DEFAULT_PENDING_SEARCH_TTL_MS,
@@ -77,12 +89,33 @@ export function buildMusicConfig(): RuntimeConfig["music"] {
 }
 
 export function buildYtdlpConfig(): RuntimeConfig["ytdlp"] {
+  const maxFileSizeMb = parseInteger(
+    process.env.YT_DLP_MAX_FILESIZE_MB,
+    DEFAULT_YT_DLP_MAX_FILESIZE_MB,
+    { min: 1 },
+  );
+  const tempFileMaxAgeHours = parseInteger(
+    process.env.YT_DLP_TEMP_MAX_AGE_HOURS,
+    DEFAULT_YT_DLP_TEMP_MAX_AGE_HOURS,
+    { min: 1 },
+  );
+  const cleanupIntervalMinutes = parseInteger(
+    process.env.YT_DLP_CLEANUP_INTERVAL_MINUTES,
+    DEFAULT_YT_DLP_CLEANUP_INTERVAL_MINUTES,
+    { min: 1, max: 24 * 60 },
+  );
   return {
     enabled: parseBoolean(process.env.YT_DLP_ENABLED, DEFAULT_YT_DLP_ENABLED),
     binaryPath: parseText(process.env.YT_DLP_PATH),
     autoDownload: parseBoolean(process.env.YT_DLP_AUTO_DOWNLOAD, DEFAULT_YT_DLP_AUTO_DOWNLOAD),
     timeoutMs: parseInteger(process.env.YT_DLP_TIMEOUT_MS, DEFAULT_YT_DLP_TIMEOUT_MS, { min: 1_000 }),
     cacheDir: path.resolve(parseText(process.env.YT_DLP_CACHE_DIR) || DEFAULT_YT_DLP_CACHE_DIR),
+    version: parseText(process.env.YT_DLP_VERSION) || DEFAULT_YT_DLP_VERSION,
+    sha256: parseText(process.env.YT_DLP_SHA256) || undefined,
+    maxFileSizeMb,
+    maxFileSizeBytes: maxFileSizeMb * 1024 * 1024,
+    tempFileMaxAgeMs: tempFileMaxAgeHours * 60 * 60 * 1000,
+    cleanupIntervalMs: cleanupIntervalMinutes * 60 * 1000,
   };
 }
 

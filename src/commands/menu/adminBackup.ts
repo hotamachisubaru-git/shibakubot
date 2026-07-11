@@ -8,7 +8,7 @@ import {
   StringSelectMenuBuilder,
 } from "discord.js";
 import type { MenuActionContext, MenuActionHandler } from "./context";
-import { requireAdminOrDev, pickUnionValue, clearPanelComponents, createPanelCollector, bindPanelCleanup, listBackupFiles, copyDbWithWal, formatTimestamp } from "./common";
+import { requireAdminOrDev, pickUnionValue, clearPanelComponents, createPanelCollector, bindPanelCleanup, bindPanelCollect, listBackupFiles, copyDbWithWal, formatTimestamp } from "./common";
 import { BACKUP_ROOT, GUILD_DB_ROOT } from "../../constants/paths";
 import { checkpointGuildDb } from "../../data";
 
@@ -58,7 +58,7 @@ const handleBackupAction: MenuActionHandler = async (context, button) => {
   let act: (typeof BACKUP_ACTIONS)[number] | null = null;
   const sub = createPanelCollector(button, panel);
 
-  sub.on("collect", async (component) => {
+  bindPanelCollect(sub, "backup", async (component) => {
     if (component.isStringSelectMenu() && component.customId === "backup_act") {
       act = pickUnionValue(component.values[0], BACKUP_ACTIONS);
       await component.deferUpdate();

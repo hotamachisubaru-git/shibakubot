@@ -17,7 +17,6 @@ import { getMusicNgWords } from "../../data";
 import { getGuildMusicPlaybackLimit } from "../misc/limits";
 import { validateTrackForQueue } from "../misc/trackValidation";
 import { getTrackTitle } from "../misc/trackUtils";
-import { FIXED_VOLUME } from "../misc/constants";
 
 // ---------------------------------------------------------------------------
 // Type helpers
@@ -211,6 +210,7 @@ export async function handleSpotifyPlay(
     lastQueuePosition,
     spotifyResolution,
     playbackLimit,
+    player.volume,
   );
 
   logSpotifyDebug(debugContext, "completed", {
@@ -247,12 +247,13 @@ function buildSpotifyReplyLines(
     tracks: { length: number };
   },
   playbackLimit: { maxTrackMinutes: number },
+  currentVolume: number,
 ): string[] {
   const lines: string[] = [];
 
   if (addedCount === 1 && firstAddedTitle) {
     if (wasIdle) {
-      lines.push(`▶ 再生開始: **${firstAddedTitle}**（音量: ${FIXED_VOLUME}）`);
+      lines.push(`▶ 再生開始: **${firstAddedTitle}**（音量: ${currentVolume}）`);
     } else {
       lines.push(
         `⏱ キューに追加しました: **${firstAddedTitle}**（位置: ${lastQueuePosition ?? 1}）`,

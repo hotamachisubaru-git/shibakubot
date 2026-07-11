@@ -7,7 +7,7 @@ import {
 import type { MessageComponentInteraction } from "discord.js";
 import type { PanelMessage } from "./common";
 import { COMMON_MESSAGES } from "../../constants/messages";
-import { createPanelCollector, clearPanelComponents, bindPanelCleanup, requireAdminOrDev } from "./common";
+import { createPanelCollector, clearPanelComponents, bindPanelCleanup, bindPanelCollect, requireAdminOrDev } from "./common";
 import { OWNER_IDS } from "./common";
 import { resetAllCounts, setCountGuild } from "../../data";
 import { displayNameFrom } from "../../utils/displayNameUtil";
@@ -52,7 +52,7 @@ export async function handleResetMenu(
   let resetTargetUserId: string | null = null;
   const sub = createPanelCollector(button, panel);
 
-  sub.on("collect", async (component) => {
+  bindPanelCollect(sub, "reset-count", async (component) => {
     if (component.isUserSelectMenu() && component.customId === "reset_user") {
       resetTargetUserId = component.values[0] ?? null;
       await component.deferUpdate();

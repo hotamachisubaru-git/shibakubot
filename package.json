@@ -9,27 +9,29 @@
     "start": "node dist/index.js",
     "register": "ts-node src/deploy-commands.ts",
     "register:prod": "node dist/deploy-commands.js",
+    "test": "tsx --test test/*.test.ts",
     "migrate": "ts-node scripts/migrate-old-data.ts",
     "release:bundle": "npm run build && node scripts/create-release-bundle.mjs"
   },
   "dependencies": {
-    "better-sqlite3": "^12.8.0",
-    "discord.js": "^14.25.1",
-    "dotenv": "^17.3.1",
+    "better-sqlite3": "^12.11.1",
+    "discord.js": "^14.26.5",
+    "dotenv": "^17.4.2",
     "express": "^5.2.1",
-    "lavalink-client": "^2.9.9",
-    "music-metadata": "^11.12.3"
+    "lavalink-client": "^2.10.3",
+    "music-metadata": "^11.13.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
     "@types/express": "^5.0.6",
-    "@types/node": "^25.5.0",
+    "@types/node": "^20.19.43",
     "ts-node": "^10.9.2",
-    "typescript": "^6.0.2"
+    "tsx": "^4.23.0",
+    "typescript": "^6.0.3"
   },
   "overrides": {
     "discord.js": {
-      "undici": "6.24.1"
+      "undici": "6.27.0"
     }
   },
   "engines": {

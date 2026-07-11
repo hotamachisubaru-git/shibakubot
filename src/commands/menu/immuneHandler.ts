@@ -8,7 +8,7 @@ import {
 import type { MessageComponentInteraction } from "discord.js";
 import type { PanelMessage } from "./common";
 import { safeCount } from "./common";
-import { createPanelCollector, clearPanelComponents, bindPanelCleanup, requireAdminOrDev } from "./common";
+import { createPanelCollector, clearPanelComponents, bindPanelCleanup, bindPanelCollect, requireAdminOrDev } from "./common";
 import { getImmuneList, addImmuneId, removeImmuneId } from "../../data";
 import { displayNameFrom } from "../../utils/displayNameUtil";
 
@@ -62,7 +62,7 @@ export async function handleImmuneMenu(
   let target: string | null = null;
   const sub = createPanelCollector(button, panel);
 
-  sub.on("collect", async (component) => {
+  bindPanelCollect(sub, "immune", async (component) => {
     if (component.isStringSelectMenu() && component.customId === "imm_act") {
       act = component.values[0] as "add" | "remove" | "list" | null;
       await component.deferUpdate();

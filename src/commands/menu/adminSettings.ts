@@ -7,7 +7,7 @@ import {
   StringSelectMenuBuilder,
 } from "discord.js";
 import type { MenuActionContext, MenuActionHandler } from "./context";
-import { requireAdminOrDev, pickUnionValue, clearPanelComponents, createPanelCollector, bindPanelCleanup } from "./common";
+import { requireAdminOrDev, pickUnionValue, clearPanelComponents, createPanelCollector, bindPanelCleanup, bindPanelCollect } from "./common";
 import { getSetting, setSetting } from "../../data";
 import { LOG_CHANNEL_ID } from "../../config/index";
 import { LOG_CHANNEL_KEY } from "./common";
@@ -66,7 +66,7 @@ const handleSettingsAction: MenuActionHandler = async (context, button) => {
   let pickedChannelId: string | null = null;
   const sub = createPanelCollector(button, panel);
 
-  sub.on("collect", async (component) => {
+  bindPanelCollect(sub, "settings", async (component) => {
     if (
       component.isChannelSelectMenu() &&
       component.customId === "settings_log_channel"

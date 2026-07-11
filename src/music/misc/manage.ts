@@ -40,41 +40,55 @@ function memberMatches(member: GuildMember, normalized: string): boolean {
   ].some((name) => name && normalizeName(name) === normalized);
 }
 
+type ManagedMemberResolution =
+  | Readonly<{ status: "found"; member: GuildMember }>
+  | Readonly<{ status: "ambiguous" }>
+  | Readonly<{ status: "not-found" }>;
+
 async function resolveManagedMember(
   message: Message,
   raw: string,
-): Promise<GuildMember | null> {
+): Promise<ManagedMemberResolution> {
   const guild = message.guild;
-  if (!guild) return null;
+  if (!guild) return { status: "not-found" };
 
   const id = raw.match(MENTION_RE)?.[1] ?? (SNOWFLAKE_RE.test(raw) ? raw : null);
   if (id) {
-    return guild.members.fetch(id).catch(() => null);
+    const member = await guild.members.fetch(id).catch(() => null);
+    return member ? { status: "found", member } : { status: "not-found" };
   }
 
   const normalized = normalizeName(raw);
-  const cached = guild.members.cache.find((member) =>
+  const cached = guild.members.cache.filter((member) =>
     memberMatches(member, normalized),
   );
-  if (cached) return cached;
+  if (cached.size === 1) {
+    return { status: "found", member: cached.first()! };
+  }
+  if (cached.size > 1) return { status: "ambiguous" };
 
   const searched = await guild.members
     .search({ query: raw, limit: 10 })
     .catch(() => null);
-  if (!searched?.size) return null;
+  if (!searched?.size) return { status: "not-found" };
 
-  return (
-    searched.find((member) => memberMatches(member, normalized)) ??
-    searched.first() ??
-    null
+  const exactMatches = searched.filter((member) =>
+    memberMatches(member, normalized),
   );
+  if (exactMatches.size === 1) {
+    return { status: "found", member: exactMatches.first()! };
+  }
+  return exactMatches.size > 1
+    ? { status: "ambiguous" }
+    : { status: "not-found" };
 }
 
 function buildManageUsage(): string {
   return (
     `使い方: \`${PREFIX}${MUSIC_TEXT_COMMAND.manage} <ユーザー> <内容>\`\n` +
     `確認: \`${PREFIX}${MUSIC_TEXT_COMMAND.manage} <ユーザー>\`\n` +
-    `削除: \`${PREFIX}${MUSIC_TEXT_COMMAND.manage} <ユーザー> clear\``
+    `削除: \`${PREFIX}${MUSIC_TEXT_COMMAND.manage} <ユーザー> clear\`\n` +
+    "空白を含む表示名や同名ユーザーは、メンションまたはユーザーIDで指定してください。"
   );
 }
 
@@ -99,14 +113,22 @@ export async function handleManageCommand(
     return;
   }
 
-  const member = await resolveManagedMember(message, targetRaw);
-  if (!member) {
+  const resolution = await resolveManagedMember(message, targetRaw);
+  if (resolution.status === "ambiguous") {
     await replyWithoutMentions(
       message,
-      "⚠️ 対象ユーザーを見つけられませんでした。メンション、ID、表示名のいずれかで指定してください。",
+      "⚠️ 同じ名前のユーザーが複数います。対象ユーザーをメンションするか、ユーザーIDで再入力してください。",
     );
     return;
   }
+  if (resolution.status === "not-found") {
+    await replyWithoutMentions(
+      message,
+      "⚠️ 完全一致するユーザーを見つけられませんでした。メンションまたはIDで指定してください。空白を含む表示名はメンションが必要です。",
+    );
+    return;
+  }
+  const member = resolution.member;
 
   const content = args.slice(1).join(" ").trim();
   if (!content) {

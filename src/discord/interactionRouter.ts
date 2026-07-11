@@ -11,7 +11,7 @@ import { ROOT_SLASH_HANDLERS } from "./slashHandlers";
 const runtimeConfig = getRuntimeConfig();
 const OWNER_IDS = runtimeConfig.discord.ownerIds;
 
-export async function handleChatInputInteraction(
+async function routeChatInputInteraction(
   interaction: ChatInputCommandInteraction,
 ): Promise<void> {
   const commandName = interaction.commandName;
@@ -53,6 +53,46 @@ export async function handleChatInputInteraction(
   }
 
   await handler(interaction);
+}
+
+async function respondToChatInputFailure(
+  interaction: ChatInputCommandInteraction,
+): Promise<void> {
+  const content = "⚠️ コマンド処理中にエラーが発生しました。時間をおいて再度お試しください。";
+  try {
+    if (interaction.deferred) {
+      await interaction.editReply({ content });
+      return;
+    }
+    if (interaction.replied) {
+      await interaction.followUp({ content, flags: "Ephemeral" });
+      return;
+    }
+    await interaction.reply({ content, flags: "Ephemeral" });
+  } catch (responseError) {
+    console.warn("[interaction] failed to send command error response", {
+      commandName: interaction.commandName,
+      guildId: interaction.guildId,
+      userId: interaction.user.id,
+    }, responseError);
+  }
+}
+
+export async function handleChatInputInteraction(
+  interaction: ChatInputCommandInteraction,
+): Promise<void> {
+  try {
+    await routeChatInputInteraction(interaction);
+  } catch (error) {
+    console.error("[interaction] slash command failed", {
+      commandName: interaction.commandName,
+      guildId: interaction.guildId,
+      userId: interaction.user.id,
+      deferred: interaction.deferred,
+      replied: interaction.replied,
+    }, error);
+    await respondToChatInputFailure(interaction);
+  }
 }
 
 export async function handleAutocompleteInteraction(

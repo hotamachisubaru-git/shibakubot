@@ -2,13 +2,12 @@ import { Message } from "discord.js";
 import { PREFIX } from "./constants";
 import { getLavalink } from "./trackUtils";
 import { MUSIC_TEXT_COMMAND } from "../../constants/commands";
+import { requireSameMusicVoiceChannel } from "./music-permissions";
 
 const VOL_MIN = 1;
 const VOL_MAX = 100;
-const VOL_DEFAULT = 50;
-
 export function parseVolumeArg(arg: string | undefined): number | null {
-  if (!arg) return VOL_DEFAULT;
+  if (!arg) return null;
   const n = Number(arg);
   if (!Number.isFinite(n)) return null;
   const clamped = Math.min(VOL_MAX, Math.max(VOL_MIN, Math.round(n)));
@@ -38,9 +37,7 @@ export async function handleVolumeCommand(
   const player = lavalink?.players.get(guildId);
 
   if (!player) {
-    await message.reply(
-      `⚠️ 現在再生中の曲がありません。\n音量は \`${VOL_DEFAULT}\` です。`,
-    );
+    await message.reply("⚠️ 現在再生中の曲がありません。");
     return;
   }
 
@@ -48,6 +45,8 @@ export async function handleVolumeCommand(
     await message.reply("⚠️ ボイスチャンネルに接続していません。");
     return;
   }
+
+  if (!(await requireSameMusicVoiceChannel(message, player.voiceChannelId))) return;
 
   await player.setVolume(volume);
 

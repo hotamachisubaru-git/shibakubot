@@ -1,14 +1,18 @@
 import { Message } from "discord.js";
 import { Player } from "lavalink-client";
-import { FIXED_VOLUME } from "../misc/constants";
+import { INITIAL_VOLUME } from "../misc/constants";
 import { getLavalink } from "../misc/trackUtils";
 
-export async function enforceFixedVolume(
+export class MusicVoiceChannelMismatchError extends Error {
+  override name = "MusicVoiceChannelMismatchError";
+}
+
+export async function applyInitialVolume(
   player: Player,
   context: string,
 ): Promise<void> {
   try {
-    await player.setVolume(FIXED_VOLUME, true);
+    await player.setVolume(INITIAL_VOLUME, true);
   } catch (error) {
     console.warn(`[music] setVolume error (${context})`, error);
   }
@@ -32,19 +36,21 @@ export async function getOrCreatePlayer(
       textChannelId: message.channelId,
       selfDeaf: true,
       selfMute: false,
-      volume: FIXED_VOLUME,
+      volume: INITIAL_VOLUME,
     });
     await player.connect();
+    await applyInitialVolume(player, "player-create");
   } else {
     if (player.voiceChannelId !== voiceChannelId) {
-      await player.changeVoiceState({ voiceChannelId });
+      throw new MusicVoiceChannelMismatchError(
+        "The player is already connected to another voice channel.",
+      );
     }
     if (!player.connected) {
       await player.connect();
     }
   }
 
-  await enforceFixedVolume(player, "player-connection");
   return player;
 }
 
