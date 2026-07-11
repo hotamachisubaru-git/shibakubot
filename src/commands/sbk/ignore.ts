@@ -7,6 +7,7 @@ import {
   removeIgnoredUserId,
 } from "../../data";
 import { hasAdminOrDevPermission } from "../../utils/permissions";
+import { formatLimitedList } from "../../utils/discordList";
 
 const runtimeConfig = getRuntimeConfig();
 const OWNER_IDS = runtimeConfig.discord.ownerIds;
@@ -85,9 +86,11 @@ export async function handleIgnore(
 
   if (subCommand === "list") {
     const ignoredIds = getIgnoredUserList(guildId);
-    const description = ignoredIds.length
-      ? ignoredIds.map((id, index) => `${index + 1}. <@${id}> (\`${id}\`)`).join("\n")
-      : "（なし）";
+    const description = formatLimitedList(ignoredIds, {
+      maxItems: 40,
+      maxLength: 3_900,
+      formatItem: (id, index) => `${index + 1}. <@${id}> (\`${id}\`)`,
+    });
 
     await interaction.reply({
       embeds: [

@@ -1,6 +1,7 @@
 import { Message } from "discord.js";
 import { MUSIC_TEXT_COMMAND } from "../constants/commands";
 import { getMusicEnabled } from "../data";
+import { isLavalinkReady } from "../lavalink/lavalink";
 import {
   handleDisable,
   handleEnable,
@@ -35,6 +36,7 @@ type MusicMessageCommandDefinition = Readonly<{
   name: string;
   aliases?: readonly string[];
   requiresEnabled?: boolean;
+  requiresLavalink?: boolean;
   handler: MusicMessageCommandHandler;
 }>;
 
@@ -112,6 +114,8 @@ const MUSIC_MESSAGE_COMMAND_DEFINITIONS: readonly MusicMessageCommandDefinition[
   },
   {
     name: MUSIC_TEXT_COMMAND.stop,
+    requiresEnabled: false,
+    requiresLavalink: false,
     handler: async (message) => handleStop(message),
   },
   {
@@ -126,6 +130,7 @@ const MUSIC_MESSAGE_COMMAND_DEFINITIONS: readonly MusicMessageCommandDefinition[
   {
     name: MUSIC_TEXT_COMMAND.manage,
     requiresEnabled: false,
+    requiresLavalink: false,
     handler: async (message, args) => handleManageCommand(message, args),
   },
   {
@@ -135,10 +140,12 @@ const MUSIC_MESSAGE_COMMAND_DEFINITIONS: readonly MusicMessageCommandDefinition[
   {
     name: MUSIC_TEXT_COMMAND.ng,
     aliases: [MUSIC_TEXT_COMMAND.ngAlias],
+    requiresLavalink: false,
     handler: async (message, args) => handleNgWordCommand(message, args),
   },
   {
     name: MUSIC_TEXT_COMMAND.help,
+    requiresLavalink: false,
     handler: handleHelpMessageCommand,
   },
   {
@@ -150,18 +157,21 @@ const MUSIC_MESSAGE_COMMAND_DEFINITIONS: readonly MusicMessageCommandDefinition[
     name: MUSIC_TEXT_COMMAND.limit,
     aliases: [MUSIC_TEXT_COMMAND.limitAlias],
     requiresEnabled: false,
+    requiresLavalink: false,
     handler: async (message, args) => handleLimitCommand(message, args),
   },
   {
     name: MUSIC_TEXT_COMMAND.disable,
     aliases: [MUSIC_TEXT_COMMAND.disableAlias],
     requiresEnabled: false,
+    requiresLavalink: false,
     handler: async (message) => handleDisable(message),
   },
   {
     name: MUSIC_TEXT_COMMAND.enable,
     aliases: [MUSIC_TEXT_COMMAND.enableAlias],
     requiresEnabled: false,
+    requiresLavalink: false,
     handler: async (message) => handleEnable(message),
   },
   {
@@ -286,6 +296,13 @@ export async function handleMusicMessage(message: Message): Promise<void> {
   }
 
   if (!(await ensureMusicFeatureEnabled(message, guildId, definition))) {
+    return;
+  }
+
+  if (definition.requiresLavalink !== false && !isLavalinkReady()) {
+    await message.reply(
+      "⚠️ Lavalinkに接続できていません。管理系コマンドは利用できますが、音楽再生はまだ利用できません。",
+    );
     return;
   }
 

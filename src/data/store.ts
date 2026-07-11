@@ -49,8 +49,6 @@ export type GuildDbStatements = {
   countLogs: Database.Statement;
   insertLog: Database.Statement;
   countSettings: Database.Statement;
-  selectMusicVolume: Database.Statement;
-  upsertMusicVolume: Database.Statement;
 };
 
 export type GuildDbContext = {
@@ -156,13 +154,6 @@ function ensureSchema(db: Database.Database): void {
       target TEXT NOT NULL,
       reason TEXT,
       delta  TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS user_music_settings (
-      userId TEXT NOT NULL,
-      key    TEXT NOT NULL,
-      value  TEXT,
-      PRIMARY KEY (userId, key)
     );
 
   `);
@@ -287,15 +278,6 @@ function buildStatements(db: Database.Database): GuildDbStatements {
       VALUES(?,?,?,?,?)
     `),
     countSettings: db.prepare("SELECT COUNT(*) AS count FROM settings"),
-    selectMusicVolume: db.prepare(`
-      SELECT value
-      FROM user_music_settings
-      WHERE userId=? AND key=?
-    `),
-    upsertMusicVolume: db.prepare(`
-      INSERT INTO user_music_settings(userId, key, value) VALUES(?, ?, ?)
-      ON CONFLICT(userId, key) DO UPDATE SET value = excluded.value
-    `),
   };
 }
 

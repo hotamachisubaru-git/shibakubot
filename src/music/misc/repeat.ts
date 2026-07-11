@@ -8,6 +8,7 @@ import {
 import { getMusicRepeat, setMusicRepeat } from "../../data";
 import { MUSIC_TEXT_COMMAND } from "../../constants/commands";
 import { applyMusicRepeatForPlayer } from "../state/state";
+import { requireSameMusicVoiceChannel } from "./music-permissions";
 
 // ---------------------------------------------------------------------------
 // parseRepeatEnabledArg
@@ -47,6 +48,14 @@ export async function handleRepeatCommand(
     return;
   }
 
+  const player = getLavalink(message)?.players.get(guildId);
+  if (
+    player &&
+    !(await requireSameMusicVoiceChannel(message, player.voiceChannelId))
+  ) {
+    return;
+  }
+
   const currentEnabled = getMusicRepeat(guildId);
   const nextEnabled = parseRepeatEnabledArg(currentEnabled, args[0]);
   if (nextEnabled === null) {
@@ -61,7 +70,6 @@ export async function handleRepeatCommand(
     clearRepeatTimer(guildId);
   }
 
-  const player = getLavalink(message)?.players.get(guildId);
   let syncFailed = false;
   if (player) {
     try {

@@ -51,6 +51,11 @@ FILE_HOST=127.0.0.1
 FILE_PORT=3001
 UPLOAD_INTERNAL_URL=http://127.0.0.1:3001/uploads
 UPLOAD_BASE_URL=https://bot.example.com/uploads
+MUSIC_UPLOAD_MAX_MB=25
+YT_DLP_MAX_FILESIZE_MB=100
+YT_DLP_VERSION=2026.07.04
+YT_DLP_TEMP_MAX_AGE_HOURS=24
+YT_DLP_CLEANUP_INTERVAL_MINUTES=360
 
 LAVALINK_HOST=127.0.0.1
 LAVALINK_PORT=2333
@@ -61,12 +66,13 @@ LAVALINK_TRACE_ENABLED=false
 
 補足:
 - `FILE_HOST=127.0.0.1` にして、外部公開は `nginx` から `/uploads/` を中継するのを推奨
+- `/uploads` は認証なしで配信されるため、ファイルサーバーのポートをインターネットへ直接公開しないでください
 - `UPLOAD_BASE_URL` は Discord 上で見える公開URL
 - `UPLOAD_INTERNAL_URL` は Lavalink から到達できる内部URL
-- AI を同一VPSで動かすなら `MODEL_ENDPOINT` や `IMAGE_ENDPOINT` も `127.0.0.1` に寄せる
+- Lavalinkを別ホストで動かす場合のみ `FILE_HOST=0.0.0.0` を明示し、`UPLOAD_INTERNAL_URL` にはBotホストの実IPまたはホスト名を指定してください
 
 ## 5. スラッシュコマンド登録
-初回デプロイ時、またはコマンド変更時に実行します。
+Bot起動時に自動登録されます。登録だけ先に行いたい場合は実行します。
 
 ```bash
 cd /opt/shibakubot
@@ -114,13 +120,14 @@ journalctl -u shibakubot -n 100 --no-pager
 確認ポイント:
 - Bot 起動時に `ログイン完了` が出る
 - Lavalink 側で `/version` 応答が返る
-- `s!play` や `s!upload` を使う場合、`UPLOAD_BASE_URL` が外から開ける
+- `p!play` や `p!upload` を使う場合、`UPLOAD_BASE_URL` が外から開ける
 
 ## 10. 更新手順
 ```bash
 cd /opt/shibakubot
 sudo -u shibakubot git pull
 sudo -u shibakubot npm ci
+sudo -u shibakubot npm test
 sudo -u shibakubot npm run build
 sudo systemctl restart shibakubot
 ```

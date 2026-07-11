@@ -1,53 +1,41 @@
 # Copilot / AI エージェント向け指示（ShibakuBot）
 
-このリポジトリで素早く開発・修正を行うための「実務的に必要な前提知識」と具体的パターンをまとめます。
+## ランタイムと確認コマンド
 
-- **ランタイム & 開発コマンド**:
-  - Node.js >= 20
-  - 開発: `npm install` → `npm run dev`（`ts-node src/index.ts`）
-  - コマンド登録: `npm run register`（`src/deploy-commands.ts` を実行）
-  - ビルド: `npm run build` → 出力は `dist/` → 本番起動 `node dist/index.js`
+- Node.js 20以上を使用する。
+- 開発起動: `npm run dev`
+- ビルド: `npm run build`
+- ユニットテスト: `npm test`
+- 本番起動: `npm run build && npm run start`
+- スラッシュコマンドはBot起動時に登録される。登録だけ行う場合は `npm run register` を使用する。
 
-- **重要な環境変数 (.env)** (必須/挙動に直結)
-  - `TOKEN`, `CLIENT_ID`, `GUILD_ID` — Discord 連携
-  - `LOG_CHANNEL_ID`, `OWNER_IDS`, `IMMUNE_IDS` — ログ・権限・免除リスト
-  - `SBK_MIN`, `SBK_MAX` — デフォルト射程（`src/config.ts`）
+## 主要な環境変数
 
-- **アーキテクチャ概観**:
-  - コマンドエントリ: `src/index.ts` — Discord クライアント初期化、Interaction ハンドラ。
-  - コンソールコマンド: `src/consoleCommands.ts` — stdin からの `move`, `timeout`, `muteAll` などを処理。
-  - コマンド実装: `src/commands/*.ts`（例: `help.ts`, `top.ts`, `members.ts`）。新しいコマンドはここに実装して `deploy-commands.ts` に反映。
-  - 永続化: per-guild SQLite を `data/guilds/{guildId}.db` に保存（`src/data.ts` の `openDb(gid)` を使用）。
-  - メダル管理: 別 DB `data/medalbank.db`（非同期 `sqlite` を利用）
-  - 音楽: Lavalink を利用（`lavalink-client`）。`src/index.ts` にノード設定があり、実際の Lavalink サーバーが必要。
+- Discord: `TOKEN`, `CLIENT_ID`, `GUILD_IDS`, `OWNER_IDS`, `IMMUNE_IDS`
+- ファイル配信: `FILE_DIR`, `FILE_HOST`, `FILE_PORT`, `UPLOAD_INTERNAL_URL`, `UPLOAD_BASE_URL`
+- 音楽: `MUSIC_PREFIX`, `MUSIC_FIXED_VOLUME`, `MUSIC_MAX_MINUTES`, `MUSIC_UPLOAD_MAX_MB`
+- yt-dlp: `YT_DLP_ENABLED`, `YT_DLP_VERSION`, `YT_DLP_SHA256`, `YT_DLP_MAX_FILESIZE_MB`
+- Lavalink: `LAVALINK_HOST`, `LAVALINK_PORT`, `LAVALINK_PASSWORD`, `LAVALINK_SECURE`
 
-- **コードベースで守るべきローカル規約・パターン**:
-  - ギルドごとのストアは必ず `src/data.ts` の `openDb(gid)` / `loadGuildStore(gid)` を通す。
-  - ユーザー識別は常に ID（文字列）で扱う。表示名ではなく `user.id` を使う（例: `src/triggers.ts` の `targetUserId`）。
-  - 即時実行/同期 DB 操作は `better-sqlite3`（同期）: 多くの関数は同期 API を返すことに注意する。
-  - メダル周りは例外的に非同期 API を使用する（`getMedalBalance` 等）。混在に注意。
+`MUSIC_FIXED_VOLUME` は新規プレイヤーの初期音量として扱う。`FILE_HOST` のデフォルトは `127.0.0.1` であり、`/uploads` を外部公開する場合は認証なしであることに注意する。
 
-- **実装上の小さな注意点（既存コード参照）**:
-  - `src/db.ts` と `src/data.ts` に似たスキーマ処理があるが、実際のランタイムは `src/data.ts` を参照している箇所が多い。変更時はどちらが影響するか確認すること。
-  - Lavalink のノード設定では `authorization` が `youshallnotpass`（デフォルト）になっている。実運用では Lavalink 側の `application.yml` と合わせる必要あり（`src/index.ts`）。
-  - コンソールコマンド（stdin）は `src/consoleCommands.ts` で受け付ける：`move`, `timeout`, `muteAll` 等がある。修正時は入出力フォーマットに注意。
+## 現在の構成
 
-- **よくある小タスクの例（テンプレ）**:
-  - 新しい slash コマンドを追加する：`src/commands/<name>.ts` にハンドラ追加 → `src/deploy-commands.ts` を実行して `npm run register`。
-  - ギルドの設定（sbk 範囲）を保存する：`src/data.ts` の `setSbkRange(gid, min, max)` を使用。
-  - トリガー追加（メッセージ→行動）: `src/triggers.ts` に `TRIGGERS['キーワード'] = { type:'sbk', targetUserId: 'ID' }` のように追加。
+- `src/index.ts`: Bot起動、コマンド登録、イベントハンドラ設定、Lavalink初期化
+- `src/discord/`: スラッシュコマンド定義・登録・ルーティング
+- `src/commands/`: スラッシュコマンド実装
+- `src/events/`: DiscordイベントとLavalink再生イベント
+- `src/lavalink/`: Lavalinkクライアント設定、接続確認、Discord音声イベント転送
+- `src/music/`: 音楽コマンド、検索、再生、アップロード、yt-dlpフォールバック
+- `src/config/`: 環境変数からの実行時設定生成
+- `src/data/`: guild単位のSQLite永続化
+- `test/`: Node.js test runnerとtsxを使用したユニットテスト
 
-- **デバッグ / ローカル手順の要点**:
-  - ログや実行状態は標準出力に出る（`console.log` 多用）。まず `npm run dev` で起動し、`README.md` にある `.env` を確認。
-  - Lavalink が必要な機能（音楽再生）をテストする場合は Lavalink サーバーを立て、`src/index.ts` の `nodes` 設定と `authorization` を合わせる。
+## 実装上の規約
 
-- **参照すべきファイル一覧（最優先）**:
-  - `src/index.ts` — エントリ / Interaction ハンドラ
-  - `src/consoleCommands.ts` — コンソールコマンド
-  - `src/data.ts`  — 永続化ロジック（counts, immune, logs, settings, music settings）
-  - `src/commands/` — 個別コマンド実装
-  - `src/triggers.ts` — メッセージ→アクションの定義
-  - `src/deploy-commands.ts` — コマンド登録スクリプト
-  - `package.json` — 主要 npm スクリプト
-
-もしこの内容で不足や誤認があれば、どの部分を深掘りすべきか教えてください。内容を反映して改善します。
+- guildやユーザーは表示名ではなくDiscord ID文字列で識別する。
+- guild単位の永続化は `src/data.ts` が公開する関数を利用する。
+- 非同期イベント処理は最上位で例外を捕捉し、イベント名とguild IDをログに含める。
+- 設定生成ロジックは `src/config/builders.ts` に置き、`src/config/runtime.ts` は組み立てに専念させる。
+- yt-dlpの取得バージョンを変更する場合は、対象OS向け資産のSHA-256も更新する。
+- 変更後は最低限 `npm test` と `npm run build` を実行する。

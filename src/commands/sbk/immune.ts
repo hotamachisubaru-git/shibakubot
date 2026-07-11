@@ -3,6 +3,7 @@ import { getRuntimeConfig } from "../../config/runtime";
 import { COMMON_MESSAGES } from "../../constants/messages";
 import { addImmuneId, getImmuneList, removeImmuneId } from "../../data";
 import { hasAdminOrDevPermission } from "../../utils/permissions";
+import { formatLimitedList } from "../../utils/discordList";
 
 const runtimeConfig = getRuntimeConfig();
 const OWNER_IDS = runtimeConfig.discord.ownerIds;
@@ -76,12 +77,16 @@ export async function handleImmune(
     const localIds = getImmuneList(guildId);
     const globalIds = Array.from(IMMUNE_IDS);
 
-    const localText = localIds.length
-      ? localIds.map((id, i) => `${i + 1}. <@${id}> (\`${id}\`)`).join("\n")
-      : "（なし）";
-    const globalText = globalIds.length
-      ? globalIds.map((id, i) => `${i + 1}. <@${id}> (\`${id}\`)`).join("\n")
-      : "（なし）";
+    const localText = formatLimitedList(localIds, {
+      maxItems: 15,
+      maxLength: 1_000,
+      formatItem: (id, i) => `${i + 1}. <@${id}> (\`${id}\`)`,
+    });
+    const globalText = formatLimitedList(globalIds, {
+      maxItems: 15,
+      maxLength: 1_000,
+      formatItem: (id, i) => `${i + 1}. <@${id}> (\`${id}\`)`,
+    });
 
     await interaction.reply({
       embeds: [

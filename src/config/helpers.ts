@@ -82,7 +82,9 @@ export function buildUploadUrlConfig(fileHost: string, filePort: number): UrlBas
     const canUseFileHost =
       fileHost !== DEFAULT_FILE_HOST &&
       fileHost !== "localhost" &&
-      fileHost !== "127.0.0.1";
+      fileHost !== "127.0.0.1" &&
+      fileHost !== "0.0.0.0" &&
+      fileHost !== "::";
     if (canUseFileHost) {
       return {
         publicBaseUrl: publicBase,

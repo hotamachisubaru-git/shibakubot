@@ -28,13 +28,45 @@ function getAttachmentNameFromUrl(url: string): string {
 
 export function pickAttachmentName(attachment: AttachmentLike): string {
   const fromTitle = decodeAttachmentName(attachment.title ?? "");
-  if (fromTitle) return fromTitle;
-
   const fromName = decodeAttachmentName(attachment.name ?? "");
+
+  if (fromTitle) {
+    const titleExtension = path.extname(fromTitle);
+    const sanitizedNameExtension = path.extname(fromName);
+    if (!titleExtension && sanitizedNameExtension) {
+      return `${fromTitle}${sanitizedNameExtension}`;
+    }
+    return fromTitle;
+  }
+
   if (fromName) return fromName;
 
   const fromUrl = getAttachmentNameFromUrl(attachment.url);
   return fromUrl || "upload";
+}
+
+export function getSupportedAttachmentExtension(
+  filename: string,
+  contentType: string | null | undefined,
+  allowedExtensions: readonly string[],
+  contentTypeToExtension: Readonly<Record<string, string>>,
+): string {
+  const filenameExtension = path.extname(filename).toLowerCase();
+  if (allowedExtensions.includes(filenameExtension)) {
+    return filenameExtension;
+  }
+
+  const normalizedContentType = contentType
+    ?.split(";", 1)[0]
+    ?.trim()
+    .toLowerCase();
+  if (!normalizedContentType) return "";
+
+  const contentTypeExtension =
+    contentTypeToExtension[normalizedContentType]?.toLowerCase() ?? "";
+  return allowedExtensions.includes(contentTypeExtension)
+    ? contentTypeExtension
+    : "";
 }
 
 function stripOptionalQuotes(value: string): string {

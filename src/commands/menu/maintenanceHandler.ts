@@ -4,7 +4,7 @@ import {
   ButtonStyle,
 } from "discord.js";
 import type { MessageComponentInteraction } from "discord.js";
-import { createPanelCollector, bindPanelCleanup, requireAdminOrDev, OWNER_IDS } from "./common";
+import { createPanelCollector, bindPanelCleanup, bindPanelCollect, requireAdminOrDev, OWNER_IDS } from "./common";
 import { hasAdminGuildOwnerOrDevPermission } from "../../utils/permissions";
 import { getMaintenanceEnabled, setMaintenanceEnabled } from "../../data";
 
@@ -60,7 +60,7 @@ export async function handleMaintenanceToggle(
   const panel = await button.fetchReply();
   const sub = createPanelCollector(button, panel);
 
-  sub.on("collect", async (component) => {
+  bindPanelCollect(sub, "maintenance", async (component) => {
     if (!component.isButton()) return;
 
     if (component.customId === "maintenance_cancel") {

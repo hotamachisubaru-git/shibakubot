@@ -2,6 +2,7 @@ import { Message } from "discord.js";
 import { PREFIX } from "./constants";
 import { getLavalink } from "./trackUtils";
 import { MUSIC_TEXT_COMMAND } from "../../constants/commands";
+import { requireSameMusicVoiceChannel } from "./music-permissions";
 
 export async function handlePauseCommand(
   message: Message,
@@ -25,6 +26,8 @@ export async function handlePauseCommand(
     await message.reply("⚠️ ボイスチャンネルに接続していません。");
     return;
   }
+
+  if (!(await requireSameMusicVoiceChannel(message, player.voiceChannelId))) return;
 
   const wasPaused = player.paused;
   await player.node.updatePlayer({ guildId: player.guildId, playerOptions: { paused: !wasPaused } });

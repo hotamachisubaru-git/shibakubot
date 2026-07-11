@@ -3,6 +3,7 @@ import { PREFIX } from "./constants";
 import { getMusicNgWords, addMusicNgWord, removeMusicNgWord, clearMusicNgWords } from "../../data";
 import { MUSIC_TEXT_COMMAND } from "../../constants/commands";
 import { canManageMusic } from "./music-permissions";
+import { formatLimitedList, truncateDiscordText } from "../../utils/discordList";
 
 // ---------------------------------------------------------------------------
 // handleNgWordCommand
@@ -34,7 +35,12 @@ export async function handleNgWordCommand(
       await message.reply("📭 NGワードは登録されていません。");
       return;
     }
-    const lines = list.map((word, index) => `${index + 1}. ${word}`).join("\n");
+    const lines = formatLimitedList(list, {
+      maxItems: 30,
+      maxLength: 1_800,
+      formatItem: (word, index) =>
+        `${index + 1}. ${truncateDiscordText(word, 50)}`,
+    });
     await message.reply(`🚫 NGワード一覧:\n${lines}`);
     return;
   }

@@ -8,6 +8,9 @@ import { LavalinkNotReadyError, probeLavalinkVersion } from "./lavalinkHealth";
 
 const LAVALINK_READY_CHECK_INTERVAL_MS = 3_000;
 
+const connectedLavalinkNodeIds = new Set<string>();
+let lavalinkInitializationPromise: Promise<void> | null = null;
+
 export function initLavalink(client: Client): ShibakuClient {
   const typedClient = client as ShibakuClient;
   const pendingVoiceServerUpdates = new Map<string, import("./lavalinkEvents").CachedVoiceServerUpdate>();
@@ -50,6 +53,42 @@ export async function waitForLavalinkReady(): Promise<void> {
       await delay(LAVALINK_READY_CHECK_INTERVAL_MS);
     }
   }
+}
+
+export function initializeLavalink(client: ShibakuClient): Promise<void> {
+  if (lavalinkInitializationPromise) {
+    return lavalinkInitializationPromise;
+  }
+
+  lavalinkInitializationPromise = (async () => {
+    console.log("[lavalink] Lavalinkサーバーに接続を試みます...");
+    await waitForLavalinkReady();
+    await client.lavalink.init({
+      id: client.user?.id ?? "0",
+      username: getRuntimeConfig().lavalink.username,
+    });
+    console.log("[lavalink] Lavalink接続完了");
+  })().finally(() => {
+    lavalinkInitializationPromise = null;
+  });
+
+  return lavalinkInitializationPromise;
+}
+
+export function updateLavalinkNodeConnection(
+  nodeId: string,
+  connected: boolean,
+): void {
+  if (connected) {
+    connectedLavalinkNodeIds.add(nodeId);
+  } else {
+    connectedLavalinkNodeIds.delete(nodeId);
+  }
+}
+
+/** 利用可能なLavalink nodeが1つ以上あるかどうか */
+export function isLavalinkReady(): boolean {
+  return connectedLavalinkNodeIds.size > 0;
 }
 
 function getHealthUrl(): string {

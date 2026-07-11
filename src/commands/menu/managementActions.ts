@@ -8,6 +8,7 @@ import { getUserCount } from "../../data";
 import { displayNameFrom } from "../../utils/displayNameUtil";
 import {
   bindPanelCleanup,
+  bindPanelCollect,
   createPanelCollector,
   formatCountWithReading,
 } from "./common";
@@ -73,7 +74,7 @@ const handleCheckAction: MenuActionHandler = async (context, button) => {
   let targetUserId: string | null = null;
   const sub = createPanelCollector(button, panel);
 
-  sub.on("collect", async (component) => {
+  bindPanelCollect(sub, "check-user", async (component) => {
     if (component.isUserSelectMenu() && component.customId === "check_user") {
       targetUserId = component.values[0] ?? null;
       await component.deferUpdate();

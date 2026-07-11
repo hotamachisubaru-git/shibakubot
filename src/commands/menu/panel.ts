@@ -53,6 +53,53 @@ export function bindPanelCleanup(
   });
 }
 
+type ComponentCollectorLike<T extends MessageComponentInteraction> = Readonly<{
+  on: (event: "collect", listener: (component: T) => void) => unknown;
+}>;
+
+async function respondToPanelError(
+  component: MessageComponentInteraction,
+): Promise<void> {
+  const payload = {
+    content: "⚠️ 操作中にエラーが発生しました。もう一度お試しください。",
+    flags: "Ephemeral" as const,
+  };
+  try {
+    if (component.deferred || component.replied) {
+      await component.followUp(payload);
+    } else {
+      await component.reply(payload);
+    }
+  } catch (responseError) {
+    console.warn(
+      "[menu] failed to send component error response",
+      { guildId: component.guildId, userId: component.user.id },
+      responseError,
+    );
+  }
+}
+
+export function bindPanelCollect<T extends MessageComponentInteraction>(
+  collector: ComponentCollectorLike<T>,
+  operation: string,
+  handler: (component: T) => Promise<void>,
+): void {
+  collector.on("collect", (component) => {
+    void handler(component).catch(async (error: unknown) => {
+      console.error(
+        "[menu] component action failed",
+        {
+          operation,
+          guildId: component.guildId,
+          userId: component.user.id,
+        },
+        error,
+      );
+      await respondToPanelError(component);
+    });
+  });
+}
+
 export async function requireAdminOrDev(
   i: MessageComponentInteraction,
   message = "この操作は管理者/開発者のみ利用できます。",

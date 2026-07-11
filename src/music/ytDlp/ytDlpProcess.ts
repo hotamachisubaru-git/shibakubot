@@ -110,7 +110,8 @@ export async function runYtDlp(args: string[]): Promise<YtDlpResult> {
   // 3. マネージドバイナリが既にあればそれを使う
   const managedBinaryPath = getManagedBinaryPathInternal();
   if (await pathExists(managedBinaryPath)) {
-    return executeYtDlpCommand(managedBinaryPath, args);
+    const verifiedBinaryPath = await ensureManagedBinary(runtimeConfig.ytdlp.autoDownload);
+    return executeYtDlpCommand(verifiedBinaryPath, args);
   }
 
   // 4. 自動ダウンロードして実行
@@ -120,6 +121,6 @@ export async function runYtDlp(args: string[]): Promise<YtDlpResult> {
     );
   }
 
-  const downloadedBinaryPath = await ensureManagedBinary();
+  const downloadedBinaryPath = await ensureManagedBinary(true);
   return executeYtDlpCommand(downloadedBinaryPath, args);
 }

@@ -33,8 +33,13 @@ import {
   shouldAttemptYtDlpFallback,
   YtDlpUserError,
 } from "../ytDlp/ytDlpUtils";
-import { enforceFixedVolume, getOrCreatePlayer, waitForVoiceConnection } from "./player-connection";
-import { FIXED_VOLUME, MAX_SELECTION_RESULTS } from "../misc/constants";
+import {
+  getOrCreatePlayer,
+  MusicVoiceChannelMismatchError,
+  waitForVoiceConnection,
+} from "./player-connection";
+import { MAX_SELECTION_RESULTS } from "../misc/constants";
+import { requireSameMusicVoiceChannel } from "../misc/music-permissions";
 import { buildExternalTrackBlockedMessage, validateTrackForQueue } from "../misc/trackValidation";
 import { handleExternalUrlFallback } from "../misc/external-url";
 
@@ -75,6 +80,16 @@ export async function handlePlay(
   }
   if (!guildId) return;
 
+  const existingPlayer = lavalink.players.get(guildId);
+  if (
+    !(await requireSameMusicVoiceChannel(
+      message,
+      existingPlayer?.voiceChannelId,
+    ))
+  ) {
+    return;
+  }
+
   const botMember = message.guild?.members.me;
   if (!botMember) {
     await message.reply("⚠️ Botのメンバー情報を取得できません。");
@@ -91,7 +106,18 @@ export async function handlePlay(
     return;
   }
 
-  const player = await getOrCreatePlayer(message, voice.id);
+  let player: Player;
+  try {
+    player = await getOrCreatePlayer(message, voice.id);
+  } catch (error) {
+    if (error instanceof MusicVoiceChannelMismatchError) {
+      await message.reply(
+        "⚠️ 別のボイスチャンネルで再生中のため、Botを移動できません。Botと同じVCに参加してください。",
+      );
+      return;
+    }
+    throw error;
+  }
   let connected = await waitForVoiceConnection(player);
   if (!connected) {
     try {
@@ -108,7 +134,6 @@ export async function handlePlay(
     return;
   }
 
-  await enforceFixedVolume(player, "play");
   await applyMusicRepeatForPlayer(player);
 
   let track: PendingTrack | undefined = options?.selectedTrack;
@@ -213,12 +238,12 @@ export async function handlePlay(
     await player.play();
     if (!hasDuration) {
       await message.reply(
-        `▶ 再生開始: **${displayTitle}**（音量: ${FIXED_VOLUME}）\n` +
+        `▶ 再生開始: **${displayTitle}**（音量: ${player.volume}）\n` +
           `⚠️ 曲の長さを取得できないため、最大 ${playbackLimit.maxTrackMinutes} 分で自動停止します。`,
       );
     } else {
       await message.reply(
-        `▶ 再生開始: **${displayTitle}**（音量: ${FIXED_VOLUME}）`,
+        `▶ 再生開始: **${displayTitle}**（音量: ${player.volume}）`,
       );
     }
   } else {

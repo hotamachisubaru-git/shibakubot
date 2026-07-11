@@ -2,6 +2,9 @@ import { SlashCommandBuilder } from "discord.js";
 import { SLASH_COMMAND } from "../constants/commands";
 import type { CommandDefinition } from "./commandCatalog-types";
 import { defineCommand } from "./commandCatalog-utils";
+import { getRuntimeConfig } from "../config/runtime";
+
+const MAX_REASON_LENGTH = getRuntimeConfig().app.maxLogReasonLength;
 
 export const baseCommandDefinitions: readonly CommandDefinition[] = [
   defineCommand(SLASH_COMMAND.sbk, "ユーザーをしばく", (builder) => {
@@ -22,6 +25,7 @@ export const baseCommandDefinitions: readonly CommandDefinition[] = [
         opt
           .setName("reason")
           .setDescription("理由（省略可・ランダム）")
+          .setMaxLength(MAX_REASON_LENGTH)
           .setRequired(false),
       );
   }),

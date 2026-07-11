@@ -9,7 +9,7 @@ import {
 } from "discord.js";
 import type { MessageComponentInteraction } from "discord.js";
 import type { PanelMessage } from "./common";
-import { safeCount, createPanelCollector, clearPanelComponents, bindPanelCleanup, showModalAndAwait, OWNER_IDS, requireAdminOrDev } from "./common";
+import { safeCount, createPanelCollector, clearPanelComponents, bindPanelCleanup, bindPanelCollect, showModalAndAwait, OWNER_IDS, requireAdminOrDev } from "./common";
 import { COMMON_MESSAGES } from "../../constants/messages";
 import { setCountGuild } from "../../data";
 import { displayNameFrom } from "../../utils/displayNameUtil";
@@ -68,7 +68,7 @@ export async function openControlModal(
   let target: string | null = null;
   const sub = createPanelCollector(button, panel);
 
-  sub.on("collect", async (component) => {
+  bindPanelCollect(sub, "set-count", async (component) => {
     if (component.isUserSelectMenu() && component.customId === "ctl_user") {
       target = component.values[0] ?? null;
       await component.deferUpdate();

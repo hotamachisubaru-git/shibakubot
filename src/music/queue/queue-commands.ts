@@ -3,6 +3,8 @@ import { PREFIX } from "../misc/constants";
 import { getLavalink, getTrackTitle } from "../misc/trackUtils";
 import { clearAutoStop, clearRepeatTimer } from "../state/state";
 import { MUSIC_TEXT_COMMAND } from "../../constants/commands";
+import { requireSameMusicVoiceChannel } from "../misc/music-permissions";
+import { formatLimitedList, truncateDiscordText } from "../../utils/discordList";
 
 // ---------------------------------------------------------------------------
 // handleSkip
@@ -22,6 +24,8 @@ export async function handleSkip(message: Message): Promise<void> {
     await message.reply("⏹ スキップできる曲がありません。");
     return;
   }
+
+  if (!(await requireSameMusicVoiceChannel(message, player.voiceChannelId))) return;
 
   clearAutoStop(guildId);
   clearRepeatTimer(guildId);
@@ -43,6 +47,8 @@ export async function handleStop(message: Message): Promise<void> {
     await message.reply("⏹ 既に停止しています。");
     return;
   }
+
+  if (!(await requireSameMusicVoiceChannel(message, player.voiceChannelId))) return;
 
   clearAutoStop(guildId);
   clearRepeatTimer(guildId);
@@ -77,11 +83,13 @@ export async function handleQueue(message: Message): Promise<void> {
   if (current) lines.push(`▶ 再生中: **${current.info.title}**`);
   if (tracks.length) {
     lines.push("", "📃 キュー:");
-    lines.push(
-      ...tracks.map(
-        (track, index) => `${index + 1}. **${getTrackTitle(track)}**`,
-      ),
-    );
+    lines.push(formatLimitedList(tracks, {
+      maxItems: 20,
+      maxLength: 1_700,
+      formatItem: (track, index) =>
+        `${index + 1}. **${truncateDiscordText(getTrackTitle(track), 80)}**`,
+      omittedLabel: (count) => `…ほか ${count} 曲`,
+    }));
   }
 
   await message.reply(lines.join("\n"));
@@ -105,6 +113,8 @@ export async function handleRemoveCommand(
     return;
   }
 
+  if (!(await requireSameMusicVoiceChannel(message, player.voiceChannelId))) return;
+
   const indexStr = rest[0];
   if (!indexStr || !/^\d+$/.test(indexStr)) {
     await message.reply(
@@ -121,10 +131,11 @@ export async function handleRemoveCommand(
     return;
   }
 
-  const removed = player.queue.tracks.splice(index, 1)[0];
+  const removed = player.queue.tracks[index];
   if (!removed) {
     await message.reply("⚠️ 指定した曲を削除できませんでした。");
     return;
   }
+  await player.queue.splice(index, 1);
   await message.reply(`🗑 キューから削除しました: **${getTrackTitle(removed)}**`);
 }

@@ -1,16 +1,53 @@
 import type { ShibakuClient } from "../lavalink/lavalinkConfig";
+import type { Player, TrackExceptionEvent, TrackStuckEvent } from "lavalink-client";
 import { nodeStatsLogCounters } from "../index";
 import { isNodeStatsPayload, getBotVoiceDebugState, promptRetrySelection, logImmediateNodeStats } from "./helpers";
 import { clearRetrySelection } from "../music/state";
 import { recoverPlaybackWithYtDlp } from "../music/playbackRecovery";
-import { enforceFixedVolume } from "../music/playback/player-connection";
+import { updateLavalinkNodeConnection } from "../lavalink/lavalink";
+
+function logLavalinkEventError(
+  eventName: string,
+  guildId: string,
+  error: unknown,
+): void {
+  console.error(
+    `[lavalink] handler failed event=${eventName} guild=${guildId}`,
+    error,
+  );
+}
+
+function recoverTrackPlayback(
+  eventName: "trackError" | "trackStuck",
+  client: ShibakuClient,
+  player: Player,
+  track: import("../music/trackUtils").PendingTrack | null,
+  payload: TrackExceptionEvent | TrackStuckEvent,
+): void {
+  void (async () => {
+    const recoveryResult = await recoverPlaybackWithYtDlp(
+      client,
+      player,
+      track,
+      payload,
+    );
+    if (recoveryResult !== "recovered") {
+      await promptRetrySelection(client, player, track);
+    }
+  })().catch((error: unknown) => {
+    logLavalinkEventError(eventName, player.guildId, error);
+  });
+}
 
 export function setupLavalinkEventHandlers(client: ShibakuClient): void {
   client.lavalink.nodeManager.on("connect", (node) => {
+    updateLavalinkNodeConnection(node.id, true);
     console.log(`[lavalink] node connected: ${node.id}`);
   });
 
   client.lavalink.nodeManager.on("disconnect", (node, reason) => {
+    updateLavalinkNodeConnection(node.id, false);
+    nodeStatsLogCounters.delete(node.id);
     console.warn(`[lavalink] node disconnected: ${node.id}`, reason);
   });
 
@@ -54,16 +91,10 @@ export function setupLavalinkEventHandlers(client: ShibakuClient): void {
         botVoiceState: getBotVoiceDebugState(client, player.guildId),
       },
     );
-    void (async () => {
-      const recoveryResult = await recoverPlaybackWithYtDlp(client, player, track, payload);
-      if (recoveryResult !== "recovered") {
-        await promptRetrySelection(client, player, track);
-      }
-    })();
+    recoverTrackPlayback("trackError", client, player, track, payload);
   });
 
   client.lavalink.on("trackStart", (player, track) => {
-    void enforceFixedVolume(player, "trackStart");
     const voiceState = player.voice as { endpoint?: string; ping?: number; connected?: boolean };
     console.log(
       `[music] track start guild=${player.guildId} title=${track?.info?.title ?? "unknown"} source=${track?.info?.sourceName ?? "unknown"} identifier=${track?.info?.identifier ?? "unknown"} uri=${track?.info?.uri ?? "unknown"}`,
@@ -114,11 +145,6 @@ export function setupLavalinkEventHandlers(client: ShibakuClient): void {
         botVoiceState: getBotVoiceDebugState(client, player.guildId),
       },
     );
-    void (async () => {
-      const recoveryResult = await recoverPlaybackWithYtDlp(client, player, track, payload);
-      if (recoveryResult !== "recovered") {
-        await promptRetrySelection(client, player, track);
-      }
-    })();
+    recoverTrackPlayback("trackStuck", client, player, track, payload);
   });
 }
