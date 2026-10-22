@@ -3,18 +3,19 @@
   "version": "2.0.0",
   "type": "commonjs",
   "main": "dist/index.js",
+  "packageManager": "bun@1.4.3",
   "scripts": {
-    "dev": "tsx src/index.ts",
-    "build": "node scripts/clean-dist.mjs && tsc",
-    "start": "node dist/index.js",
-    "register": "tsx src/deploy-commands.ts",
-    "register:prod": "node dist/deploy-commands.js",
-    "test": "tsx --test test/*.test.ts",
-    "migrate": "tsx scripts/migrate-old-data.ts",
-    "release:bundle": "npm run build && node scripts/create-release-bundle.mjs"
+    "dev": "bun src/index.ts",
+    "build": "bun scripts/clean-dist.mjs && bunx --bun tsc",
+    "start": "bun dist/index.js",
+    "register": "bun src/deploy-commands.ts",
+    "register:prod": "bun dist/deploy-commands.js",
+    "test": "bun test",
+    "migrate": "bun scripts/migrate-old-data.ts",
+    "release:bundle": "bun run build && bun scripts/create-release-bundle.mjs"
   },
   "dependencies": {
-    "better-sqlite3": "^12.11.1",
+    "better-sqlite3": "^13.0.3",
     "discord.js": "^14.26.5",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
@@ -23,9 +24,9 @@
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
+    "@types/bun": "^1.4.3",
     "@types/express": "^5.0.6",
     "@types/node": "^20.19.43",
-    "tsx": "^4.23.0",
     "typescript": "^6.0.3"
   },
   "overrides": {
@@ -34,6 +35,9 @@
     }
   },
   "engines": {
-    "node": ">=20"
-  }
+    "bun": ">=1.4.3"
+  },
+  "trustedDependencies": [
+    "better-sqlite3"
+  ]
 }

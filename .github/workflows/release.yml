@@ -19,6 +19,7 @@ concurrency:
 
 jobs:
   release:
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
 
     steps:
@@ -27,11 +28,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Node.js をセットアップ
-        uses: actions/setup-node@v4
+      - name: Bun をセットアップ
+        uses: oven-sh/setup-bun@v2
         with:
-          node-version: "24"
-          cache: npm
+          bun-version: "1.4.3"
 
       - name: リリース情報を解決
         id: release_meta
@@ -68,32 +68,13 @@ jobs:
               }
             }
 
-            try {
-              await github.rest.git.getRef({
-                owner,
-                repo,
-                ref: `tags/${tag}`,
-              });
-              core.info(`Tag ${tag} は既に存在するため再利用します。`);
-            } catch (error) {
-              if (error.status !== 404) {
-                throw error;
-              }
-
-              await github.rest.git.createRef({
-                owner,
-                repo,
-                ref: `refs/tags/${tag}`,
-                sha: context.sha,
-              });
-              core.info(`Tag ${tag} を ${context.sha} に作成しました。`);
-            }
-
+            // Publish the tag only after installation, build, and packaging
+            // succeed. action-gh-release creates it using target_commitish.
             core.setOutput("should_release", "true");
 
       - name: 依存関係をインストール
         if: steps.release_meta.outputs.should_release == 'true'
-        run: npm ci
+        run: bun install --frozen-lockfile
 
       - name: リリース情報を表示
         if: steps.release_meta.outputs.should_release == 'true'
@@ -101,17 +82,17 @@ jobs:
           echo "Ref: ${GITHUB_REF}"
           echo "SHA: ${GITHUB_SHA}"
           echo "Tag: ${{ steps.release_meta.outputs.tag }}"
-          echo "Version: $(node -p "require('./package.json').version")"
+          echo "Version: $(bun -p "require('./package.json').version")"
 
       - name: リリースノートを生成
         if: steps.release_meta.outputs.should_release == 'true'
         run: |
           mkdir -p release
-          node scripts/extract-release-notes.mjs > release/release-notes.md
+          bun scripts/extract-release-notes.mjs > release/release-notes.md
 
       - name: リリースバンドルを作成
         if: steps.release_meta.outputs.should_release == 'true'
-        run: npm run release:bundle
+        run: bun run release:bundle
 
       - name: リリースバンドルを圧縮
         if: steps.release_meta.outputs.should_release == 'true'

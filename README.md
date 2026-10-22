@@ -9,7 +9,8 @@ Discordサーバー向けのBotです。
 - 音楽再生（`p!` プレフィックス、YouTube Music / YouTube / SoundCloud / Bandcamp 検索、Spotify URL/URI、各種URL再生、アップロード再生、NGワード管理）
 
 ## 前提
-- Node.js `>= 20`
+- Bun `>= 1.4.3`（この `bun` ブランチのBot実行環境）
+- `yt-dlp` を使ったYouTube再生には JavaScript challenge 対応ランタイムが別途必要（`Node.js >= 22` を `PATH` に置くか、`Deno` を利用）
 - Discord Developer Portal で以下 Intents を有効化
   - `SERVER MEMBERS INTENT`
   - `MESSAGE CONTENT INTENT`
@@ -21,29 +22,39 @@ Discord Voice の仕様変更により、古い音声クライアントは接続
 このBotで音楽機能を使う場合は **Lavalink 4.2.0 以上（推奨: 最新）** を使用してください。
 
 ## セットアップ
-1. 依存インストール
+1. [Bun公式サイト](https://bun.com/docs/installation) の手順で Bun 1.4.3 以上をインストールし、依存関係を固定バージョンで展開
    ```bash
-   npm install
+   bun install --frozen-lockfile
    ```
 2. `.env.example` を参考に `.env` を作成
 3. Lavalink を起動（音楽機能を使う場合。未起動でもBot本体は起動します）
 4. 起動（ログイン後、スラッシュコマンドを登録してからLavalink接続を開始します）
    ```bash
-   npm run dev
+   bun run dev
    ```
 
 スラッシュコマンドだけを手動で登録する場合:
 ```bash
-npm run register
+bun run register
 ```
 
 本番実行:
 ```bash
-npm run build
-npm run start
+bun run build
+bun run start
 ```
 
-`npm run start` はログイン後にスラッシュコマンドを登録します。手動登録する場合は、先に `npm run register:prod` を実行してください。
+`bun run start` はログイン後にスラッシュコマンドを登録します。手動登録する場合は、先に `bun run register:prod` を実行してください。
+
+### WindowsでNode.js版から切り替える際の注意
+
+1. 既存のNode.js版Botを停止する（同じDiscordトークンで二重起動しない）。
+2. `.env` と `data/`（必要なら `backup/`・`files/` も）をバックアップする。これらはGitの追跡対象外です。
+3. `git switch bun` → `bun install --frozen-lockfile` → `bun test` → `bun run build` の順で確認する。
+4. 問題なければ `bun run start` を実行する。問題が起きたら旧プロセスを停止した状態で、バックアップと元のNode.js版に戻す。
+
+SQLiteドライバーはBun対応を確認した `better-sqlite3` v13系へ更新しています。
+本体の実行はBunに移行しますが、`yt-dlp` のJavaScript challenge処理は互換性上、Node.js 22以上（または対応するDeno）を使います。
 
 ## VPS運用
 Linux VPS に移す場合は、`systemd` と Lavalink 用のテンプレートを同梱しています。
@@ -106,7 +117,7 @@ CLEAR_GLOBAL=true
 - `YT_DLP_PATH` を指定するとその実行ファイルを優先使用
 - `YT_DLP_AUTO_DOWNLOAD=true` なら、`YT_DLP_VERSION` の公式バイナリを `YT_DLP_CACHE_DIR` へ取得し、SHA-256検証後に使用
 - 自動取得が有効な場合は、OSの `PATH` にある古い `yt-dlp` より、バージョン管理された検証済みバイナリを優先
-- Node.js 22以上ではYouTubeのJavaScript challenge用ランタイムとしてBot自身のNode.jsを自動利用。Node.js 20/21ではDeno 2.3以上などの対応ランタイムが別途必要
+- Bun実行時は`yt-dlp`に`--js-runtimes node`を渡してOSの`PATH`上のNode.js 22以上を利用します。Node.jsがない場合は対応するDenoを導入してください（Bun自身はyt-dlpのランタイムとして指定しません）
 - デフォルト以外の `YT_DLP_VERSION` に変更する場合は、そのOS向けリリース資産の `YT_DLP_SHA256` も指定してください
 - `YT_DLP_MAX_FILESIZE_MB` は外部URLから取得するファイルの上限です。yt-dlp実行時とダウンロード後の両方で検査します
 - `YT_DLP_TEMP_MAX_AGE_HOURS` を超えた `remote-*` ファイルは、起動時および `YT_DLP_CLEANUP_INTERVAL_MINUTES` 間隔で削除されます
@@ -187,10 +198,10 @@ Lavalink 側で有効なら、例として `YouTube / ニコニコ / SoundCloud 
 - `Used disallowed intents`
   - Developer Portal で Intents を有効化
 - `Unknown interaction`
-  - `npm run register` を再実行
-- `ts-node/dist/bin.js` の先頭で `basedir=$(dirname ...)` の構文エラーになる
-  - `node_modules` が破損しています。`npm rebuild` ではなく、Botを停止して `rm -rf node_modules && npm ci` を実行
-  - VPSの詳細な復旧手順は [docs/vps.md](docs/vps.md) を参照
+  - `bun run register` を再実行
+- Bunの依存関係やSQLiteネイティブモジュールが読み込めない
+  - Botを停止し、`bun install --frozen-lockfile` を再実行して、`bun test` で確認
+  - `node_modules` を別OSからコピーせず、そのOS上で依存関係をインストールしてください
 - 音楽が無音/再生されない
   - Lavalink のバージョンが `4.2.0+` か確認
   - `LAVALINK_HOST` / `LAVALINK_PORT` / `LAVALINK_PASSWORD` の一致確認
@@ -203,11 +214,11 @@ Lavalink 側で有効なら、例として `YouTube / ニコニコ / SoundCloud 
   - 非公開・地域制限・要ログイン・ライブ配信URLは取り込みできない場合あり
 
 ## 開発補助コマンド
-- `npm test` 環境変数・検索クエリ・曲長判定のユニットテスト
-- `npm run migrate` 旧データ移行
-- `npm run release:bundle` 配布バンドル作成（`release/shibakubot-v<version>` と `release/<version>` を生成）
+- `bun test` SQLite・設定・yt-dlpランタイム検証
+- `bun run migrate` 旧データ移行
+- `bun run release:bundle` 配布バンドル作成（`release/shibakubot-v<version>` と `release/<version>` を生成）
 
-Pull Requestおよび `main` / `master` へのpushでは、GitHub ActionsがNode.js 24で `npm ci`、`npm test`、`npm run build` を実行します。
+Pull Requestおよび `main` / `master` / `bun` へのpushでは、GitHub ActionsがWindowsとUbuntuの両方でBun 1.4.3を使い、依存関係の固定インストール、テスト、ビルド、SQLite動作確認を実行します（この `bun` ブランチのワークフロー）。
 
 ## リリース
 - `main` / `master` に push されたとき、`package.json` の `version` が未リリースなら GitHub Release を自動作成（ワークフローとREADMEのみの変更では実行しません）

@@ -22,10 +22,12 @@ function getBaseArgs(): string[] {
   const args = ["--ignore-config", "--no-update", "--abort-on-error"];
   const nodeMajorVersion = Number.parseInt(process.versions.node.split(".")[0] ?? "", 10);
 
-  // Deno is enabled by default in yt-dlp. When the Bot itself runs on a
-  // supported Node.js version, also make that runtime available for YouTube's
-  // JavaScript challenge solver so a separate Deno install is not mandatory.
-  if (Number.isFinite(nodeMajorVersion) && nodeMajorVersion >= 22) {
+  // Bun exposes a Node.js-compatible version, but process.execPath points to
+  // Bun, not node.exe. yt-dlp's JS challenge solver must launch real Node.js.
+  // Node.js >= 22 on PATH is optional if a supported Deno runtime is installed.
+  if ("bun" in process.versions) {
+    args.push("--js-runtimes", "node");
+  } else if (Number.isFinite(nodeMajorVersion) && nodeMajorVersion >= 22) {
     args.push("--js-runtimes", `node:${process.execPath}`);
   }
 

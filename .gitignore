@@ -10,10 +10,9 @@
 *.db
 /backup/
 !package.json
-!package-lock.json
 !tsconfig.json
-/test/*
-*.test.ts
+
+# Test files are part of CI and must be tracked.
 
 # Build and dependencies
 node_modules/

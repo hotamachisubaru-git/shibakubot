@@ -1,4 +1,5 @@
 #!/bin/sh
+# Legacy Node.js repair helper. For Bun use docs/vps.md instead.
 set -eu
 
 SERVICE_NAME="${1:-shibakubot}"

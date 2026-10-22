@@ -33,7 +33,7 @@ const filesToCopy = [
   "LICENSE",
   ".env.example",
   "package.json",
-  "package-lock.json",
+  "bun.lock",
 ];
 
 assertExists(distPath);
@@ -47,10 +47,10 @@ const releaseReadme = [
   `バージョン: v${version}`,
   "",
   "## クイックスタート",
-  "1. `npm ci --omit=dev` を実行",
+  "1. Bun 1.4.3 以上をインストールし、`bun install --frozen-lockfile --production` を実行",
   "2. `.env.example` を `.env` にコピーし、必要な値を設定",
-  "3. `npm run register:prod` を実行",
-  "4. `npm start` で起動",
+  "3. `bun run register:prod` を実行",
+  "4. `bun run start` で起動",
   "",
   "このバンドルは `scripts/create-release-bundle.mjs` によって生成されました。",
 ].join("\n");

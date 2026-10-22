@@ -8,9 +8,9 @@ Wants=network-online.target
 Type=simple
 User=shibakubot
 Group=shibakubot
-WorkingDirectory=/opt/shibakubot
+WorkingDirectory=/opt/shibakubot/source
 Environment=NODE_ENV=production
-ExecStart=/usr/bin/env node dist/index.js
+ExecStart=/opt/shibakubot/.bun/bin/bun dist/index.js
 Restart=always
 RestartSec=10
 TimeoutStopSec=30

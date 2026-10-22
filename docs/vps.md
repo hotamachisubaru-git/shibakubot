@@ -5,7 +5,8 @@
 
 ## 推奨構成
 - OS: Ubuntu 24.04 LTS など
-- Node.js: `20+`
+- Bun: `1.4.3+`（このブランチのBot本体）
+- `yt-dlp`を利用する場合、Node.js `22+` を `PATH` に置くか対応するDenoを別途導入
 - Java: `17+` または `21`
 - 常駐: `systemd`
 - 公開URL: `nginx` 経由の HTTPS を推奨
@@ -18,26 +19,25 @@
 ```bash
 sudo apt update
 sudo apt install -y curl git build-essential nginx openjdk-21-jre-headless
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-sudo apt install -y nodejs
 ```
 
 ## 2. ユーザー作成
 ```bash
 sudo useradd --system --create-home --home /opt/shibakubot --shell /usr/sbin/nologin shibakubot
 sudo useradd --system --create-home --home /opt/lavalink --shell /usr/sbin/nologin lavalink
+sudo -u shibakubot env HOME=/opt/shibakubot bash -c 'curl -fsSL https://bun.com/install | bash -s "bun-v1.4.3"'
 ```
 
 ## 3. Bot 配置
 ```bash
-sudo -u shibakubot git clone <repo-url> /opt/shibakubot
-cd /opt/shibakubot
-sudo -u shibakubot npm ci
-sudo -u shibakubot npm run build
+sudo -u shibakubot git clone -b bun <repo-url> /opt/shibakubot/source
+cd /opt/shibakubot/source
+sudo -u shibakubot /opt/shibakubot/.bun/bin/bun install --frozen-lockfile
+sudo -u shibakubot /opt/shibakubot/.bun/bin/bun run build
 ```
 
 ## 4. `.env` 配置
-`.env.example` をベースに `/opt/shibakubot/.env` を作成します。  
+`.env.example` をベースに `/opt/shibakubot/source/.env` を作成します。
 VPSでは次の値を先に決めると詰まりにくいです。
 
 ```env
@@ -75,8 +75,8 @@ LAVALINK_TRACE_ENABLED=false
 Bot起動時に自動登録されます。登録だけ先に行いたい場合は実行します。
 
 ```bash
-cd /opt/shibakubot
-sudo -u shibakubot npm run register:prod
+cd /opt/shibakubot/source
+sudo -u shibakubot /opt/shibakubot/.bun/bin/bun run register:prod
 ```
 
 ## 6. Lavalink 配置
@@ -102,8 +102,8 @@ TLS 終端は `certbot` や既存のリバースプロキシ構成に合わせ�
 配置と起動:
 
 ```bash
-sudo cp /opt/shibakubot/deploy/systemd/lavalink.service.example /etc/systemd/system/lavalink.service
-sudo cp /opt/shibakubot/deploy/systemd/shibakubot.service.example /etc/systemd/system/shibakubot.service
+sudo cp /opt/shibakubot/source/deploy/systemd/lavalink.service.example /etc/systemd/system/lavalink.service
+sudo cp /opt/shibakubot/source/deploy/systemd/shibakubot.service.example /etc/systemd/system/shibakubot.service
 sudo systemctl daemon-reload
 sudo systemctl enable --now lavalink
 sudo systemctl enable --now shibakubot
@@ -124,11 +124,11 @@ journalctl -u shibakubot -n 100 --no-pager
 
 ## 10. 更新手順
 ```bash
-cd /opt/shibakubot
+cd /opt/shibakubot/source
 sudo -u shibakubot git pull
-sudo -u shibakubot npm ci
-sudo -u shibakubot npm test
-sudo -u shibakubot npm run build
+sudo -u shibakubot /opt/shibakubot/.bun/bin/bun install --frozen-lockfile
+sudo -u shibakubot /opt/shibakubot/.bun/bin/bun test
+sudo -u shibakubot /opt/shibakubot/.bun/bin/bun run build
 sudo systemctl restart shibakubot
 ```
 
@@ -138,32 +138,30 @@ Lavalink 設定や JAR を更新した場合は:
 sudo systemctl restart lavalink
 ```
 
-## `ts-node/dist/bin.js` で構文エラーになる場合
+## 依存関係またはSQLiteドライバーが読み込めない場合
 
-`node_modules/ts-node/dist/bin.js` の先頭に `basedir=$(dirname ...)` と表示される場合は、
-依存パッケージ本体がシェル用ランチャーの内容で壊れています。`npm rebuild` ではパッケージ本体を
-再取得しないため復旧しません。Botを停止して `node_modules` を削除し、ロックファイルから
-クリーンインストールしてください。
+Botを停止し、BunとそのOSでネイティブドライバーを入れ直します。
+以下は必要に応じた復旧作業なので、実行前にBotを停止してください。
 
 ```bash
-cd /opt/shibakubot
+cd /opt/shibakubot/source
 sudo systemctl stop shibakubot
 rm -rf node_modules
-npm ci
-npm test
-npm run build
-npm run register:prod
+sudo -u shibakubot /opt/shibakubot/.bun/bin/bun install --frozen-lockfile
+sudo -u shibakubot /opt/shibakubot/.bun/bin/bun test
+sudo -u shibakubot /opt/shibakubot/.bun/bin/bun run build
+sudo -u shibakubot /opt/shibakubot/.bun/bin/bun run register:prod
 sudo systemctl start shibakubot
 sudo systemctl --no-pager --full status shibakubot
 ```
 
-Windowsなど別OSで作成した `node_modules` はVPSへコピーせず、VPS上で `npm ci` を実行します。
+Windowsなど別OSで作成した `node_modules` はVPSへコピーせず、VPS上で `bun install --frozen-lockfile` を実行します。
 
 ## バックアップ対象
-- `/opt/shibakubot/.env`
-- `/opt/shibakubot/data`
-- `/opt/shibakubot/backup`
-- `/opt/shibakubot/files`
+- `/opt/shibakubot/source/.env`
+- `/opt/shibakubot/source/data`
+- `/opt/shibakubot/source/backup`
+- `/opt/shibakubot/source/files`
 
 ## 注意点
 - 現状の起動フローでは、Bot は起動時に Lavalink 到達待ちを行います
