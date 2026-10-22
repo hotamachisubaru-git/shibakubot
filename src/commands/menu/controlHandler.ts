@@ -13,6 +13,7 @@ import { safeCount, createPanelCollector, clearPanelComponents, bindPanelCleanup
 import { COMMON_MESSAGES } from "../../constants/messages";
 import { setCountGuild } from "../../data";
 import { displayNameFrom } from "../../utils/displayNameUtil";
+import { fetchUserOrNull } from "../../utils/discordErrors";
 import { hasAdminOrDevPermission } from "../../utils/permissions";
 import { isBotOrSelfTarget, isOwnerTarget } from "../../utils/targetGuards";
 import { parseBigIntInput } from "../../utils/bigint";
@@ -91,9 +92,7 @@ export async function openControlModal(
         return;
       }
 
-      const targetUser = await component.client.users
-        .fetch(targetUserId)
-        .catch(() => null);
+      const targetUser = await fetchUserOrNull(component.client, targetUserId);
       if (!targetUser) {
         await component.reply({
           content: COMMON_MESSAGES.targetUserUnavailable,

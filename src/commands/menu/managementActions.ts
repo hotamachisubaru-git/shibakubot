@@ -29,7 +29,11 @@ const handleLimitAction: MenuActionHandler = async (context, button) => {
     async (min, max) => {
       context.state.sbkMin = min;
       context.state.sbkMax = max;
-      await context.refreshMenu().catch(() => undefined);
+      await context.refreshMenu().catch((error: unknown) => {
+        console.warn("[menu] range saved but failed to refresh menu", {
+          guildId: context.gid, min, max,
+        }, error);
+      });
     },
   );
 };

@@ -5,6 +5,7 @@ import { searchAudiostock, buildAudiostockTrackInfo } from "../misc/audiostock";
 import { isAudiostockExplicitQuery, extractAudiostockKeyword, buildSearchQueries, buildPendingTrackDedupKey, mergeSearchCandidates, PRIMARY_KEYWORD_SEARCH_PREFIXES, SECONDARY_KEYWORD_SEARCH_PREFIXES, parseExplicitKeywordSearchQuery } from "./searchQuery";
 import type { PendingTrack } from "../misc/trackUtils";
 import { handleSpotifyPlay } from "../spotify/spotifyPlay";
+import { logSearchResultError } from "./searchResult";
 
 // ---------------------------------------------------------------------------
 // searchTracks — thin wrapper around player.search
@@ -16,7 +17,14 @@ export async function searchTracks(
   requester: Message["author"],
 ): Promise<SearchResult | UnresolvedSearchResult | null> {
   try {
-    return await player.search({ query: searchQuery }, requester);
+    const result = await player.search({ query: searchQuery }, requester);
+    logSearchResultError(result, {
+      guildId: player.guildId,
+      requesterId: requester.id,
+      query: searchQuery,
+      operation: "search",
+    });
+    return result;
   } catch (error) {
     console.warn("[music] search error", { requesterId: requester.id, query: searchQuery }, error);
     return null;

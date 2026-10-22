@@ -17,3 +17,4 @@ Object.defineProperty(exports, "__esModule", { value: true });
 __exportStar(require("./data/store"), exports);
 __exportStar(require("./data/settings"), exports);
 __exportStar(require("./data/manage"), exports);
+__exportStar(require("./data/medalBank"), exports);

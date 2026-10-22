@@ -27,7 +27,12 @@ async function resolveLogChannel(
   for (const channelId of channelCandidates) {
     const channel = await interaction.client.channels
       .fetch(channelId)
-      .catch(() => null);
+      .catch((error: unknown) => {
+        console.warn("[sbk-log] failed to fetch configured log channel", {
+          guildId, channelId,
+        }, error);
+        return null;
+      });
     if (!channel || channel.type !== ChannelType.GuildText) continue;
     if (channel.guildId !== guildId) continue;
     return channel;

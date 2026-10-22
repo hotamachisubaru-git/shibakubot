@@ -7,6 +7,7 @@ import { formatBigIntJP } from "../../utils/formatCount";
 import { randomInt, randomReason } from "../../utils/sbkRandom";
 import { isBotOrSelfTarget } from "../../utils/targetGuards";
 import { truncateUtf16WithEllipsis } from "../../utils/text";
+import { fetchGuildMemberOrNull } from "../../utils/discordErrors";
 
 const runtimeConfig = getRuntimeConfig();
 const IMMUNE_IDS = runtimeConfig.discord.immuneIds;
@@ -73,9 +74,14 @@ export async function handleSbk(
   if (count < min) count = min;
   if (count > max) count = max;
 
-  const member = await interaction.guild?.members
-    .fetch(targetUser.id)
-    .catch(() => null);
+  const member = interaction.guild
+    ? await fetchGuildMemberOrNull(interaction.guild, targetUser.id).catch((error: unknown) => {
+      console.warn("[sbk] failed to fetch display name; using user tag", {
+        guildId, targetId: targetUser.id,
+      }, error);
+      return null;
+    })
+    : null;
   const displayName = member?.displayName ?? targetUser.tag;
 
   const expectedNextCount = getUserCount(guildId, targetUser.id) + count;
@@ -107,7 +113,7 @@ export async function handleSbk(
     }, error);
     await interaction.editReply(
       "❌ 返信には成功しましたが、回数の保存に失敗しました。管理者に確認してください。",
-    ).catch(() => undefined);
+    );
     return;
   }
 
@@ -116,7 +122,11 @@ export async function handleSbk(
       `**${displayName}** を **${formatBigIntJP(count)}回** しばきました！\n` +
         `（累計 ${formatBigIntJP(nextCount)}回 / 今回 +${formatBigIntJP(count)}回）\n` +
         `理由: ${reason}`,
-    ).catch(() => undefined);
+    ).catch((error: unknown) => {
+      console.warn("[sbk] count saved but failed to update displayed total", {
+        guildId, targetId: targetUser.id, nextCount: nextCount.toString(),
+      }, error);
+    });
   }
 
   await sendLog(

@@ -47,8 +47,14 @@ export async function promptRetrySelection(
 
   const channel =
     client.channels.cache.get(retry.channelId) ??
-    (await client.channels.fetch(retry.channelId).catch(() => null));
-  if (!channel || !("send" in channel)) return;
+    (await client.channels.fetch(retry.channelId));
+  if (!channel || !("send" in channel)) {
+    console.warn("[music] retry selection channel unavailable", {
+      guildId,
+      channelId: retry.channelId,
+    });
+    return;
+  }
 
   const lines = retry.remainingTracks.map((candidate, index) => {
     const title = getTrackTitle(candidate);
@@ -70,13 +76,15 @@ export async function promptRetrySelection(
 
 export async function logImmediateNodeStats(player: {
   guildId: string;
+  connected?: boolean;
   volume: number;
   lavalinkVolume: number;
+  ping?: {
+    ws?: number;
+  };
   voice?: {
     endpoint?: string;
     sessionId?: string;
-    ping?: number;
-    connected?: boolean;
   };
   node: {
     id: string;
@@ -100,8 +108,6 @@ export async function logImmediateNodeStats(player: {
       const voiceState = player.voice as {
         endpoint?: string;
         sessionId?: string;
-        ping?: number;
-        connected?: boolean;
       };
       const stats = await player.node.fetchStats();
       console.log(`[lavalink] node stats immediate: ${player.node.id}`, {
@@ -109,8 +115,8 @@ export async function logImmediateNodeStats(player: {
         guildId: player.guildId,
         playerVolume: player.volume,
         lavalinkVolume: player.lavalinkVolume,
-        voiceConnected: voiceState.connected ?? null,
-        voicePing: voiceState.ping ?? null,
+        voiceConnected: player.connected ?? null,
+        voicePing: player.ping?.ws ?? null,
         voiceEndpoint: voiceState.endpoint ?? null,
         voiceSessionIdPresent: Boolean(voiceState.sessionId),
         players: stats.players,

@@ -43,6 +43,14 @@ import { requireSameMusicVoiceChannel } from "../misc/music-permissions";
 import { buildExternalTrackBlockedMessage, validateTrackForQueue } from "../misc/trackValidation";
 import { handleExternalUrlFallback } from "../misc/external-url";
 
+export class TrackNotFoundError extends Error {
+  override name = "TrackNotFoundError";
+
+  constructor() {
+    super("TRACK_NOT_FOUND");
+  }
+}
+
 export type HandlePlayOptions = {
   titleFallback?: string;
   forceTitle?: boolean;
@@ -192,7 +200,7 @@ export async function handlePlay(
           return;
         }
         if (options?.throwOnNotFound) {
-          throw new Error("TRACK_NOT_FOUND");
+          throw new TrackNotFoundError();
         }
         await message.reply("🔍 曲が見つかりませんでした…。");
         return;

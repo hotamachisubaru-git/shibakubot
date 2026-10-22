@@ -1,5 +1,4 @@
 import { Player } from "lavalink-client";
-import { getMusicRepeat } from "../../data";
 import { getGuildMusicPlaybackLimit } from "../misc/limits";
 import { getTrackDurationMs, getTrackId, type PendingTrack } from "../misc/trackUtils";
 import { hookManagerAutoStopOnce } from "./state-hook";
@@ -17,28 +16,33 @@ export function clearAutoStop(guildId: string): void {
   autoStopTimers.delete(guildId);
 }
 
-function stopPlayerNow(player: Player): void {
-  const legacyPlayer = player as LegacyStoppablePlayer;
-  if (typeof legacyPlayer.stop === "function") {
-    void Promise.resolve(legacyPlayer.stop()).catch(() => undefined);
-    return;
+async function stopPlayerNow(player: Player): Promise<void> {
+  try {
+    const legacyPlayer = player as LegacyStoppablePlayer;
+    if (typeof legacyPlayer.stop === "function") {
+      await legacyPlayer.stop();
+    } else {
+      await player.stopPlaying(true, false);
+    }
+  } catch (error) {
+    console.warn("[music] auto-stop failed", { guildId: player.guildId }, error);
   }
-  void player.stopPlaying(true, false).catch(() => undefined);
 }
 
 function armAutoStop(guildId: string, player: Player, ms: number, trackId?: string): void {
   clearAutoStop(guildId);
   const timeoutMs = Math.min(Math.max(1, Math.ceil(ms)), MAX_TIMEOUT_MS);
   const timeout = setTimeout(() => {
+    autoStopTimers.delete(guildId);
     try {
       const currentTrackId = getTrackId(player.queue.current);
       if (!trackId || currentTrackId === trackId) {
         if (player.playing) {
-          stopPlayerNow(player);
+          void stopPlayerNow(player);
         }
       }
-    } catch {
-      // noop
+    } catch (error) {
+      console.warn("[music] auto-stop timer failed", { guildId, trackId }, error);
     }
   }, timeoutMs);
   autoStopTimers.set(guildId, timeout);
@@ -61,7 +65,7 @@ function armAutoStopForTrack(player: Player, track: PendingTrack): void {
   if (delayMs <= 0) {
     clearAutoStop(player.guildId);
     if (player.playing) {
-      stopPlayerNow(player);
+      void stopPlayerNow(player);
     }
     return;
   }

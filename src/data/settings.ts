@@ -1,5 +1,6 @@
 import { getRuntimeConfig } from "../config/runtime";
 import { SETTING_KEYS } from "../constants/settings";
+import { parseStoredSettingJson } from "./settingJson";
 import {
   type CounterMap,
   getAllCounts,
@@ -155,22 +156,15 @@ function saveMusicNgWords(gid: string, words: string[]): string[] {
 
 export function getMusicNgWords(gid: string): string[] {
   const raw = getSetting(gid, SETTING_KEYS.musicNgWords);
-  if (!raw) return [];
+  if (raw === null) return [];
 
-  try {
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return Array.from(
-      new Set(
-        parsed
-          .filter((word) => typeof word === "string")
-          .map((word) => normalizeNgWord(word))
-          .filter((word) => word.length > 0),
-      ),
-    ).sort();
-  } catch {
-    return [];
+  const parsed = parseStoredSettingJson(raw, gid, SETTING_KEYS.musicNgWords);
+  if (!Array.isArray(parsed) || !parsed.every((word) => typeof word === "string")) {
+    throw new Error(`[data] Invalid stored musicNgWords (guild=${gid}): expected a string array`);
   }
+  return Array.from(
+    new Set(parsed.map((word: string) => normalizeNgWord(word)).filter((word) => word.length > 0)),
+  ).sort();
 }
 
 export function addMusicNgWord(

@@ -8,6 +8,7 @@ import {
 import { MUSIC_TEXT_COMMAND } from "../../constants/commands";
 import { PREFIX } from "./constants";
 import { canManageMusic } from "./music-permissions";
+import { fetchGuildMemberOrNull } from "../../utils/discordErrors";
 
 const SNOWFLAKE_RE = /^\d{17,20}$/;
 const MENTION_RE = /^<@!?(\d{17,20})>$/;
@@ -54,7 +55,7 @@ async function resolveManagedMember(
 
   const id = raw.match(MENTION_RE)?.[1] ?? (SNOWFLAKE_RE.test(raw) ? raw : null);
   if (id) {
-    const member = await guild.members.fetch(id).catch(() => null);
+    const member = await fetchGuildMemberOrNull(guild, id);
     return member ? { status: "found", member } : { status: "not-found" };
   }
 
@@ -67,10 +68,8 @@ async function resolveManagedMember(
   }
   if (cached.size > 1) return { status: "ambiguous" };
 
-  const searched = await guild.members
-    .search({ query: raw, limit: 10 })
-    .catch(() => null);
-  if (!searched?.size) return { status: "not-found" };
+  const searched = await guild.members.search({ query: raw, limit: 10 });
+  if (!searched.size) return { status: "not-found" };
 
   const exactMatches = searched.filter((member) =>
     memberMatches(member, normalized),

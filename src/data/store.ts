@@ -73,21 +73,18 @@ export function coerceBigInt(
   value: unknown,
   fallback: bigint = 0n,
 ): bigint {
+  if (value === undefined) return fallback;
   if (typeof value === "bigint") return value;
-  if (typeof value === "number") {
-    if (!Number.isFinite(value)) return fallback;
-    return BigInt(Math.trunc(value));
+  if (typeof value === "number" && Number.isSafeInteger(value)) {
+    return BigInt(value);
   }
   if (typeof value === "string") {
     const trimmed = value.trim();
-    if (!BIGINT_RE.test(trimmed)) return fallback;
-    try {
+    if (BIGINT_RE.test(trimmed)) {
       return BigInt(trimmed);
-    } catch {
-      return fallback;
     }
   }
-  return fallback;
+  throw new Error("[data] Invalid stored counter value: expected an integer");
 }
 
 function toBigIntInput(value: bigint | number): bigint {
@@ -315,17 +312,18 @@ function closeGuildDbContext(gid: string): void {
   const existing = guildDbContexts.get(gid);
   if (!existing) return;
 
+  existing.db.close();
   guildDbContexts.delete(gid);
-  try {
-    existing.db.close();
-  } catch {
-    // noop
-  }
 }
 
 function closeAllGuildDbContexts(): void {
   for (const gid of [...guildDbContexts.keys()]) {
-    closeGuildDbContext(gid);
+    try {
+      closeGuildDbContext(gid);
+    } catch (error) {
+      // Exit cleanup must still attempt the remaining guild databases.
+      console.warn(`[data] Failed to close guild database (guild=${gid})`, error);
+    }
   }
 }
 
@@ -642,7 +640,10 @@ export function getGuildDbInfo(gid: string): GuildDbInfo {
 
 export function checkpointGuildDb(gid: string): void {
   runGuildMaintenance(gid, (db) => {
-    db.pragma("wal_checkpoint(TRUNCATE)");
+    const result = db.pragma("wal_checkpoint(TRUNCATE)") as Array<{ busy: number }>;
+    if (result[0]?.busy !== 0) {
+      throw new Error(`[data] WAL checkpoint did not complete (guild=${gid})`);
+    }
   });
 }
 

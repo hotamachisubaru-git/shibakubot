@@ -6,6 +6,7 @@ import { getRuntimeConfig } from "../../config/runtime";
 import { COMMON_MESSAGES } from "../../constants/messages";
 import { resetAllCounts, setCountGuild } from "../../data";
 import { hasAdminOrDevPermission } from "../../utils/permissions";
+import { fetchGuildMemberOrNull } from "../../utils/discordErrors";
 
 const runtimeConfig = getRuntimeConfig();
 const OWNER_IDS = runtimeConfig.discord.ownerIds;
@@ -54,7 +55,12 @@ export async function handleReset(
   if (target) {
     setCountGuild(guildId, target.id, 0n);
 
-    const member = await guild.members.fetch(target.id).catch(() => null);
+    const member = await fetchGuildMemberOrNull(guild, target.id).catch((error: unknown) => {
+      console.warn("[reset] failed to fetch display name; using user tag", {
+        guildId, targetId: target.id,
+      }, error);
+      return null;
+    });
     const display = member?.displayName ?? target.tag;
     await interaction.reply({
       content: `**${display}** のしばき回数を0にリセットしました。`,

@@ -1,4 +1,3 @@
-import fs from "node:fs";
 import type { Client } from "discord.js";
 import type {
   Player,
@@ -20,6 +19,8 @@ import {
 } from "../ytDlp/ytDlpUtils";
 import { getGuildMusicPlaybackLimit } from "../misc/limits";
 import { buildExternalTrackBlockedMessage } from "../misc/trackValidation";
+import { removeTemporaryFile } from "../misc/fileCleanup";
+import { logSearchResultError } from "../search/searchResult";
 
 const RECOVERY_RETRY_TTL_MS = 5 * 60 * 1000;
 const recoveryLocks = new Set<string>();
@@ -63,7 +64,8 @@ function logRecoveryMessage(
 function summarizePayload(payload: TrackExceptionEvent | TrackStuckEvent): string {
   if ("exception" in payload) {
     const message = payload.exception?.message?.trim();
-    return message || "playback error";
+    const summary = message?.split(/\r?\n/, 1)[0]?.trim();
+    return summary || "playback error";
   }
   if ("thresholdMs" in payload && typeof payload.thresholdMs === "number") {
     return `track stuck (${payload.thresholdMs}ms)`;
@@ -79,11 +81,21 @@ async function resolveDownloadedTrack(
   const internalResult = await player.search({ query: internalUrl }, {
     system: "playback-recovery",
   });
+  logSearchResultError(internalResult, {
+    guildId: player.guildId,
+    query: internalUrl,
+    operation: "playback-recovery-internal",
+  });
   const internalTrack = internalResult?.tracks?.[0] ?? null;
   if (internalTrack) return internalTrack;
 
   const publicResult = await player.search({ query: publicUrl }, {
     system: "playback-recovery",
+  });
+  logSearchResultError(publicResult, {
+    guildId: player.guildId,
+    query: publicUrl,
+    operation: "playback-recovery-public",
   });
   return publicResult?.tracks?.[0] ?? null;
 }
@@ -128,6 +140,11 @@ export async function recoverPlaybackWithYtDlp(
     try {
       downloadedTrack = await downloadExternalTrack(sourceUrl);
     } catch (error) {
+      console.warn("[music] yt-dlp recovery failed", {
+        guildId: player.guildId,
+        sourceUrl,
+        error,
+      });
       const detail =
         error instanceof YtDlpUserError
           ? error.message
@@ -147,7 +164,7 @@ export async function recoverPlaybackWithYtDlp(
       getGuildMusicPlaybackLimit(player.guildId),
     );
     if (blockedMessage) {
-      await fs.promises.unlink(downloadedTrack.filePath).catch(() => undefined);
+      await removeTemporaryFile(downloadedTrack.filePath);
       logRecoveryMessage(
         client,
         player,
@@ -162,7 +179,7 @@ export async function recoverPlaybackWithYtDlp(
       downloadedTrack.publicUrl,
     );
     if (!recoveredTrack) {
-      await fs.promises.unlink(downloadedTrack.filePath).catch(() => undefined);
+      await removeTemporaryFile(downloadedTrack.filePath);
       logRecoveryMessage(
         client,
         player,
@@ -205,7 +222,11 @@ export async function recoverPlaybackWithYtDlp(
     );
     return "recovered";
   } catch (error) {
-    console.warn("[music] playback recovery error", error);
+    console.warn("[music] playback recovery error", {
+      guildId: player.guildId,
+      trackTitle,
+      sourceUrl,
+    }, error);
     logRecoveryMessage(
       client,
       player,

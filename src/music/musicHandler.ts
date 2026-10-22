@@ -309,11 +309,19 @@ export async function handleMusicMessage(message: Message): Promise<void> {
   try {
     await definition.handler(message, parsedCommand.args);
   } catch (error) {
-    console.error("[music] command error", error);
+    console.error("[music] command error", {
+      guildId,
+      channelId: message.channelId,
+      command: definition.name,
+    }, error);
     try {
       await message.reply("⚠️ コマンド処理中にエラーが発生しました。");
-    } catch {
-      // noop
+    } catch (replyError) {
+      console.warn("[music] command error reply failed", {
+        guildId,
+        channelId: message.channelId,
+        command: definition.name,
+      }, replyError);
     }
   }
 }

@@ -53,7 +53,7 @@ UPLOAD_INTERNAL_URL=http://127.0.0.1:3001/uploads
 UPLOAD_BASE_URL=https://bot.example.com/uploads
 MUSIC_UPLOAD_MAX_MB=25
 YT_DLP_MAX_FILESIZE_MB=100
-YT_DLP_VERSION=2026.07.04
+YT_DLP_VERSION=2026.08.19
 YT_DLP_TEMP_MAX_AGE_HOURS=24
 YT_DLP_CLEANUP_INTERVAL_MINUTES=360
 
@@ -137,6 +137,27 @@ Lavalink 設定や JAR を更新した場合は:
 ```bash
 sudo systemctl restart lavalink
 ```
+
+## `ts-node/dist/bin.js` で構文エラーになる場合
+
+`node_modules/ts-node/dist/bin.js` の先頭に `basedir=$(dirname ...)` と表示される場合は、
+依存パッケージ本体がシェル用ランチャーの内容で壊れています。`npm rebuild` ではパッケージ本体を
+再取得しないため復旧しません。Botを停止して `node_modules` を削除し、ロックファイルから
+クリーンインストールしてください。
+
+```bash
+cd /opt/shibakubot
+sudo systemctl stop shibakubot
+rm -rf node_modules
+npm ci
+npm test
+npm run build
+npm run register:prod
+sudo systemctl start shibakubot
+sudo systemctl --no-pager --full status shibakubot
+```
+
+Windowsなど別OSで作成した `node_modules` はVPSへコピーせず、VPS上で `npm ci` を実行します。
 
 ## バックアップ対象
 - `/opt/shibakubot/.env`

@@ -115,11 +115,7 @@ async function handleBackupGuild(
     return;
   }
 
-  try {
-    checkpointGuildDb(context.gid);
-  } catch {
-    // noop
-  }
+  checkpointGuildDb(context.gid);
 
   const stamp = formatTimestamp();
   const destDir = path.join(BACKUP_ROOT, "guilds", context.gid);

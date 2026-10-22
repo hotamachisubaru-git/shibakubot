@@ -63,6 +63,8 @@ function normalizeUrl(raw: string | undefined, fallback: string): URL {
   try {
     return new URL(value);
   } catch {
+    // Do not log the supplied URL: it may contain credentials or query secrets.
+    console.warn("[config] Invalid upload base URL; using the default", { fallback });
     return new URL(fallback);
   }
 }

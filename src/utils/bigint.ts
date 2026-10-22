@@ -1,13 +1,18 @@
 const INTEGER_TEXT_PATTERN = /^[+-]?\d+$/u;
+const GROUPED_INTEGER_TEXT_PATTERN = /^[+-]?\d{1,3}(?:,\d{3})+$/u;
 
 export function parseBigIntInput(raw: string): bigint | null {
-  const normalized = raw.trim();
-  if (normalized.length === 0 || !INTEGER_TEXT_PATTERN.test(normalized)) {
+  const normalized = raw.trim().normalize("NFKC");
+  if (
+    normalized.length === 0 ||
+    (!INTEGER_TEXT_PATTERN.test(normalized) &&
+      !GROUPED_INTEGER_TEXT_PATTERN.test(normalized))
+  ) {
     return null;
   }
 
   try {
-    return BigInt(normalized);
+    return BigInt(normalized.replace(/,/gu, ""));
   } catch {
     return null;
   }

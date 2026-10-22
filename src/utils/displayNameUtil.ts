@@ -1,4 +1,5 @@
 import type { BaseInteraction } from "discord.js";
+import { fetchGuildMemberOrNull, fetchUserOrNull } from "./discordErrors";
 
 export type AnyInteraction = Pick<BaseInteraction, "guild" | "guildId" | "client">;
 
@@ -14,7 +15,12 @@ async function tryFetchGuildDisplayName(
     return cachedMember.displayName;
   }
 
-  const member = await guild.members.fetch(userId).catch(() => null);
+  const member = await fetchGuildMemberOrNull(guild, userId).catch((error: unknown) => {
+    console.warn("[display-name] failed to fetch member; falling back to user tag", {
+      guildId: guild.id, userId,
+    }, error);
+    return null;
+  });
   return member?.displayName ?? null;
 }
 
@@ -27,7 +33,12 @@ async function tryFetchUserTag(
     return cachedUser.tag;
   }
 
-  const user = await interaction.client.users.fetch(userId).catch(() => null);
+  const user = await fetchUserOrNull(interaction.client, userId).catch((error: unknown) => {
+    console.warn("[display-name] failed to fetch user; falling back to user ID", {
+      guildId: interaction.guildId, userId,
+    }, error);
+    return null;
+  });
   return user?.tag ?? null;
 }
 

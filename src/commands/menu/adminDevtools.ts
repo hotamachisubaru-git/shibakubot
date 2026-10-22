@@ -157,16 +157,18 @@ async function handleDevCheckpoint(
 ): Promise<void> {
   try {
     checkpointGuildDb(context.gid);
-    await component.followUp({
-      content: "WALチェックポイントを実行しました。",
-      flags: "Ephemeral",
-    });
-  } catch {
+  } catch (error) {
+    console.error("[menu] WAL checkpoint failed", { guildId: context.gid }, error);
     await component.followUp({
       content: "WALチェックポイントに失敗しました。",
       flags: "Ephemeral",
     });
+    return;
   }
+  await component.followUp({
+    content: "WALチェックポイントを実行しました。",
+    flags: "Ephemeral",
+  });
 }
 
 async function handleDevVacuum(
@@ -175,16 +177,18 @@ async function handleDevVacuum(
 ): Promise<void> {
   try {
     vacuumGuildDb(context.gid);
-    await component.followUp({
-      content: "VACUUM を実行しました。",
-      flags: "Ephemeral",
-    });
-  } catch {
+  } catch (error) {
+    console.error("[menu] VACUUM failed", { guildId: context.gid }, error);
     await component.followUp({
       content: "VACUUM に失敗しました。",
       flags: "Ephemeral",
     });
+    return;
   }
+  await component.followUp({
+    content: "VACUUM を実行しました。",
+    flags: "Ephemeral",
+  });
 }
 
 export { handleDevtoolsAction };

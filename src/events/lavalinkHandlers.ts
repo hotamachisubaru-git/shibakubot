@@ -95,7 +95,7 @@ export function setupLavalinkEventHandlers(client: ShibakuClient): void {
   });
 
   client.lavalink.on("trackStart", (player, track) => {
-    const voiceState = player.voice as { endpoint?: string; ping?: number; connected?: boolean };
+    const voiceState = player.voice as { endpoint?: string };
     console.log(
       `[music] track start guild=${player.guildId} title=${track?.info?.title ?? "unknown"} source=${track?.info?.sourceName ?? "unknown"} identifier=${track?.info?.identifier ?? "unknown"} uri=${track?.info?.uri ?? "unknown"}`,
       {
@@ -106,8 +106,8 @@ export function setupLavalinkEventHandlers(client: ShibakuClient): void {
         position: player.position,
         volume: player.volume,
         lavalinkVolume: player.lavalinkVolume,
-        voiceConnected: voiceState.connected ?? null,
-        voicePing: voiceState.ping ?? null,
+        voiceConnected: player.connected ?? null,
+        voicePing: player.ping?.ws ?? null,
         voiceEndpoint: voiceState.endpoint ?? null,
         botVoiceState: getBotVoiceDebugState(client, player.guildId),
       },

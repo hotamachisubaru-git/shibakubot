@@ -3,12 +3,13 @@ import fs from "node:fs";
 import path from "node:path";
 import { getRuntimeConfig } from "../../config/runtime";
 import { DEFAULT_YT_DLP_VERSION } from "../../config/constants";
+import { isMissingFileError, removeTemporaryFile } from "../misc/fileCleanup";
 
 let managedBinaryDownloadPromise: Promise<string> | null = null;
 
 const DEFAULT_YT_DLP_SHA256: Readonly<Record<string, string>> = {
-  "yt-dlp": "495be29ff4d9d4e9be7eabdfef225221e5d5282e77f2f505abc6dca80349f3fd",
-  "yt-dlp.exe": "52fe3c26dcf71fbdc85b528589020bb0b8e383155cfa81b64dd447bbe35e24b8",
+  "yt-dlp": "1fa6733c37ea6fb51c99ad8fe785e7b7e5f3246c9b980230329d4fb72ed8d4d6",
+  "yt-dlp.exe": "66674953fe251b89f4d08c5f0e35e0728679bd67ab3d7d05c0562af101dd3e7a",
 };
 
 function getManagedBinaryAssetName(): string {
@@ -75,8 +76,10 @@ export async function pathExists(targetPath: string): Promise<boolean> {
   try {
     await fs.promises.access(targetPath);
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    if (isMissingFileError(error)) return false;
+    // Permission and I/O failures must not silently select another executable.
+    throw error;
   }
 }
 
@@ -87,6 +90,7 @@ async function saveResponseBodyToFile(response: globalThis.Response, savePath: s
   }
   const reader = body.getReader();
   const fileHandle = await fs.promises.open(savePath, "w");
+  let completed = false;
   try {
     while (true) {
       const chunk = await reader.read();
@@ -94,8 +98,14 @@ async function saveResponseBodyToFile(response: globalThis.Response, savePath: s
       if (!chunk.value || chunk.value.length === 0) continue;
       await fileHandle.write(chunk.value);
     }
+    completed = true;
   } finally {
-    await fileHandle.close();
+    try {
+      await fileHandle.close();
+    } catch (error) {
+      if (completed) throw error;
+      console.warn(`[music] failed to close yt-dlp download: ${savePath}`, error);
+    }
   }
 }
 
@@ -108,7 +118,11 @@ export async function ensureManagedBinary(allowDownload = true): Promise<string>
     if (await verifyFileSha256(targetPath, expectedSha256)) {
       return targetPath;
     }
-    await fs.promises.unlink(targetPath).catch(() => undefined);
+    try {
+      await fs.promises.unlink(targetPath);
+    } catch (error) {
+      if (!isMissingFileError(error)) throw error;
+    }
     if (!allowDownload) {
       throw new YtDlpUserError(
         "キャッシュ済みyt-dlpのSHA-256検証に失敗しました。自動取得を有効にするか、キャッシュを更新してください。",
@@ -148,11 +162,7 @@ export async function ensureManagedBinary(allowDownload = true): Promise<string>
         await fs.promises.rename(tempPath, targetPath);
         return targetPath;
       } catch (error) {
-        try {
-          await fs.promises.unlink(tempPath);
-        } catch {
-          // noop
-        }
+        await removeTemporaryFile(tempPath);
         throw error;
       } finally {
         managedBinaryDownloadPromise = null;

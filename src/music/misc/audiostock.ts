@@ -38,21 +38,22 @@ function parseDurationToMs(durationText: string): number {
 }
 
 async function resolvePreviewUrl(playUrl: string): Promise<string | null> {
-  try {
-    const response = await fetch(playUrl, {
-      headers: { "User-Agent": USER_AGENT },
-      redirect: "manual",
-    });
-    const location = response.headers.get("location");
-    if (location) return location;
-    // 直接 body が返ってくる場合もある
-    if (response.ok && response.headers.get("content-type")?.startsWith("audio/")) {
-      return playUrl;
-    }
-    return null;
-  } catch {
-    return null;
+  const response = await fetch(playUrl, {
+    headers: { "User-Agent": USER_AGENT },
+    redirect: "manual",
+  });
+  const location = response.headers.get("location");
+  if (location && response.status >= 300 && response.status < 400) return location;
+  // A removed preview is a missing candidate, not a service failure.
+  if (response.status === 404 || response.status === 410) return null;
+  if (!response.ok) {
+    throw new Error(`Audiostock preview request failed: ${response.status} ${response.statusText}`);
   }
+  // 直接 body が返ってくる場合もある
+  if (response.headers.get("content-type")?.startsWith("audio/")) {
+    return playUrl;
+  }
+  return null;
 }
 
 export async function searchAudiostock(
@@ -62,22 +63,17 @@ export async function searchAudiostock(
   const params = new URLSearchParams();
   params.set("audio_search[keywords]", keyword);
 
-  let html: string;
-  try {
-    const response = await fetch(`${SEARCH_URL}?${params.toString()}`, {
-      headers: { "User-Agent": USER_AGENT },
-    });
-    if (!response.ok) {
-      console.warn("[audiostock] search failed:", response.status, response.statusText);
-      return [];
-    }
-    html = await response.text();
-  } catch (error) {
-    console.warn("[audiostock] search error:", error);
-    return [];
+  const response = await fetch(`${SEARCH_URL}?${params.toString()}`, {
+    headers: { "User-Agent": USER_AGENT },
+  });
+  if (!response.ok) {
+    throw new Error(`Audiostock search failed: ${response.status} ${response.statusText}`);
   }
+  const html = await response.text();
 
   const tracks: AudiostockTrack[] = [];
+  let previewFailed = false;
+  let firstPreviewError: unknown;
   // 各作品ブロックは <div class="player-audio-inner player-item ..."> で囲まれている
   const itemRegex =
     /<div class="player-audio-inner player-item[^"]*">[\s\S]*?<\/div>\s*<\/div>/g;
@@ -117,7 +113,15 @@ export async function searchAudiostock(
 
     if (!id || !title) continue;
 
-    const previewUrl = await resolvePreviewUrl(playUrl);
+    let previewUrl: string | null;
+    try {
+      previewUrl = await resolvePreviewUrl(playUrl);
+    } catch (error) {
+      if (!previewFailed) firstPreviewError = error;
+      previewFailed = true;
+      console.warn(`[audiostock] preview lookup failed for track ${id}`, error);
+      continue;
+    }
     if (!previewUrl) continue;
 
     tracks.push({
@@ -130,6 +134,8 @@ export async function searchAudiostock(
     });
   }
 
+  // Keep useful partial results, but never report an outage as an empty search.
+  if (!tracks.length && previewFailed) throw firstPreviewError;
   return tracks;
 }
 

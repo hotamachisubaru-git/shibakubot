@@ -8,6 +8,7 @@ import {
   ModalSubmitInteraction,
 } from "discord.js";
 import { hasAdminOrDevPermission } from "../../utils/permissions";
+import { isDeletedDiscordMessage, isDiscordCollectorTimeout } from "../../utils/discordErrors";
 import { OWNER_IDS } from "./menuPageDefs";
 
 export type PanelMessage = Awaited<ReturnType<MessageComponentInteraction["fetchReply"]>>;
@@ -15,8 +16,11 @@ export type PanelMessage = Awaited<ReturnType<MessageComponentInteraction["fetch
 export async function clearPanelComponents(panel: PanelMessage): Promise<void> {
   try {
     await panel.edit({ components: [] });
-  } catch {
-    /* noop */
+  } catch (error) {
+    if (isDeletedDiscordMessage(error)) return;
+    console.warn("[menu] failed to clear panel components", {
+      guildId: panel.guildId, messageId: panel.id,
+    }, error);
   }
 }
 
@@ -122,5 +126,8 @@ export async function showModalAndAwait(
       time,
       filter: (m: ModalSubmitInteraction) => m.user.id === interactor.user.id,
     })
-    .catch(() => null);
+    .catch((error: unknown) => {
+      if (isDiscordCollectorTimeout(error)) return null;
+      throw error;
+    });
 }

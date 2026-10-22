@@ -62,6 +62,10 @@ export async function handleSpotifyPlay(
     spotifyResolution = await resolveSpotifyInput(query);
   } catch (error) {
     warnSpotifyDebug(debugContext, "resolve-error", { query: formatSpotifyDebugQuery(query) }, error);
+    await message.reply(
+      "⚠️ Spotify の情報取得中にエラーが発生しました。時間をおいて再試行してください。",
+    );
+    return true;
   }
 
   if (!spotifyResolution?.tracks.length) {
@@ -271,7 +275,7 @@ function buildSpotifyReplyLines(
 
   if (spotifyResolution.truncated) {
     lines.push(
-      `⚠️ 取り込み件数が多いため、先頭 ${spotifyResolution.tracks.length} 曲のみ追加対象にしました。`,
+      `⚠️ 取得件数の上限、公開情報の不足、または一部の取得失敗により、取得できた ${spotifyResolution.tracks.length} 曲を追加対象にしました。`,
     );
   }
   if (skippedCount > 0) {

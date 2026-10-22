@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
+import { isMissingFileError, removeTemporaryFile } from "../misc/fileCleanup";
 import path from "node:path";
 import { getRuntimeConfig } from "../../config/runtime";
 import { makeInternalUrl } from "../../utils/makeInternalUrl";
@@ -232,10 +233,12 @@ async function deleteDownloadedArtifacts(prefix: string): Promise<void> {
     const targets = names.filter((name) => name.startsWith(`${prefix}.`));
     await Promise.all(
       targets.map((name) =>
-        fs.promises.unlink(path.join(UPLOAD_DIR, name)).catch(() => undefined),
+        removeTemporaryFile(path.join(UPLOAD_DIR, name)),
       ),
     );
-  } catch {
-    // noop
+  } catch (error) {
+    if (!isMissingFileError(error)) {
+      console.warn(`[music] failed to list yt-dlp cleanup artifacts: ${prefix}`, error);
+    }
   }
 }

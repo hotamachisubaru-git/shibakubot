@@ -16,6 +16,7 @@ import {
 } from "./searchDebug";
 import type { SpotifyTrackMetadata } from "../spotify/spotifyUtils";
 import { scoreSpotifySearchCandidate, type ScoredCandidate } from "./spotifyScoring";
+import { logSearchResultError } from "./searchResult";
 
 // ---------------------------------------------------------------------------
 // Spotify search query groups
@@ -53,6 +54,12 @@ export async function resolveSpotifyTrackCandidate(
   for (const searchQueries of buildSpotifySearchQueryGroups(spotifyTrack)) {
     for (const searchQuery of searchQueries) {
       const result = await player.search({ query: searchQuery }, requester);
+      logSearchResultError(result, {
+        guildId: player.guildId,
+        requesterId: requester.id,
+        query: searchQuery,
+        operation: "spotify-search",
+      });
       const candidates = result?.tracks?.slice(0, SPOTIFY_SEARCH_RESULT_LIMIT) ?? [];
       if (!candidates.length) {
         warnSpotifyDebug(debugContext, "search-query-empty", {

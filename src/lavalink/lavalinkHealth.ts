@@ -1,7 +1,13 @@
 import { getRuntimeConfig } from "../config/runtime";
 import { LAVALINK_READY_CHECK_TIMEOUT_MS } from "./lavalinkConfig";
 
-export class LavalinkNotReadyError extends Error {}
+export class LavalinkNotReadyError extends Error {
+  override name = "LavalinkNotReadyError";
+
+  constructor(message: string, public readonly cause?: unknown) {
+    super(message);
+  }
+}
 
 function getLavalinkHealthUrl(): string {
   const runtimeConfig = getRuntimeConfig();
@@ -38,7 +44,7 @@ export async function probeLavalinkVersion(): Promise<string> {
     signal: AbortSignal.timeout(LAVALINK_READY_CHECK_TIMEOUT_MS),
   }).catch((error: unknown) => {
     if (isRetryableLavalinkError(error)) {
-      throw new LavalinkNotReadyError("Lavalink server is not reachable yet.");
+      throw new LavalinkNotReadyError("Lavalink server is not reachable yet.", error);
     }
     throw error;
   });

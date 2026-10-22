@@ -5,6 +5,7 @@ import {
   type PermissionsBitField,
 } from "discord.js";
 import type { MenuActionHandler } from "./context";
+import { fetchGuildMemberOrNull } from "../../utils/discordErrors";
 
 type PermissionCheck = {
   label: string;
@@ -42,7 +43,7 @@ async function fetchBotMember(
   buttonGuild: NonNullable<Parameters<MenuActionHandler>[1]["guild"]>,
   clientUserId: string,
 ): Promise<GuildMember | null> {
-  return buttonGuild.members.me ?? buttonGuild.members.fetch(clientUserId).catch(() => null);
+  return buttonGuild.members.me ?? fetchGuildMemberOrNull(buttonGuild, clientUserId);
 }
 
 export const handlePermissionsAction: MenuActionHandler = async (
@@ -75,7 +76,7 @@ export const handlePermissionsAction: MenuActionHandler = async (
       ? button.channel.permissionsFor(botMember)
       : null;
 
-  const requester = await guild.members.fetch(button.user.id).catch(() => null);
+  const requester = await fetchGuildMemberOrNull(guild, button.user.id);
   const voiceChannel = requester?.voice.channel ?? null;
   const voicePermissions = voiceChannel?.permissionsFor(botMember) ?? null;
 

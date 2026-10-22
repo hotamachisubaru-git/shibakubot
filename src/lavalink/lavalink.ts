@@ -48,6 +48,7 @@ export async function waitForLavalinkReady(): Promise<void> {
         const detail = error instanceof Error ? error.message : String(error);
         console.warn(
           `[lavalink] waiting for server: ${healthUrl} (attempt ${attempt}) ${detail}`,
+          error,
         );
       }
       await delay(LAVALINK_READY_CHECK_INTERVAL_MS);

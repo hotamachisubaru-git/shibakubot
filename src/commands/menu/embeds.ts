@@ -74,7 +74,7 @@ export async function guildMembersEmbed(i: GuildScopedInteraction): Promise<Embe
     return new EmbedBuilder().setTitle("メンバー一覧").setDescription(UNKNOWN_GUILD_MESSAGE);
   }
   const counts = getAllCounts(gid);
-  const { members } = await fetchGuildMembersSafe(guild);
+  const { members, fromCache } = await fetchGuildMembersSafe(guild);
   const humans = members.filter((m) => !m.user.bot);
   const rows = await Promise.all(
     humans.map(async (m) => ({
@@ -94,5 +94,11 @@ export async function guildMembersEmbed(i: GuildScopedInteraction): Promise<Embe
   if (desc === null) {
     return buildTooLongEmbed("メンバー一覧（エラー）", joined.length, EMBED_DESC_LIMIT);
   }
-  return new EmbedBuilder().setTitle("メンバー一覧").setDescription(desc);
+  const embed = new EmbedBuilder().setTitle("メンバー一覧").setDescription(
+    desc || (fromCache ? "取得済みキャッシュに表示できるメンバーがありません。" : "表示できるメンバーがいません。"),
+  );
+  if (fromCache) {
+    embed.setFooter({ text: "メンバー取得がタイムアウトしたためキャッシュを表示しています。全メンバーを取得できていません。" });
+  }
+  return embed;
 }

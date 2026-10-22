@@ -3,25 +3,28 @@ import type { SpotifyReference, SpotifyTrackMetadata, SpotifyResolution } from "
 import { parseSpotifyReferenceFromUri, parseSpotifyReferenceFromUrl, extractMetaContent, parseArtistFromTrackDescription, parseCollectionTrackCount, extractTrackUrlsFromCollectionHtml } from "./spotifyUtils-parser";
 
 async function resolveSpotifyRedirect(input: string): Promise<SpotifyReference | null> {
+  let url: URL;
   try {
-    const url = new URL(input);
-    const host = url.hostname.replace(/^www\./i, "").toLowerCase();
-    if (host !== "spotify.link" && host !== "spoti.fi") {
-      return null;
-    }
-
-    const response = await fetch(input, {
-      headers: {
-        "user-agent": SPOTIFY_USER_AGENT,
-      },
-      redirect: "follow",
-      signal: AbortSignal.timeout(SPOTIFY_FETCH_TIMEOUT_MS),
-    });
-
-    return parseSpotifyReferenceFromUrl(response.url);
+    url = new URL(input);
   } catch {
     return null;
   }
+  const host = url.hostname.replace(/^www\./i, "").toLowerCase();
+  if (host !== "spotify.link" && host !== "spoti.fi") {
+    return null;
+  }
+
+  const response = await fetch(input, {
+    headers: {
+      "user-agent": SPOTIFY_USER_AGENT,
+    },
+    redirect: "follow",
+    signal: AbortSignal.timeout(SPOTIFY_FETCH_TIMEOUT_MS),
+  });
+  if (!response.ok) {
+    throw new Error(`spotify redirect failed: ${response.status} ${response.statusText}`);
+  }
+  return parseSpotifyReferenceFromUrl(response.url);
 }
 
 export async function resolveSpotifyReference(input: string): Promise<SpotifyReference | null> {
@@ -80,12 +83,8 @@ function parseSpotifyTrackMetadata(
 }
 
 async function resolveSpotifyTrack(url: string): Promise<SpotifyTrackMetadata | null> {
-  try {
-    const html = await fetchSpotifyHtml(url);
-    return parseSpotifyTrackMetadata(html, url);
-  } catch {
-    return null;
-  }
+  const html = await fetchSpotifyHtml(url);
+  return parseSpotifyTrackMetadata(html, url);
 }
 
 async function mapWithConcurrency<T, R>(
@@ -127,15 +126,30 @@ async function resolveSpotifyCollection(
 
   const truncatedByLimit = trackUrls.length > SPOTIFY_MAX_RESOLVED_TRACKS;
   const targets = trackUrls.slice(0, SPOTIFY_MAX_RESOLVED_TRACKS);
+  const fetchErrors: unknown[] = [];
   const tracks = await mapWithConcurrency(
     targets,
     SPOTIFY_TRACK_FETCH_CONCURRENCY,
-    async (trackUrl) => resolveSpotifyTrack(trackUrl),
+    async (trackUrl) => {
+      try {
+        return await resolveSpotifyTrack(trackUrl);
+      } catch (error) {
+        fetchErrors.push(error);
+        console.warn("[spotify] collection track fetch failed", {
+          collectionUrl: reference.url,
+          trackUrl,
+        }, error);
+        return null;
+      }
+    },
   );
   const resolvedTracks = tracks.filter(
     (track): track is SpotifyTrackMetadata => Boolean(track),
   );
-  if (!resolvedTracks.length) return null;
+  if (!resolvedTracks.length) {
+    if (fetchErrors.length) throw fetchErrors[0];
+    return null;
+  }
 
   return {
     type: reference.type,

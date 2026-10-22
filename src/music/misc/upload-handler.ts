@@ -25,8 +25,9 @@ import {
 } from "./uploadUtils";
 import { makeInternalUrl } from "../../utils/makeInternalUrl";
 import { makePublicUrl } from "../../utils/makePublicUrl";
-import { handlePlay } from "../playback/play";
+import { handlePlay, TrackNotFoundError } from "../playback/play";
 import { getRuntimeConfig } from "../../config/runtime";
+import { removeTemporaryFile } from "./fileCleanup";
 
 export class UploadTooLargeError extends Error {
   override name = "UploadTooLargeError";
@@ -66,6 +67,7 @@ export async function saveResponseBodyToFile(
   const reader = body.getReader();
   const fileHandle = await fs.promises.open(savePath, "w");
   let writtenBytes = 0;
+  let completed = false;
   try {
     while (true) {
       const chunk = await reader.read();
@@ -73,13 +75,23 @@ export async function saveResponseBodyToFile(
       if (!chunk.value || chunk.value.length === 0) continue;
       writtenBytes += chunk.value.length;
       if (writtenBytes > maxBytes) {
-        await reader.cancel("upload size limit exceeded").catch(() => undefined);
+        try {
+          await reader.cancel("upload size limit exceeded");
+        } catch (error) {
+          console.warn("[music] failed to cancel oversized upload", error);
+        }
         throw new UploadTooLargeError("upload size limit exceeded");
       }
       await fileHandle.write(chunk.value);
     }
+    completed = true;
   } finally {
-    await fileHandle.close();
+    try {
+      await fileHandle.close();
+    } catch (error) {
+      if (completed) throw error;
+      console.warn(`[music] failed to close upload: ${savePath}`, error);
+    }
   }
 }
 
@@ -148,6 +160,7 @@ export async function handleUpload(
   const id = crypto.randomUUID();
   const filename = `${id}${ext}`;
   const savePath = path.join(UPLOAD_DIR, filename);
+  let playbackAttempted = false;
 
   try {
     const response = await fetch(attachment.url);
@@ -203,8 +216,9 @@ export async function handleUpload(
       });
       const title = metadata.common.title?.trim();
       if (title) metadataTitle = title;
-    } catch {
-      // noop
+    } catch (error) {
+      // Metadata is optional; retain the ID3/filename fallback and its failure reason.
+      console.warn("[music] upload metadata parsing failed; trying ID3/filename", error);
     }
 
     if (!metadataTitle) {
@@ -230,35 +244,40 @@ export async function handleUpload(
         `▶ 再生します…`,
     );
 
+    playbackAttempted = true;
     try {
       await handlePlay(message, internalUrl, {
         titleFallback: playbackTitle,
         forceTitle: true,
         throwOnNotFound: true,
       });
-    } catch {
+    } catch (internalError) {
+      if (!(internalError instanceof TrackNotFoundError)) throw internalError;
+      console.warn("[music] upload internal URL lookup failed; trying public URL", internalError);
       await handlePlay(message, publicUrl, {
         titleFallback: playbackTitle,
         forceTitle: true,
+        throwOnNotFound: true,
       });
     }
   } catch (error) {
     console.error("[music] upload error", error);
-    try {
-      await fs.promises.unlink(savePath);
-    } catch {
-      // noop
+    // Once playback was attempted, a queue or reply failure may follow a successful
+    // enqueue. Preserve the file unless lookup explicitly confirmed no track.
+    if (!playbackAttempted || error instanceof TrackNotFoundError) {
+      await removeTemporaryFile(savePath);
     }
+    const failureMessage = error instanceof UploadTooLargeError
+      ? `⚠️ アップロードできるファイルは最大 ${uploadConfig.uploadMaxMb} MBです。`
+      : playbackAttempted
+        ? "⚠️ アップロード後の再生処理でエラーが発生しました。"
+        : "❌ アップロード処理に失敗しました。";
     try {
-      await message.reply(
-        error instanceof UploadTooLargeError
-          ? `⚠️ アップロードできるファイルは最大 ${uploadConfig.uploadMaxMb} MBです。`
-          : "❌ アップロード処理に失敗しました。",
-      );
+      await message.reply(failureMessage);
     } catch (replyError) {
       console.warn("[music] upload error reply failed, fallback to send", replyError);
       if ("send" in message.channel) {
-        await message.channel.send("❌ アップロード処理に失敗しました。");
+        await message.channel.send(failureMessage);
       }
     }
   }

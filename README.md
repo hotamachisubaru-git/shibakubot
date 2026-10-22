@@ -78,7 +78,7 @@ YT_DLP_PATH=
 YT_DLP_AUTO_DOWNLOAD=true
 YT_DLP_TIMEOUT_MS=180000
 YT_DLP_CACHE_DIR=./data/yt-dlp
-YT_DLP_VERSION=2026.07.04
+YT_DLP_VERSION=2026.08.19
 # YT_DLP_SHA256=custom_version_asset_sha256
 YT_DLP_MAX_FILESIZE_MB=100
 YT_DLP_TEMP_MAX_AGE_HOURS=24
@@ -104,7 +104,9 @@ CLEAR_GLOBAL=true
 - `MUSIC_FIXED_VOLUME` は新規プレイヤーの初期音量です（1〜100）。`p!vol` で変更した値は次のトラックでも維持されます
 - `YT_DLP_ENABLED=true` で、Lavalink 未対応URLを `yt-dlp` 取り込みで再生可能
 - `YT_DLP_PATH` を指定するとその実行ファイルを優先使用
-- `YT_DLP_AUTO_DOWNLOAD=true` かつ `yt-dlp` が未導入なら、`YT_DLP_VERSION` の公式バイナリを `YT_DLP_CACHE_DIR` へ取得し、SHA-256検証後に使用
+- `YT_DLP_AUTO_DOWNLOAD=true` なら、`YT_DLP_VERSION` の公式バイナリを `YT_DLP_CACHE_DIR` へ取得し、SHA-256検証後に使用
+- 自動取得が有効な場合は、OSの `PATH` にある古い `yt-dlp` より、バージョン管理された検証済みバイナリを優先
+- Node.js 22以上ではYouTubeのJavaScript challenge用ランタイムとしてBot自身のNode.jsを自動利用。Node.js 20/21ではDeno 2.3以上などの対応ランタイムが別途必要
 - デフォルト以外の `YT_DLP_VERSION` に変更する場合は、そのOS向けリリース資産の `YT_DLP_SHA256` も指定してください
 - `YT_DLP_MAX_FILESIZE_MB` は外部URLから取得するファイルの上限です。yt-dlp実行時とダウンロード後の両方で検査します
 - `YT_DLP_TEMP_MAX_AGE_HOURS` を超えた `remote-*` ファイルは、起動時および `YT_DLP_CLEANUP_INTERVAL_MINUTES` 間隔で削除されます
@@ -186,6 +188,9 @@ Lavalink 側で有効なら、例として `YouTube / ニコニコ / SoundCloud 
   - Developer Portal で Intents を有効化
 - `Unknown interaction`
   - `npm run register` を再実行
+- `ts-node/dist/bin.js` の先頭で `basedir=$(dirname ...)` の構文エラーになる
+  - `node_modules` が破損しています。`npm rebuild` ではなく、Botを停止して `rm -rf node_modules && npm ci` を実行
+  - VPSの詳細な復旧手順は [docs/vps.md](docs/vps.md) を参照
 - 音楽が無音/再生されない
   - Lavalink のバージョンが `4.2.0+` か確認
   - `LAVALINK_HOST` / `LAVALINK_PORT` / `LAVALINK_PASSWORD` の一致確認

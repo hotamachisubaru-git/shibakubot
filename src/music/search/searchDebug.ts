@@ -44,7 +44,7 @@ function logSpotifyDebug(context: SpotifyDebugContext, event: DebugEvent, detail
 }
 
 function warnSpotifyDebug(context: SpotifyDebugContext, event: WarnEvent, details?: Record<string, unknown>, error?: unknown): void {
-  if (!SPOTIFY_DEBUG_ENABLED) return;
+  if (!SPOTIFY_DEBUG_ENABLED && event !== "resolve-error") return;
   const prefix = buildPrefix(context, event);
   if (details && error !== undefined) { console.warn(prefix, details, error); return; }
   if (details) { console.warn(prefix, details); return; }
@@ -53,7 +53,6 @@ function warnSpotifyDebug(context: SpotifyDebugContext, event: WarnEvent, detail
 }
 
 function errorSpotifyDebug(context: SpotifyDebugContext, event: ErrorEvent, details?: Record<string, unknown>, error?: unknown): void {
-  if (!SPOTIFY_DEBUG_ENABLED) return;
   const prefix = buildPrefix(context, event);
   if (details && error !== undefined) { console.error(prefix, details, error); return; }
   if (details) { console.error(prefix, details); return; }

@@ -75,6 +75,7 @@ export const MENU_PAGE_DEFINITIONS: readonly MenuPageDefinition[] = [
       { customId: "menu_sysstats", label: "システム統計", style: ButtonStyle.Secondary, summary: "Bot稼働状況とサーバー負荷を確認します。" },
       { customId: "menu_backup", label: "バックアップ", style: ButtonStyle.Secondary, summary: "ギルドDBの保存と一覧確認を行います。" },
       { customId: "menu_maintenance", label: "メンテ切替", style: ButtonStyle.Secondary, summary: "メンテナンスモードを切り替えます。" },
+      { customId: "menu_medal", label: "メダル操作", style: ButtonStyle.Success, summary: "メダル操作ページを開きます。" },
     ],
   },
   {
@@ -91,6 +92,20 @@ export const MENU_PAGE_DEFINITIONS: readonly MenuPageDefinition[] = [
       { customId: "menu_event_notify", label: "イベント通知", style: ButtonStyle.Secondary, summary: "イベント開始前の通知を設定します。" },
       { customId: "menu_event_help", label: "イベントヘルプ", style: ButtonStyle.Secondary, summary: "イベント機能の使い方を確認します。" },
       { customId: "menu_event_export", label: "イベントエクスポート", style: ButtonStyle.Secondary, summary: "イベント情報をCSVでエクスポートします。" },
+    ],
+  },
+  {
+    page: 5,
+    navCustomId: "menu_page_medal",
+    navLabel: "メダル",
+    title: "メダル",
+    summary: "メダルに関する操作を行います。",
+    permissionNote: "管理者 / 開発者が利用できます。",
+    actions: [
+      { customId: "menu_medal_add", label: "メダル追加", style: ButtonStyle.Secondary, summary: "メダルを追加します。" },
+      { customId: "menu_medal_remove", label: "メダル減算", style: ButtonStyle.Danger, summary: "メダルを減算します（残高は0未満になりません）。" },
+      { customId: "menu_medal_set", label: "残高設定", style: ButtonStyle.Secondary, summary: "メダル残高を指定値へ上書きします。" },
+      { customId: "menu_medal_vip", label: "VIP管理", style: ButtonStyle.Secondary, summary: "VIPユーザーの追加・削除・一覧確認を行います。" },
     ],
   },
 ] as const;

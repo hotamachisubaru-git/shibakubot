@@ -1,4 +1,3 @@
-import fs from "node:fs";
 import { Message } from "discord.js";
 import { getMusicNgWords } from "../../data";
 import { findNgWordMatch } from "./trackUtils";
@@ -10,6 +9,7 @@ import {
 } from "../ytDlp/ytDlpUtils";
 import { buildExternalTrackBlockedMessage } from "./trackValidation";
 import { HandlePlayOptions } from "../playback/play";
+import { removeTemporaryFile } from "./fileCleanup";
 
 // ---------------------------------------------------------------------------
 // handleExternalUrlFallback
@@ -50,7 +50,7 @@ export async function handleExternalUrlFallback(
     getGuildMusicPlaybackLimit(guildId),
   );
   if (blockedMessage) {
-    await fs.promises.unlink(downloadedTrack.filePath).catch(() => undefined);
+    await removeTemporaryFile(downloadedTrack.filePath);
     await message.reply(blockedMessage);
     return true;
   }
@@ -61,7 +61,7 @@ export async function handleExternalUrlFallback(
     ngWords,
   );
   if (ngMatch) {
-    await fs.promises.unlink(downloadedTrack.filePath).catch(() => undefined);
+    await removeTemporaryFile(downloadedTrack.filePath);
     await message.reply("🚫 NGワードが含まれているため再生できません。");
     return true;
   }
@@ -90,17 +90,19 @@ export async function handleExternalUrlFallback(
     },
   };
 
+  const { handlePlay, TrackNotFoundError } = await import("../playback/play");
   try {
-    await import("../playback/play").then(({ handlePlay }) =>
-      handlePlay(message, downloadedTrack.internalUrl, playOptions),
-    );
-  } catch {
+    await handlePlay(message, downloadedTrack.internalUrl, playOptions);
+  } catch (internalError) {
+    // Retry only a failed lookup; queue/play/reply errors can occur after enqueueing.
+    if (!(internalError instanceof TrackNotFoundError)) throw internalError;
+    console.warn("[music] internal URL lookup failed; trying public URL", internalError);
     try {
-      await import("../playback/play").then(({ handlePlay }) =>
-        handlePlay(message, downloadedTrack.publicUrl, playOptions),
-      );
-    } catch {
-      await fs.promises.unlink(downloadedTrack.filePath).catch(() => undefined);
+      await handlePlay(message, downloadedTrack.publicUrl, playOptions);
+    } catch (publicError) {
+      if (!(publicError instanceof TrackNotFoundError)) throw publicError;
+      console.warn("[music] public URL lookup failed", publicError);
+      await removeTemporaryFile(downloadedTrack.filePath);
       await message.reply(
         "⚠️ 外部URLの取り込みには成功しましたが、Lavalink から再生できませんでした。",
       );

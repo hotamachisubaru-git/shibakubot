@@ -11,6 +11,7 @@ import { createPanelCollector, clearPanelComponents, bindPanelCleanup, bindPanel
 import { OWNER_IDS } from "./common";
 import { resetAllCounts, setCountGuild } from "../../data";
 import { displayNameFrom } from "../../utils/displayNameUtil";
+import { fetchUserOrNull } from "../../utils/discordErrors";
 import { isBotOrSelfTarget, isOwnerTarget } from "../../utils/targetGuards";
 
 export async function handleResetMenu(
@@ -87,9 +88,7 @@ export async function handleResetMenu(
         return;
       }
 
-      const targetUser = await component.client.users
-        .fetch(resetTargetUserId)
-        .catch(() => null);
+      const targetUser = await fetchUserOrNull(component.client, resetTargetUserId);
       if (targetUser && isBotOrSelfTarget(targetUser, component.client.user?.id)) {
         await component.reply({
           content: COMMON_MESSAGES.botTargetExcluded,

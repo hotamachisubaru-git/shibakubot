@@ -19,6 +19,9 @@ export async function fetchGuildMembersSafe(
     return { members, fromCache: false };
   } catch (error: unknown) {
     if (isGuildMembersTimeoutError(error)) {
+      console.warn("[members] fetch timed out; returning potentially incomplete cache", {
+        guildId: guild.id, cachedMembers: guild.members.cache.size,
+      }, error);
       return { members: guild.members.cache, fromCache: true };
     }
     throw error;

@@ -7,6 +7,8 @@ export interface YtDlpResult {
   stderr: string;
 }
 
+const announcedYtDlpCommands = new Set<string>();
+
 function isCommandNotFoundError(error: unknown): boolean {
   return (
     error instanceof Error &&
@@ -17,7 +19,17 @@ function isCommandNotFoundError(error: unknown): boolean {
 }
 
 function getBaseArgs(): string[] {
-  return ["--ignore-config", "--no-update", "--abort-on-error"];
+  const args = ["--ignore-config", "--no-update", "--abort-on-error"];
+  const nodeMajorVersion = Number.parseInt(process.versions.node.split(".")[0] ?? "", 10);
+
+  // Deno is enabled by default in yt-dlp. When the Bot itself runs on a
+  // supported Node.js version, also make that runtime available for YouTube's
+  // JavaScript challenge solver so a separate Deno install is not mandatory.
+  if (Number.isFinite(nodeMajorVersion) && nodeMajorVersion >= 22) {
+    args.push("--js-runtimes", `node:${process.execPath}`);
+  }
+
+  return args;
 }
 
 export function getBaseArgsInternal(): string[] {
@@ -29,6 +41,11 @@ async function executeYtDlpCommand(
   args: string[],
 ): Promise<YtDlpResult> {
   const timeoutMs = getRuntimeConfig().ytdlp.timeoutMs;
+
+  if (!announcedYtDlpCommands.has(command)) {
+    announcedYtDlpCommands.add(command);
+    console.log(`[music] yt-dlp executable: ${command}`);
+  }
 
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
@@ -74,7 +91,7 @@ async function executeYtDlpCommand(
           return;
         }
         const detail = stderr.trim() || stdout.trim() || `exit code ${code ?? "unknown"}`;
-        reject(new Error(`yt-dlp failed: ${detail}`));
+        reject(new Error(`yt-dlp failed (${command}): ${detail}`));
       });
     });
   });
@@ -98,7 +115,23 @@ export async function runYtDlp(args: string[]): Promise<YtDlpResult> {
     }
   }
 
-  // 2. PATH 上の yt-dlp を試す
+  // 2. バージョンとSHA-256を管理できるマネージドバイナリを優先する。
+  // PATH上の古いディストリビューション版が、YT_DLP_VERSIONで指定した
+  // バージョンを意図せず上書きしないようにする。
+  const managedBinaryPath = getManagedBinaryPathInternal();
+  if (await pathExists(managedBinaryPath)) {
+    const verifiedBinaryPath = await ensureManagedBinary(runtimeConfig.ytdlp.autoDownload);
+    return executeYtDlpCommand(verifiedBinaryPath, args);
+  }
+
+  // 3. 自動取得が有効なら指定バージョンを取得して実行する。
+  if (runtimeConfig.ytdlp.autoDownload) {
+    const downloadedBinaryPath = await ensureManagedBinary(true);
+    return executeYtDlpCommand(downloadedBinaryPath, args);
+  }
+
+  // 4. 自動取得を明示的に無効化した場合のみ、PATH上のバイナリへ
+  // フォールバックする。
   try {
     return await executeYtDlpCommand("yt-dlp", args);
   } catch (error) {
@@ -107,20 +140,7 @@ export async function runYtDlp(args: string[]): Promise<YtDlpResult> {
     }
   }
 
-  // 3. マネージドバイナリが既にあればそれを使う
-  const managedBinaryPath = getManagedBinaryPathInternal();
-  if (await pathExists(managedBinaryPath)) {
-    const verifiedBinaryPath = await ensureManagedBinary(runtimeConfig.ytdlp.autoDownload);
-    return executeYtDlpCommand(verifiedBinaryPath, args);
-  }
-
-  // 4. 自動ダウンロードして実行
-  if (!runtimeConfig.ytdlp.autoDownload) {
-    throw new YtDlpUserError(
-      "yt-dlp が見つかりません。YT_DLP_PATH を設定するか、yt-dlp を PATH に追加してください。",
-    );
-  }
-
-  const downloadedBinaryPath = await ensureManagedBinary(true);
-  return executeYtDlpCommand(downloadedBinaryPath, args);
+  throw new YtDlpUserError(
+    "yt-dlp が見つかりません。YT_DLP_PATH を設定するか、YT_DLP_AUTO_DOWNLOAD を有効にしてください。",
+  );
 }

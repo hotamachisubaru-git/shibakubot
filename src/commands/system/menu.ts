@@ -20,11 +20,14 @@ import {
 import type { MenuActionContext, MenuRuntimeState } from "../menu/context";
 import { handleMenuAdminAction } from "../menu/adminActions";
 import { handleMenuManagementAction } from "../menu/managementActions";
+import { handleMenuMedalAction } from "../menu/medalActions";
 import { handlePermissionsAction } from "../menu/permissionsAction";
+import { isDeletedDiscordMessage } from "../../utils/discordErrors";
 
 const EXTERNAL_MENU_HANDLERS = [
   handleMenuAdminAction,
   handleMenuManagementAction,
+  handleMenuMedalAction,
   handlePermissionsAction,
 ] as const;
 
@@ -187,14 +190,10 @@ export async function handleMenu(
 
       if (button.customId === "menu_close") {
         await button.deferUpdate();
-        try {
-          await button.message.edit({
-            content: "✅ メニューを閉じました。",
-            components: disabledCopyOfRows(built.rows),
-          });
-        } catch {
-          // noop
-        }
+        await button.message.edit({
+          content: "✅ メニューを閉じました。",
+          components: disabledCopyOfRows(built.rows),
+        });
         collector.stop("close");
         return;
       }
@@ -205,7 +204,7 @@ export async function handleMenu(
         }
       }
 
-      await button.deferUpdate().catch(() => {});
+      await button.deferUpdate();
     } catch (error) {
       throw error;
     }
@@ -214,8 +213,11 @@ export async function handleMenu(
   collector.on("end", async () => {
     try {
       await menuMessage.edit({ components: disabledCopyOfRows(built.rows) });
-    } catch {
-      // noop
+    } catch (error) {
+      if (isDeletedDiscordMessage(error)) return;
+      console.warn("[menu] failed to disable expired menu", {
+        guildId: gid, messageId: menuMessage.id,
+      }, error);
     }
   });
 }
