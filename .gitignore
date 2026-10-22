@@ -12,6 +12,8 @@
 !package.json
 !package-lock.json
 !tsconfig.json
+/test/*
+*.test.ts
 
 # Build and dependencies
 node_modules/
