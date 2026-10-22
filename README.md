@@ -207,10 +207,10 @@ Lavalink 側で有効なら、例として `YouTube / ニコニコ / SoundCloud 
 - `npm run migrate` 旧データ移行
 - `npm run release:bundle` 配布バンドル作成（`release/shibakubot-v<version>` と `release/<version>` を生成）
 
-Pull Requestおよび `main` / `master` へのpushでは、GitHub ActionsがNode.js 20で `npm ci`、`npm test`、`npm run build` を実行します。
+Pull Requestおよび `main` / `master` へのpushでは、GitHub ActionsがNode.js 24で `npm ci`、`npm test`、`npm run build` を実行します。
 
 ## リリース
-- `main` / `master` に push されたとき、`package.json` の `version` が未リリースなら GitHub Release を自動作成
+- `main` / `master` に push されたとき、`package.json` の `version` が未リリースなら GitHub Release を自動作成（ワークフローとREADMEのみの変更では実行しません）
 - リリースしたい変更では先に `package.json` の `version` を更新してから push
 
 ## ライセンス

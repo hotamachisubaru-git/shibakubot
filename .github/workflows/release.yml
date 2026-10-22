@@ -5,6 +5,9 @@ on:
     branches:
       - main
       - master
+    paths-ignore:
+      - ".github/workflows/**"
+      - "README.md"
   workflow_dispatch:
 
 permissions:
@@ -27,7 +30,7 @@ jobs:
       - name: Node.js をセットアップ
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24"
           cache: npm
 
       - name: リリース情報を解決
